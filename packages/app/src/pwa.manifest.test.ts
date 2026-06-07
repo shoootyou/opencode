@@ -76,7 +76,23 @@ describe("site.webmanifest", () => {
 
   test("theme_color is not '#ffffff' (inconsistency fix — fails until E5)", () => {
     // #ffffff is visually inconsistent with the dark app shell.
-    // After the fix this should match the app's primary brand colour.
+    // After the fix this should match the app's primary brand/background colour.
     expect(manifest.theme_color?.toLowerCase()).not.toBe("#ffffff")
+  })
+
+  test("theme_color is #F8F7F7 (consistent with index.html meta theme-color)", () => {
+    expect(manifest.theme_color).toBe("#F8F7F7")
+  })
+
+  test("background_color is #F8F7F7 (aligned with theme_color)", () => {
+    expect(manifest.background_color).toBe("#F8F7F7")
+  })
+
+  test("start_url is '/'", () => {
+    expect((manifest as { start_url?: string }).start_url).toBe("/")
+  })
+
+  test("id is '/' (PWA identity spec compliance)", () => {
+    expect((manifest as { id?: string }).id).toBe("/")
   })
 })
