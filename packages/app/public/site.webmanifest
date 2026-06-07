@@ -1,4 +1,6 @@
 {
+  "id": "/",
+  "start_url": "/",
   "name": "OpenCode",
   "short_name": "OpenCode",
   "icons": [
