@@ -30,7 +30,7 @@ export function PwaUpdatePrompt() {
     get when() {
       return show() && needRefresh()
     },
-    get children(): any {
+    get children(): HTMLDivElement {
       const _el = _banner() as HTMLDivElement
       const _buttons = _el.querySelectorAll("button")
       const _reloadBtn = _buttons[0] as HTMLButtonElement
