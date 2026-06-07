@@ -220,6 +220,29 @@ describe("PwaUpdatePrompt", () => {
     dispose()
   })
 
+  test("B9: re-shows banner if SW update fires again after dismiss", () => {
+    const { container, dispose } = mountIntoContainer()
+
+    // 1. SW fires onNeedRefresh → banner appears
+    triggerNeedRefresh()
+    expect(container.querySelector("[role='status']")).not.toBeNull()
+
+    // 2. User clicks Dismiss → banner hides
+    const dismissBtn = Array.from(container.querySelectorAll("button")).find((b) => {
+      const text = b.textContent?.trim().toLowerCase() ?? ""
+      return text.includes("dismiss") || text.includes("close") || text.includes("later")
+    })
+    expect(dismissBtn).not.toBeNull()
+    dismissBtn!.click()
+    expect(container.querySelector("[role='status']")).toBeNull()
+
+    // 3. SW fires onNeedRefresh again → banner reappears
+    triggerNeedRefresh()
+    expect(container.querySelector("[role='status']")).not.toBeNull()
+
+    dispose()
+  })
+
   test("B8: component does not throw when updateServiceWorker is not provided", () => {
     omitUpdateServiceWorker = true
 
