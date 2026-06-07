@@ -95,4 +95,19 @@ describe("site.webmanifest", () => {
   test("id is '/' (PWA identity spec compliance)", () => {
     expect((manifest as { id?: string }).id).toBe("/")
   })
+
+  test("scope is '/'", () => {
+    expect((manifest as { scope?: string }).scope).toBe("/")
+  })
+
+  test("screenshots has wide and narrow entries", () => {
+    const screenshots = (manifest as { screenshots?: Array<{ form_factor?: string }> }).screenshots
+    expect(screenshots).toBeDefined()
+    expect(screenshots?.some((s) => s.form_factor === "wide")).toBe(true)
+    expect(screenshots?.some((s) => s.form_factor === "narrow")).toBe(true)
+  })
+
+  test("description is set", () => {
+    expect((manifest as { description?: string }).description).toBeTruthy()
+  })
 })
