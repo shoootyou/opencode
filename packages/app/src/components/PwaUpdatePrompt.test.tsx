@@ -77,6 +77,7 @@ mock.module("virtual:pwa-register/solid", () => ({
 
     // Wire up the error trigger so tests can exercise onRegisterError
     triggerRegisterError = () => {
+      setNeedRefreshSignal(true)  // restore the signal the mock cleared on Reload
       options.onRegisterError?.(new Error("SW registration failed"))
     }
 
