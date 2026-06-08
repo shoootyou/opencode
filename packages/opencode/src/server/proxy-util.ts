@@ -9,6 +9,10 @@ const hop = new Set([
   "transfer-encoding",
   "upgrade",
   "host",
+  // Never forward client Basic credentials to the UI upstream (app.opencode.ai)
+  // or to a different opencode instance via the API/WS proxy. The `extra`
+  // argument is applied after sanitize, so a trusted upstream can re-set it.
+  "authorization",
 ])
 
 function sanitize(out: Headers) {

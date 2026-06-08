@@ -1,6 +1,6 @@
 import { ServerAuth } from "@/server/auth"
 import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiError, HttpApiMiddleware } from "effect/unstable/httpapi"
 import { hasPtyConnectTicketURL } from "@/server/shared/pty-ticket"
 import { isPublicUIPath } from "@/server/shared/public-ui"
@@ -10,8 +10,6 @@ export {
 } from "@opencode-ai/server/middleware/authorization"
 
 const AUTH_TOKEN_QUERY = "auth_token"
-const UNAUTHORIZED = 401
-const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 
 // Avoid HttpApiSecurity alternatives here: Effect security middleware wraps the
 // full handler, so a downstream failure can make the next auth alternative run
@@ -44,12 +42,10 @@ function validateCredential<A, E, R>(
 ) {
   return Effect.gen(function* () {
     if (!ServerAuth.required(config)) return yield* effect
-    if (!ServerAuth.authorized(credential, config)) {
-      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-        Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
-      )
-      return yield* new HttpApiError.Unauthorized({})
-    }
+    // Bare 401, no www-authenticate header: a fetch/XHR 401 never triggers the
+    // browser's native Basic-Auth dialog, so the header is dead surface. The
+    // frontend detects the 401 status and drives login itself.
+    if (!ServerAuth.authorized(credential, config)) return yield* new HttpApiError.Unauthorized({})
     return yield* effect
   })
 }
@@ -82,22 +78,10 @@ function credentialFromURL(url: URL, request: HttpServerRequest.HttpServerReques
   return Effect.succeed(emptyCredential())
 }
 
-function validateRawCredential<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  credential: ServerAuth.DecodedCredentials,
-  config: ServerAuth.Info,
-) {
-  if (!ServerAuth.required(config)) return effect
-  if (!ServerAuth.authorized(credential, config))
-    return Effect.succeed(
-      HttpServerResponse.empty({
-        status: UNAUTHORIZED,
-        headers: { "www-authenticate": WWW_AUTHENTICATE },
-      }),
-    )
-  return effect
-}
-
+// Reduced to: public-UI bypass → authorized passthrough → bare 401. The static
+// frontend (uiRoute) is now served publicly, so the only consumer of this
+// middleware is docRoute (/doc). No server path issues a 302 or a
+// www-authenticate header anymore — the frontend drives login on API 401.
 export const authorizationRouterMiddleware = HttpRouter.middleware()(
   Effect.gen(function* () {
     const config = yield* ServerAuth.Config
@@ -108,13 +92,17 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
         if (isPublicUIPath(request.method, url.pathname)) return yield* effect
-        return yield* credentialFromURL(url, request).pipe(
-          Effect.flatMap((credential) => validateRawCredential(effect, credential, config)),
-        )
+        const credential = yield* credentialFromURL(url, request)
+        if (ServerAuth.authorized(credential, config)) return yield* effect
+        return HttpServerResponse.empty({ status: 401 })
       })
   }),
 )
 
+// NOTE: This middleware intentionally omits the public-path (isPublicUIPath) bypass.
+// /login is served exclusively by authorizationRouterMiddleware via uiRoute (the raw
+// UI catch-all), not by any typed HttpApi handler. If a typed route is ever added at
+// /login, add an isPublicUIPath guard here.
 export const authorizationLayer = Layer.effect(
   Authorization,
   Effect.gen(function* () {
