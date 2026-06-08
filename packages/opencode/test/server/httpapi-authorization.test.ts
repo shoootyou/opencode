@@ -96,10 +96,13 @@ describe("HttpApi authorization middleware", () => {
         { concurrency: "unbounded" },
       )
 
+      // RFC 017 A4/D3: bare 401, NO www-authenticate header. A fetch/XHR 401
+      // never triggers the browser's native Basic-Auth dialog, so the header is
+      // dead surface; the frontend detects the 401 status and drives login.
       expect(missing.status).toBe(401)
-      expect(missing.headers["www-authenticate"] ?? "").toContain("Basic")
+      expect(missing.headers["www-authenticate"]).toBeUndefined()
       expect(badPassword.status).toBe(401)
-      expect(badPassword.headers["www-authenticate"] ?? "").toContain("Basic")
+      expect(badPassword.headers["www-authenticate"]).toBeUndefined()
       expect(good.status).toBe(200)
     }),
   )
@@ -166,8 +169,12 @@ describe("HttpApi authorization middleware", () => {
       const response = yield* HttpClient.get("/api/probe")
       const body = yield* response.json
 
+      // RFC 017 A4/D3: drop ONLY the www-authenticate header. The bodyful,
+      // SDK-visible v2 error (status 401 + tagged JSON body) is the typed
+      // contract declared by the Authorization middleware (error: UnauthorizedError)
+      // and must be preserved — parity with opencode's HttpApiError.Unauthorized.
       expect(response.status).toBe(401)
-      expect(response.headers["www-authenticate"] ?? "").toContain("Basic")
+      expect(response.headers["www-authenticate"]).toBeUndefined()
       expect(body).toEqual({ _tag: "UnauthorizedError", message: "Authentication required" })
     }),
   )

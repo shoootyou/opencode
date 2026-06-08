@@ -129,7 +129,8 @@ const platform: Platform = {
   setDefaultServer: writeDefaultServerUrl,
 }
 
-// Capture the token before stripping so authFromToken can use it after the URL is cleaned.
+// Capture before clearAuthToken() strips the URL. Null on /login because
+// the login page reads auth_token directly and handles it via buildFastPathRedirect.
 const rawAuthToken = location.pathname !== "/login" ? new URLSearchParams(location.search).get("auth_token") : null
 
 // Strip auth_token before Sentry captures the URL.
