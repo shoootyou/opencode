@@ -5,10 +5,11 @@ import { render } from "solid-js/web"
 import { AppBaseProviders, AppInterface } from "@/app"
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt"
 import { type Platform, PlatformProvider } from "@/context/platform"
+import LoginPage from "@/pages/login"
 import { dict as en } from "@/i18n/en"
 import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
-import { authFromToken } from "@/utils/server"
+import { authFromToken, getCurrentServerUrl } from "@/utils/server"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
@@ -100,17 +101,10 @@ if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
 }
 
-const getCurrentUrl = () => {
-  if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
-  if (import.meta.env.DEV)
-    return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
-  return location.origin
-}
-
 const getDefaultUrl = () => {
   const lsDefault = readDefaultServerUrl()
   if (lsDefault) return lsDefault
-  return getCurrentUrl()
+  return getCurrentServerUrl()
 }
 
 const clearAuthToken = () => {
@@ -135,6 +129,14 @@ const platform: Platform = {
   setDefaultServer: writeDefaultServerUrl,
 }
 
+// Capture the token before stripping so authFromToken can use it after the URL is cleaned.
+const rawAuthToken = location.pathname !== "/login" ? new URLSearchParams(location.search).get("auth_token") : null
+
+// Strip auth_token before Sentry captures the URL.
+if (location.pathname !== "/login") {
+  clearAuthToken()
+}
+
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
@@ -155,34 +157,50 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 if (root instanceof HTMLElement) {
-  const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
-  clearAuthToken()
-  const server: ServerConnection.Http = {
-    type: "http",
-    authToken: !!auth,
-    http: {
-      url: getCurrentUrl(),
-      ...auth,
-    },
+  // Render the login page without the full app shell when the path is /login.
+  if (location.pathname === "/login") {
+    render(
+      () => (
+        <>
+          <PlatformProvider value={platform}>
+            <AppBaseProviders>
+              <LoginPage />
+            </AppBaseProviders>
+          </PlatformProvider>
+          <PwaUpdatePrompt />
+        </>
+      ),
+      root,
+    )
+  } else {
+    const auth = authFromToken(rawAuthToken)
+    const server: ServerConnection.Http = {
+      type: "http",
+      authToken: !!auth,
+      http: {
+        url: getCurrentServerUrl(),
+        ...auth,
+      },
+    }
+    render(
+      () => (
+        <>
+          <PlatformProvider value={platform}>
+            <AppBaseProviders>
+              <AppInterface
+                defaultServer={ServerConnection.Key.make(getDefaultUrl())}
+                canonicalLocalServer={ServerConnection.key(server)}
+                servers={[server]}
+                disableHealthCheck
+              />
+            </AppBaseProviders>
+          </PlatformProvider>
+          {/* Mounted outside AppBaseProviders so it remains visible during connection errors
+              and is not caught by inner ErrorBoundaries. */}
+          <PwaUpdatePrompt />
+        </>
+      ),
+      root,
+    )
   }
-  render(
-    () => (
-      <>
-        <PlatformProvider value={platform}>
-          <AppBaseProviders>
-            <AppInterface
-              defaultServer={ServerConnection.Key.make(getDefaultUrl())}
-              canonicalLocalServer={ServerConnection.key(server)}
-              servers={[server]}
-              disableHealthCheck
-            />
-          </AppBaseProviders>
-        </PlatformProvider>
-        {/* Mounted outside AppBaseProviders so it remains visible during connection errors
-            and is not caught by inner ErrorBoundaries. */}
-        <PwaUpdatePrompt />
-      </>
-    ),
-    root,
-  )
 }

@@ -3,7 +3,7 @@ import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { batch, onCleanup, onMount } from "solid-js"
-import { createSdkForServer } from "@/utils/server"
+import { createSdkForServer, redirectToLogin, shouldRedirectToLogin } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { ServerConnection, useServer } from "./server"
@@ -19,6 +19,14 @@ const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(er
 export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () => unknown) {
   if (!event.persisted) return
   start()
+}
+
+// Detects a 401 from the generic SSE error (RFC 017 B2/D7). The stream throws a
+// plain Error shaped `SSE failed: ${status} ${statusText}` with no structured
+// status field, so we match the status string on a word boundary (so "1401"
+// does not match).
+export function isUnauthorizedSseError(error: unknown): boolean {
+  return error instanceof Error && /\b401\b/.test(error.message)
 }
 
 export function createServerSdkContext(server: ServerConnection.Any, scope: ServerScope) {
@@ -144,6 +152,8 @@ export function createServerSdkContext(server: ServerConnection.Any, scope: Serv
             signal: attempt.signal,
             onSseError: (error) => {
               if (isStreamClosed(error, attempt?.signal)) return
+              if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
+                redirectToLogin()
               if (streamErrorLogged) return
               streamErrorLogged = true
               console.error("[global-sdk] event stream error", {
@@ -186,6 +196,8 @@ export function createServerSdkContext(server: ServerConnection.Any, scope: Serv
             await wait(0)
           }
         } catch (error) {
+          if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
+            redirectToLogin()
           if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {
             streamErrorLogged = true
             console.error("[global-sdk] event stream failed", {
