@@ -1,3 +1,23 @@
+/**
+ * @spec-handoff
+ * @interface ProxyUtil.headers(input: Request | HeadersInit | Record<string, string>, extra?: HeadersInit): Headers
+ * @behavior
+ *   - Strips the "authorization" header from the output (RFC 017 A5/D4): client
+ *     Basic credentials must never be forwarded to the UI upstream
+ *     (app.opencode.ai) or to a different opencode instance via the API/WS proxy.
+ *   - Retains non-hop, non-sensitive headers (e.g. "x-foo", "content-type").
+ *   - "authorization" is added to the existing hop-by-hop strip set, alongside
+ *     "proxy-authorization" which is already stripped.
+ *   - `extra` is applied AFTER sanitize, so an explicit `authorization` passed via
+ *     `extra` is preserved (documents the escape hatch + confirms sanitize order).
+ * @edge-cases
+ *   - Mixed-case header keys ("Authorization") are normalized by Headers and
+ *     still stripped.
+ *   - Request input form ({ headers }) strips authorization identically to the
+ *     plain-object form.
+ * @see ../../src/server/proxy-util.ts (hop set)
+ */
+
 import { describe, expect, test } from "bun:test"
 import { ProxyUtil } from "../../src/server/proxy-util"
 
@@ -109,5 +129,45 @@ describe("ProxyUtil", () => {
       expect(result.get("x-custom")).toBe("val")
       expect(result.get("x-extra")).toBe("added")
     })
+
+    // RFC 017 A5/D4 — never forward client Basic credentials to the UI upstream
+    // (app.opencode.ai) or to a different opencode instance via the API/WS proxy.
+    test("strips the authorization header (plain object input)", () => {
+      const result = ProxyUtil.headers({
+        authorization: "Basic abc",
+        "x-foo": "bar",
+      })
+      expect(result.get("authorization")).toBeNull()
+      expect(result.get("x-foo")).toBe("bar")
+    })
+
+    test("strips the authorization header (Request input)", () => {
+      const req = new Request("http://localhost", {
+        headers: { authorization: "Basic abc", "x-foo": "bar" },
+      })
+      const result = ProxyUtil.headers(req)
+      expect(result.get("authorization")).toBeNull()
+      expect(result.get("x-foo")).toBe("bar")
+    })
+
+    test("strips authorization regardless of header-key casing", () => {
+      const result = ProxyUtil.headers({ Authorization: "Basic abc", "x-foo": "bar" })
+      expect(result.get("authorization")).toBeNull()
+      expect(result.get("x-foo")).toBe("bar")
+    })
+
+    test("preserves an explicit authorization passed via extra (sanitize runs before extra)", () => {
+      const result = ProxyUtil.headers({ authorization: "Basic client" }, { authorization: "Basic explicit" })
+      // The client credential is stripped by sanitize, then `extra` re-sets an
+      // explicit value — the documented escape hatch for a trusted upstream.
+      expect(result.get("authorization")).toBe("Basic explicit")
+    })
   })
+
+  // The RFC 017 server-middleware-reduction behaviors (uiRoute public, /doc
+  // protected, typed-API bare 401 with no www-authenticate, no 302 redirect) are
+  // now exercised as real integration tests against the Effect HTTP server
+  // harness — see test/server/httpapi-ui.test.ts ("HttpApi UI fallback" and
+  // "HttpApi /doc protection") and test/server/httpapi-authorization.test.ts.
+  // They were promoted out of the test.todo stubs that previously lived here.
 })

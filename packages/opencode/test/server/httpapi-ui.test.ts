@@ -17,7 +17,7 @@ import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { ServerAuth } from "../../src/server/auth"
 import { authorizationRouterMiddleware } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import { serveEmbeddedUIEffect, serveUIEffect } from "../../src/server/shared/ui"
+import { LOCAL_WEB_UI_DIR, serveEmbeddedUIEffect, serveUIEffect } from "../../src/server/shared/ui"
 import { testEffect } from "../lib/effect"
 
 void Log.init({ print: false })
@@ -80,6 +80,11 @@ function app(input?: { password?: string; username?: string }) {
   }
 }
 
+// Mirrors production `uiRoute` (server.ts): the static-frontend catch-all is
+// served PUBLICLY — no `authorizationRouterMiddleware` layer. The frontend is a
+// static bundle with no secrets and drives login itself on API 401 (RFC 017 A1).
+// A `password`/`username` may still be supplied to prove that the UI is reachable
+// *even when* a server password is configured.
 function uiApp(input?: {
   password?: string
   username?: string
@@ -93,15 +98,56 @@ function uiApp(input?: {
         const client = yield* HttpClient.HttpClient
         const flags = yield* RuntimeFlags.Service
         yield* router.add("*", "/*", (request) =>
-          serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+          serveUIEffect(request, {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+            localWebUi: flags.localWebUi,
+            localWebUiDir: LOCAL_WEB_UI_DIR,
+          }),
         )
       }),
     ).pipe(
-      Layer.provide(authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.defaultLayer))),
+      // No auth layer on uiRoute — public, matching production server.ts.
       Layer.provide([
         FSUtil.defaultLayer,
         input?.client ?? httpClient(new Response("ui")),
         RuntimeFlags.layer({ disableEmbeddedWebUi: input?.disableEmbeddedWebUi ?? false }),
+        HttpServer.layerServices,
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({
+            OPENCODE_SERVER_PASSWORD: input?.password,
+            OPENCODE_SERVER_USERNAME: input?.username,
+          }),
+        ),
+      ]),
+    ),
+    { disableLogger: true },
+  ).handler
+  return {
+    request(input: string | URL | Request, init?: RequestInit) {
+      return Effect.promise(() =>
+        Promise.resolve(
+          handler(
+            input instanceof Request ? input : new Request(new URL(input, "http://localhost"), init),
+            HttpApiApp.context,
+          ),
+        ),
+      )
+    },
+  }
+}
+
+// Mirrors production `docRoute` (server.ts): /doc is the only remaining consumer
+// of `authorizationRouterMiddleware` and stays PROTECTED — bare 401 without
+// credentials, 200 with valid credentials (RFC 017 A2/D2).
+function docApp(input?: { password?: string; username?: string }) {
+  const handler = HttpRouter.toWebHandler(
+    HttpRouter.use((router) =>
+      router.add("GET", "/doc", () => Effect.succeed(HttpServerResponse.text("openapi-doc"))),
+    ).pipe(
+      Layer.provide(authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.defaultLayer))),
+      Layer.provide([
         HttpServer.layerServices,
         ConfigProvider.layer(
           ConfigProvider.fromUnknown({
@@ -139,7 +185,13 @@ function routeOrderingApp() {
           Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })),
         )
         yield* router.add("*", "/*", (request) =>
-          serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+          serveUIEffect(request, {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+            localWebUi: flags.localWebUi,
+            localWebUiDir: LOCAL_WEB_UI_DIR,
+          }),
         )
       }),
     ).pipe(
@@ -217,6 +269,8 @@ describe("HttpApi UI fallback", () => {
           fs,
           client,
           disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          localWebUi: flags.localWebUi,
+          localWebUiDir: LOCAL_WEB_UI_DIR,
         })
       }).pipe(
         Effect.provide(
@@ -267,6 +321,8 @@ describe("HttpApi UI fallback", () => {
           fs,
           client,
           disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          localWebUi: flags.localWebUi,
+          localWebUiDir: LOCAL_WEB_UI_DIR,
         })
       }).pipe(
         Effect.provide(
@@ -365,7 +421,10 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("requires server password for the web UI", () =>
+  // RFC 017 A1/D1: uiRoute is now PUBLIC. GET / with a server password set must
+  // serve the UI shell (200), not 401 — the static bundle has no secrets and the
+  // frontend drives login on API 401.
+  it.live("serves the web UI publicly even when a server password is set", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
@@ -373,12 +432,33 @@ describe("HttpApi UI fallback", () => {
         disableEmbeddedWebUi: true,
       }).request("/")
 
-      expect(response.status).toBe(401)
-      expect(response.headers.get("www-authenticate")).toBe('Basic realm="Secure Area"')
+      expect(response.status).toBe(200)
+      // No native-dialog trigger: the public UI never emits www-authenticate.
+      expect(response.headers.get("www-authenticate")).toBeNull()
     }),
   )
 
-  it.live("accepts auth token for the web UI", () =>
+  // RFC 017 A1/D1: static assets are served by the public uiRoute and must not
+  // 401 even with a password configured (the /login page can load its own JS).
+  it.live("serves static UI assets publicly even when a server password is set", () =>
+    Effect.gen(function* () {
+      const response = yield* uiApp({
+        password: "secret",
+        username: "opencode",
+        disableEmbeddedWebUi: true,
+        client: httpClient(new Response("console.log('ok')", { headers: { "content-type": "text/javascript" } })),
+      }).request("/assets/app.js")
+
+      expect(response.status).not.toBe(401)
+      expect(response.headers.get("www-authenticate")).toBeNull()
+    }),
+  )
+
+  // The public uiRoute ignores credentials entirely: an `auth_token` query param
+  // (or a Basic header) neither grants nor gates access — the UI is served
+  // regardless. This guards against a regression that re-introduces credential
+  // gating on the static frontend.
+  it.live("serves the web UI regardless of supplied credentials", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
@@ -392,40 +472,11 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("accepts basic auth for the web UI", () =>
-    Effect.gen(function* () {
-      const response = yield* uiApp({
-        password: "secret",
-        username: "opencode",
-        disableEmbeddedWebUi: true,
-      }).request("/", {
-        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
-      })
-
-      expect(response.status).toBe(200)
-    }),
-  )
-
-  it.live("accepts basic auth passwords containing colons for the web UI", () =>
-    Effect.gen(function* () {
-      const response = yield* uiApp({
-        password: "sec:ret",
-        username: "opencode",
-        disableEmbeddedWebUi: true,
-      }).request("/", {
-        headers: { authorization: `Basic ${btoa("opencode:sec:ret")}` },
-      })
-
-      expect(response.status).toBe(200)
-    }),
-  )
-
-  // Regression for #25698 (Ope): the browser fetches the PWA manifest and
-  // its icons via flows that don't carry app-managed credentials (the
-  // `<link rel="manifest">` request is not under page-auth control), so the
-  // server returning 401 breaks PWA install. These specific public assets
-  // should bypass auth.
-  it.live("serves the PWA manifest without auth even when a server password is set", () =>
+  // Regression for #25698 (Ope): the browser fetches the PWA manifest and its
+  // icons via flows that don't carry app-managed credentials. Under the new
+  // public-frontend model (RFC 017 A1) these assets are served by the public
+  // uiRoute, so they are reachable even when a server password is set.
+  it.live("serves the PWA manifest publicly even when a server password is set", () =>
     Effect.gen(function* () {
       for (const path of ["/site.webmanifest", "/web-app-manifest-192x192.png", "/web-app-manifest-512x512.png"]) {
         const response = yield* uiApp({
@@ -435,6 +486,7 @@ describe("HttpApi UI fallback", () => {
           client: httpClient(new Response("ok")),
         }).request(path)
         expect(response.status).not.toBe(401)
+        expect(response.headers.get("www-authenticate")).toBeNull()
       }
     }),
   )
@@ -451,6 +503,40 @@ describe("HttpApi UI fallback", () => {
 
       expect(response.status).toBe(204)
       expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000")
+    }),
+  )
+})
+
+// RFC 017 A2/D2: /doc remains the only consumer of authorizationRouterMiddleware
+// and stays protected. The OpenAPI doc exposes the attack-surface map, so it must
+// not be public like the static frontend.
+describe("HttpApi /doc protection", () => {
+  it.live("returns 401 for /doc with no credentials when a password is set", () =>
+    Effect.gen(function* () {
+      const response = yield* docApp({ password: "secret", username: "opencode" }).request("/doc")
+
+      expect(response.status).toBe(401)
+      // Bare 401 — the reduced middleware no longer emits www-authenticate.
+      expect(response.headers.get("www-authenticate")).toBeNull()
+    }),
+  )
+
+  it.live("serves /doc with valid credentials", () =>
+    Effect.gen(function* () {
+      const response = yield* docApp({ password: "secret", username: "opencode" }).request("/doc", {
+        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+      })
+
+      expect(response.status).toBe(200)
+      expect(yield* responseText(response)).toBe("openapi-doc")
+    }),
+  )
+
+  it.live("serves /doc without credentials when no password is configured", () =>
+    Effect.gen(function* () {
+      const response = yield* docApp().request("/doc")
+
+      expect(response.status).toBe(200)
     }),
   )
 })

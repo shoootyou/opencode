@@ -1,11 +1,10 @@
 import { ServerAuth } from "../auth"
-import { UnauthorizedError } from "../errors"
 import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
+import { UnauthorizedError } from "../errors"
 
 const AUTH_TOKEN_QUERY = "auth_token"
-const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 
 export class Authorization extends HttpApiMiddleware.Service<Authorization>()("@opencode/HttpApiAuthorization", {
   error: UnauthorizedError,
@@ -37,6 +36,12 @@ function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
   return Effect.succeed(emptyCredential())
 }
 
+// Reduced to: authorized passthrough → bare 401. The static frontend is served
+// publicly; this API-only middleware no longer issues a 302 redirect or a
+// www-authenticate header. We drop ONLY the header — the bodyful, SDK-visible
+// UnauthorizedError (the typed contract declared above) is preserved so clients
+// still receive a structured 401, parity with opencode's HttpApiError.Unauthorized.
+// The frontend detects the 401 status and drives login.
 export const authorizationLayer = Layer.effect(
   Authorization,
   Effect.gen(function* () {
@@ -47,9 +52,6 @@ export const authorizationLayer = Layer.effect(
         const request = yield* HttpServerRequest.HttpServerRequest
         const credential = yield* credentialFromRequest(request)
         if (ServerAuth.authorized(credential, config)) return yield* effect
-        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-          Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
-        )
         return yield* new UnauthorizedError({ message: "Authentication required" })
       }),
     )

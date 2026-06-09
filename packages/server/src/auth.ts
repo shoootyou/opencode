@@ -1,6 +1,7 @@
 export * as ServerAuth from "./auth"
 
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"
+import { timingSafeEqual, createHash } from "node:crypto"
 
 export type Credentials = {
   password?: string
@@ -45,7 +46,7 @@ export function authorized(credentials: DecodedCredentials, config: Info) {
   return (
     Option.isSome(config.password) &&
     credentials.username === config.username &&
-    Redacted.value(credentials.password) === config.password.value
+    safeEqual(Redacted.value(credentials.password), config.password.value ?? "")
   )
 }
 
@@ -60,4 +61,12 @@ export function headers(credentials?: Credentials) {
   const authorization = header(credentials)
   if (!authorization) return undefined
   return { Authorization: authorization }
+}
+
+// Constant-time string comparison to prevent timing-based credential oracle attacks.
+// Inputs are hashed first so that strings of different lengths still take equal time.
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest()
+  const hb = createHash("sha256").update(b).digest()
+  return timingSafeEqual(ha, hb)
 }
