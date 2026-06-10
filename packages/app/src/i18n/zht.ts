@@ -36,6 +36,7 @@ export const dict = {
   "command.session.next.unseen": "下一個未讀會話",
   "command.session.archive": "封存工作階段",
   "command.session.unarchive": "取消封存工作階段",
+  "command.session.archivedBrowse": "瀏覽封存的工作階段",
 
   "command.palette": "命令面板",
 
@@ -307,6 +308,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "搜尋資料夾",
   "dialog.directory.empty": "找不到資料夾",
+  "dialog.archivedSessions.title": "封存的工作階段",
+  "dialog.archivedSessions.empty": "沒有封存的工作階段",
 
   "dialog.server.title": "伺服器",
   "dialog.server.description": "切換此應用程式連線的 OpenCode 伺服器。",

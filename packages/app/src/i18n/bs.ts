@@ -32,6 +32,7 @@ export const dict = {
   "command.session.next.unseen": "Sljedeća nepročitana sesija",
   "command.session.archive": "Arhiviraj sesiju",
   "command.session.unarchive": "Vrati sesiju iz arhive",
+  "command.session.archivedBrowse": "Pregledaj arhivirane sesije",
 
   "command.palette": "Paleta komandi",
 
@@ -308,6 +309,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Pretraži foldere",
   "dialog.directory.empty": "Nema pronađenih foldera",
+  "dialog.archivedSessions.title": "Arhivirane sesije",
+  "dialog.archivedSessions.empty": "Nema arhiviranih sesija",
 
   "dialog.server.title": "Serveri",
   "dialog.server.description": "Promijeni na koji se OpenCode server ova aplikacija povezuje.",

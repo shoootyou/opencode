@@ -32,6 +32,7 @@ export const dict = {
   "command.session.next.unseen": "Следующая непрочитанная сессия",
   "command.session.archive": "Архивировать сессию",
   "command.session.unarchive": "Разархивировать сессию",
+  "command.session.archivedBrowse": "Просмотр архивированных сессий",
 
   "command.palette": "Палитра команд",
 
@@ -307,6 +308,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Поиск папок",
   "dialog.directory.empty": "Папки не найдены",
+  "dialog.archivedSessions.title": "Архивированные сессии",
+  "dialog.archivedSessions.empty": "Нет архивированных сессий",
 
   "dialog.server.title": "Серверы",
   "dialog.server.description": "Переключите сервер OpenCode к которому подключается приложение.",

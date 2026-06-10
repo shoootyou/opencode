@@ -35,6 +35,7 @@ export const dict = {
   "command.session.next.unseen": "Next unread session",
   "command.session.archive": "Archive session",
   "command.session.unarchive": "Unarchive session",
+  "command.session.archivedBrowse": "Browse archived sessions",
 
   "command.palette": "Command palette",
 
@@ -314,6 +315,9 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Search folders",
   "dialog.directory.empty": "No folders found",
+
+  "dialog.archivedSessions.title": "Archived sessions",
+  "dialog.archivedSessions.empty": "No archived sessions",
 
   "app.server.unreachable": "Could not reach {{server}}",
   "app.server.retrying": "Retrying automatically...",

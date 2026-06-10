@@ -35,6 +35,7 @@ export const dict = {
   "command.session.next.unseen": "Neste uleste økt",
   "command.session.archive": "Arkiver sesjon",
   "command.session.unarchive": "Gjenopprett sesjon fra arkiv",
+  "command.session.archivedBrowse": "Bla gjennom arkiverte sesjoner",
 
   "command.palette": "Kommandopalett",
 
@@ -310,6 +311,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Søk etter mapper",
   "dialog.directory.empty": "Ingen mapper funnet",
+  "dialog.archivedSessions.title": "Arkiverte sesjoner",
+  "dialog.archivedSessions.empty": "Ingen arkiverte sesjoner",
 
   "dialog.server.title": "Servere",
   "dialog.server.description": "Bytt hvilken OpenCode-server denne appen kobler til.",

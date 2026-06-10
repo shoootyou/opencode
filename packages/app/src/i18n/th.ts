@@ -32,6 +32,7 @@ export const dict = {
   "command.session.next.unseen": "เซสชันที่ยังไม่ได้อ่านถัดไป",
   "command.session.archive": "จัดเก็บเซสชัน",
   "command.session.unarchive": "ยกเลิกการจัดเก็บเซสชัน",
+  "command.session.archivedBrowse": "เรียกดูเซสชันที่จัดเก็บ",
 
   "command.palette": "คำสั่งค้นหา",
 
@@ -307,6 +308,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "ค้นหาโฟลเดอร์",
   "dialog.directory.empty": "ไม่พบโฟลเดอร์",
+  "dialog.archivedSessions.title": "เซสชันที่จัดเก็บ",
+  "dialog.archivedSessions.empty": "ไม่มีเซสชันที่จัดเก็บ",
 
   "dialog.server.title": "เซิร์ฟเวอร์",
   "dialog.server.description": "สลับเซิร์ฟเวอร์ OpenCode ที่แอปนี้เชื่อมต่อด้วย",

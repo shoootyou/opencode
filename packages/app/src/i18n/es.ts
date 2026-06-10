@@ -32,6 +32,7 @@ export const dict = {
   "command.session.next.unseen": "Siguiente sesión no leída",
   "command.session.archive": "Archivar sesión",
   "command.session.unarchive": "Desarchivar sesión",
+  "command.session.archivedBrowse": "Explorar sesiones archivadas",
 
   "command.palette": "Paleta de comandos",
 
@@ -307,6 +308,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Buscar carpetas",
   "dialog.directory.empty": "No se encontraron carpetas",
+  "dialog.archivedSessions.title": "Sesiones archivadas",
+  "dialog.archivedSessions.empty": "No hay sesiones archivadas",
 
   "dialog.server.title": "Servidores",
   "dialog.server.description": "Cambiar a qué servidor de OpenCode se conecta esta app.",

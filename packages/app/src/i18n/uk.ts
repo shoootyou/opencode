@@ -35,6 +35,7 @@ export const dict = {
   "command.session.next.unseen": "Наступна непрочитана сесія",
   "command.session.archive": "Архівувати сесію",
   "command.session.unarchive": "Розархівувати сесію",
+  "command.session.archivedBrowse": "Переглянути архівовані сесії",
 
   "command.palette": "Палітра команд",
 
@@ -314,6 +315,8 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Пошук папок",
   "dialog.directory.empty": "Папок не знайдено",
+  "dialog.archivedSessions.title": "Архівовані сесії",
+  "dialog.archivedSessions.empty": "Немає архівованих сесій",
 
   "app.server.unreachable": "Не вдалося досягти {{server}}",
   "app.server.retrying": "Автоматичне повторення...",

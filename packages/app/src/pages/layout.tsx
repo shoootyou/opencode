@@ -1017,6 +1017,14 @@ export default function Layout(props: ParentProps) {
     navigate(`/${base64Encode(session.directory)}/session/${session.id}`)
   }
 
+  function browseArchivedSessions() {
+    const run = ++dialogRun
+    void import("@/components/dialog-archived-sessions").then((x) => {
+      if (dialogDead || dialogRun !== run) return
+      dialog.show(() => <x.DialogArchivedSessions onUnarchive={unarchiveSession} />)
+    })
+  }
+
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
@@ -1129,6 +1137,14 @@ export default function Layout(props: ParentProps) {
           const session = (store.session ?? []).find((s) => s.id === params.id)
           if (session) void unarchiveSession(session)
         },
+      },
+      {
+        id: "session.archived.browse",
+        title: language.t("command.session.archivedBrowse"),
+        category: language.t("command.category.session"),
+        // Discovery entry point: intentionally NOT disabled by `!params.id` — it must work from
+        // anywhere to surface archived sessions across every project.
+        onSelect: () => browseArchivedSessions(),
       },
       {
         id: "workspace.new",
