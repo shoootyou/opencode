@@ -57,7 +57,7 @@ import { Vcs } from "@/project/vcs"
 import { Worktree } from "@/worktree"
 import { Workspace } from "@/control-plane/workspace"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@/server/cors"
-import { serveUIEffect } from "@/server/shared/ui"
+import { serveUIEffect, LOCAL_WEB_UI_DIR } from "@/server/shared/ui"
 import { ServerAuth } from "@/server/auth"
 import { InstanceHttpApi, RootHttpApi } from "./api"
 import { Api } from "@opencode-ai/server/api"
@@ -181,7 +181,13 @@ const uiRoute = HttpRouter.use((router) =>
     const client = yield* HttpClient.HttpClient
     const flags = yield* RuntimeFlags.Service
     yield* router.add("*", "/*", (request) =>
-      serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+      serveUIEffect(request, {
+        fs,
+        client,
+        disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+        localWebUi: flags.localWebUi,
+        localWebUiDir: LOCAL_WEB_UI_DIR,
+      }),
     )
   }),
 ).pipe(Layer.provide(authOnlyRouterLayer))
