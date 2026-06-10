@@ -1,3 +1,19 @@
+/**
+ * @spec-handoff
+ * @interface applyDirectoryEvent({ event: "session.updated", ... }) — unarchive branch
+ * @behavior
+ *   - When a root session.updated arrives with a falsy time.archived for a session that is NOT
+ *     currently in the store (it was removed when archived), the reducer re-inserts it AND
+ *     increments store.sessionTotal by 1 (restoring the count the archive path decremented).
+ *   - Child sessions (info.parentID set) re-insert but do NOT change sessionTotal.
+ *   - The increment must key off the stable session id, never the nullable time.archived field
+ *     (null/undefined collapse into one bucket), so two distinct unarchives increment twice.
+ * @edge-cases
+ *   - Today the not-found insert path (event-reducer.ts ~lines 148-152) never increments
+ *     sessionTotal, so unarchive leaves the count stale. Mirror the archive decrement guard:
+ *     `if (!info.parentID) setStore("sessionTotal", (v) => v + 1)` on the unarchive insert.
+ * @see ./event-reducer.ts (applyDirectoryEvent, "session.updated" case)
+ */
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
@@ -221,6 +237,82 @@ describe("applyDirectoryEvent", () => {
     expect(store.permission.ses_1).toBeUndefined()
     expect(store.question.ses_1).toBeUndefined()
     expect(store.session_status.ses_1).toBeUndefined()
+  })
+
+  test("restores a root session and increments sessionTotal when unarchived", () => {
+    // ses_1 was archived earlier, so it is no longer in the list and sessionTotal was decremented.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_2" })],
+        sessionTotal: 1,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: undefined }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_1", "ses_2"])
+    expect(store.sessionTotal).toBe(2)
+  })
+
+  test("does not change sessionTotal when a child session is unarchived", () => {
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_2" })],
+        sessionTotal: 1,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.updated",
+        properties: { info: rootSession({ id: "ses_1", parentID: "ses_2", archived: undefined }) },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_1", "ses_2"])
+    expect(store.sessionTotal).toBe(1)
+  })
+
+  test("counts each unarchived root session independently (not bucketed by archived field)", () => {
+    // Both events carry a falsy archived value. A reducer that aggregates by the nullable
+    // archived field would collapse them into one bucket and only increment once.
+    const [store, setStore] = createStore(baseState({ session: [], sessionTotal: 0 }))
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: undefined }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_1"])
+    expect(store.sessionTotal).toBe(1)
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_2", archived: undefined }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_1", "ses_2"])
+    expect(store.sessionTotal).toBe(2)
   })
 
   test("cleans session caches when deleted and decrements only root totals", () => {

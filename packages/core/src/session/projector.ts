@@ -72,7 +72,10 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
-    time_archived: info.time.archived,
+    // Coerce to null so a cleared archived timestamp (undefined) produces SET time_archived = NULL
+    // on update. Drizzle omits undefined values from the UPDATE set, which would leave the column
+    // unchanged and keep an unarchived session hidden from default listings.
+    time_archived: info.time.archived ?? null,
   }
 }
 

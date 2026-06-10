@@ -17,7 +17,9 @@ import { mock } from "bun:test"
 
 // Resolve solid-js at runtime relative to this file so the path works on any
 // machine regardless of checkout location or Bun cache layout.
-const solidPkg = Bun.resolveSync("solid-js", import.meta.dir).replace(/\/dist\/solid\.js$/, "")
+// Strip whichever dist entry Bun's resolver picked (e.g. dist/server.js under the
+// "node" condition, or dist/solid.js) so we land on the package root.
+const solidPkg = Bun.resolveSync("solid-js", import.meta.dir).replace(/\/dist\/[^/]+\.c?js$/, "")
 
 // Override solid-js with browser build — must use async factory so the mock
 // is in place before the module graph for any test file resolves.

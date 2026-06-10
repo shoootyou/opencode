@@ -150,6 +150,10 @@ export function applyDirectoryEvent(input: {
       const trimmed = trimSessions(next, { limit, permission: input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
+      // Re-inserting a session that was removed when archived (unarchive). Mirror the archive
+      // decrement: restore the root-session count. Keyed off the stable session id (one event
+      // per id), never the nullable archived field, so distinct unarchives each increment.
+      if (!info.parentID) input.setStore("sessionTotal", (value) => value + 1)
       break
     }
     case "session.deleted": {
