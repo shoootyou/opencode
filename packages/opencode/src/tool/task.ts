@@ -7,10 +7,11 @@ import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
+import { Provider } from "@/provider/provider"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope } from "effect"
+import { Effect, Exit, Option, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
@@ -49,6 +50,10 @@ const BaseParameterFields = {
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
+  model: Schema.optional(Schema.String).annotate({
+    description:
+      'The model the subagent should use, in "providerID/modelID" form (e.g. "anthropic/claude-sonnet-4"). Overrides the subagent\'s default/inherited model.',
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -88,6 +93,10 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    // Provider is resolved optionally so the tool still constructs in contexts
+    // that do not wire it up; it is only consulted when an explicit `model`
+    // param needs validation.
+    const providerOption = yield* Effect.serviceOption(Provider.Service)
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -117,6 +126,67 @@ export const TaskTool = Tool.define(
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
+
+      // An explicit `model` param overrides BOTH the agent's own model and the
+      // parent assistant inheritance. Validate it here — BEFORE the child session
+      // is created and before ops.prompt — so an unknown, malformed, or unsafe
+      // value short-circuits without spawning an orphan child session. The gate is
+      // `!== undefined` (not truthiness) so an empty string is treated as PRESENT
+      // and validated/rejected rather than silently inheriting.
+      const override =
+        params.model !== undefined
+          ? yield* Effect.gen(function* () {
+              const requested = params.model!
+              const resolver = Option.getOrUndefined(providerOption)
+              if (!resolver)
+                return yield* Effect.fail(
+                  new Error(`Cannot resolve task model "${requested}": the provider service is unavailable.`),
+                )
+              const parsed = Provider.parseModel(requested)
+              // FORMAT guard (case A): reject empty segments and prototype-polluting keys
+              // BEFORE any provider lookup. An unguarded record index on these keys would
+              // otherwise resolve Object.prototype as a "found" model, or throw a raw
+              // TypeError that leaks "Cannot read properties of undefined" instead of an
+              // actionable error. `segment in {}` rejects inherited members (toString,
+              // valueOf, __proto__) too — a fixed denylist is insufficient.
+              const formatError = () =>
+                new Error(
+                  `Invalid task model "${requested}": expected "provider/model" format, e.g. "anthropic/claude-sonnet-4".`,
+                )
+              const unsafe = (segment: string) => segment === "" || segment in {}
+              if (unsafe(parsed.providerID) || unsafe(parsed.modelID)) return yield* Effect.fail(formatError())
+              yield* resolver.getModel(parsed.providerID, parsed.modelID).pipe(
+                // UNAVAILABLE (cases B/C): the well-formed string named a provider/model
+                // the resolver could not find. Discriminate by list() membership of the
+                // parsed providerID — ABSENT → case B (provider not configured), PRESENT
+                // → case C (model missing for a known provider) — never by message text.
+                Effect.catchTag("ProviderModelNotFoundError", (error) =>
+                  Effect.gen(function* () {
+                    const configured = yield* resolver.list()
+                    const suffix =
+                      error.suggestions && error.suggestions.length
+                        ? ` Did you mean: ${error.suggestions.join(", ")}?`
+                        : ""
+                    if (Object.hasOwn(configured, parsed.providerID))
+                      return yield* Effect.fail(
+                        new Error(
+                          `Model unavailable: model "${parsed.modelID}" is not available for provider "${parsed.providerID}".${suffix}`,
+                        ),
+                      )
+                    return yield* Effect.fail(
+                      new Error(`Model unavailable: provider "${parsed.providerID}" is not configured.${suffix}`),
+                    )
+                  }),
+                ),
+                // Defensive: the FORMAT guard above should make this unreachable, but a raw
+                // DEFECT (e.g. a TypeError from unguarded record indexing) is NOT caught by
+                // catchTag. Convert any defect to the FORMAT error so no raw "Cannot read
+                // properties of undefined" can leak.
+                Effect.catchDefect(() => Effect.fail(formatError())),
+              )
+              return parsed
+            })
+          : undefined
 
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
@@ -164,10 +234,11 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
-      }
+      const model = override ??
+        next.model ?? {
+          modelID: msg.info.modelID,
+          providerID: msg.info.providerID,
+        }
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,
@@ -192,7 +263,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
-          variant: next.model ? undefined : variant,
+          variant: override || next.model ? undefined : variant,
           agent: next.name,
           parts,
         })

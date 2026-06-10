@@ -26,3 +26,20 @@ export function name(
 ) {
   return get(list, providerID, modelID)?.name ?? modelID
 }
+
+export function providerModel(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  providerID: string,
+  modelID: string,
+) {
+  const provider =
+    list instanceof Map
+      ? list.get(providerID)
+      : Array.isArray(list)
+        ? list.find((item) => item.id === providerID)
+        : undefined
+  const model = provider?.models[modelID]
+  const providerLabel = provider ? provider.name : providerID
+  const modelLabel = model ? model.name : modelID
+  return `${providerLabel}/${modelLabel}`
+}
