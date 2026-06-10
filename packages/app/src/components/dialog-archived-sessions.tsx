@@ -43,10 +43,17 @@ export function DialogArchivedSessions(props: { onUnarchive: (session: Session) 
     })
   })
 
-  // Synchronous cached accessor for `<List>`: returns the fetched entries, and `[]` (never the thrown
-  // error) on failure so the toast above is the single error surface.
+  // Cached accessor for `<List>`: returns the fetched entries, and `[]` (never the thrown error) on
+  // failure so the toast above is the single error surface. While the cached fetch is still in flight
+  // we return a pending promise instead of a synchronous `[]`, so `useFilteredList`'s `grouped`
+  // resource stays in its loading state for the whole round-trip (mirroring how `dialog-select-file`
+  // drives loading from an async `items`). A synchronous `[]` would resolve `grouped` on the next
+  // microtask and flash the "No archived sessions" empty state mid-fetch. The pending promise never
+  // settles on its own: once the resource resolves, `archived.latest` changes, this accessor re-runs
+  // with the real entries, and `grouped` refetches — abandoning the stale pending promise.
   const items = () => {
     if (archived.error) return []
+    if (archived.loading) return new Promise<ArchivedEntry[]>(() => {})
     return archived.latest ?? []
   }
 
