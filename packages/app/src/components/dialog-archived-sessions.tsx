@@ -1,3 +1,4 @@
+import { createEffect, createResource } from "solid-js"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -20,12 +21,33 @@ export function DialogArchivedSessions(props: { onUnarchive: (session: Session) 
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
 
-  const items = async () => {
+  // Fetch the global archived list ONCE when the dialog opens, then filter client-side. Passing an
+  // async fetch directly to `<List items>` would re-issue this cross-project query on every keystroke
+  // (the list re-invokes `items` per filter change), so we cache it in a resource instead.
+  const [archived] = createResource(async () => {
     // `archived` lives on the experimental list endpoint (`/experimental/session`), which is the
     // GLOBAL cross-project list — exactly what discovery needs since archived sessions span every
     // project. The non-experimental `session.list` is project-scoped and omits the archived filter.
     const response = await serverSDK.client.experimental.session.list({ archived: true, roots: true })
     return buildArchivedSessionEntries(response.data ?? [], language.t("command.session.new"))
+  })
+
+  // The SDK client is `throwOnError: true`, so a failed fetch errors the resource. Surface it via the
+  // sibling unarchive toast pattern — otherwise the empty list masquerades as "no archived sessions".
+  createEffect(() => {
+    const err = archived.error
+    if (!err) return
+    showToast({
+      title: language.t("common.requestFailed"),
+      description: errorMessage(err, language.t("common.requestFailed")),
+    })
+  })
+
+  // Synchronous cached accessor for `<List>`: returns the fetched entries, and `[]` (never the thrown
+  // error) on failure so the toast above is the single error surface.
+  const items = () => {
+    if (archived.error) return []
+    return archived.latest ?? []
   }
 
   const handleSelect = (entry: ArchivedEntry | undefined) => {
