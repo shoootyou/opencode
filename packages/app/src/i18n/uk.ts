@@ -34,6 +34,7 @@ export const dict = {
   "command.session.previous.unseen": "Попередня непрочитана сесія",
   "command.session.next.unseen": "Наступна непрочитана сесія",
   "command.session.archive": "Архівувати сесію",
+  "command.session.unarchive": "Розархівувати сесію",
 
   "command.palette": "Палітра команд",
 
@@ -651,6 +652,7 @@ export const dict = {
   "common.rename": "Перейменувати",
   "common.reset": "Скинути",
   "common.archive": "Архівувати",
+  "common.unarchive": "Розархівувати",
   "common.delete": "Видалити",
   "common.close": "Закрити",
   "common.edit": "Редагувати",

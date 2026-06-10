@@ -31,6 +31,7 @@ export const dict = {
   "command.session.previous.unseen": "เซสชันที่ยังไม่ได้อ่านก่อนหน้า",
   "command.session.next.unseen": "เซสชันที่ยังไม่ได้อ่านถัดไป",
   "command.session.archive": "จัดเก็บเซสชัน",
+  "command.session.unarchive": "ยกเลิกการจัดเก็บเซสชัน",
 
   "command.palette": "คำสั่งค้นหา",
 
@@ -589,6 +590,7 @@ export const dict = {
   "common.rename": "เปลี่ยนชื่อ",
   "common.reset": "รีเซ็ต",
   "common.archive": "จัดเก็บ",
+  "common.unarchive": "ยกเลิกการจัดเก็บ",
   "common.delete": "ลบ",
   "common.close": "ปิด",
   "common.edit": "แก้ไข",

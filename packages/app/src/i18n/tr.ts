@@ -35,6 +35,7 @@ export const dict = {
   "command.session.previous.unseen": "Önceki okunmamış oturum",
   "command.session.next.unseen": "Sonraki okunmamış oturum",
   "command.session.archive": "Oturumu arşivle",
+  "command.session.unarchive": "Oturumu arşivden çıkar",
 
   "command.palette": "Komut paleti",
 
@@ -601,6 +602,7 @@ export const dict = {
   "common.rename": "Yeniden adlandır",
   "common.reset": "Sıfırla",
   "common.archive": "Arşivle",
+  "common.unarchive": "Arşivden çıkar",
   "common.delete": "Sil",
   "common.close": "Kapat",
   "common.edit": "Düzenle",

@@ -31,6 +31,7 @@ export const dict = {
   "command.session.previous.unseen": "Forrige ulæste session",
   "command.session.next.unseen": "Næste ulæste session",
   "command.session.archive": "Arkivér session",
+  "command.session.unarchive": "Fjern arkivering af session",
 
   "command.palette": "Kommandopalette",
 
@@ -591,6 +592,7 @@ export const dict = {
   "common.rename": "Omdøb",
   "common.reset": "Nulstil",
   "common.archive": "Arkivér",
+  "common.unarchive": "Fjern arkivering",
   "common.delete": "Slet",
   "common.close": "Luk",
   "common.edit": "Rediger",

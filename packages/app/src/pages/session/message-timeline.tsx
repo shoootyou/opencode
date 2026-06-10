@@ -59,6 +59,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
+import { archiveToggleLabelKey, isSessionArchived } from "@/pages/layout/helpers"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
@@ -874,6 +875,40 @@ export function MessageTimeline(props: {
       })
   }
 
+  const unarchiveSession = async (sessionID: string) => {
+    const session = sync.session.get(sessionID)
+    if (!session) return
+
+    await sdk.client.session
+      .update({
+        sessionID,
+        // The generated SDK type advertises `archived?: number` and omits `null` because Effect
+        // Schema emits `optional(NullOr(Finite))` as a plain `{type:number}` in OpenAPI. The
+        // runtime accepts `null` to clear the timestamp and restore the session, so cast at the
+        // call site rather than regenerating or hand-editing the SDK.
+        time: { archived: null as never },
+      })
+      .then(() => {
+        sync.set(
+          produce((draft) => {
+            const index = draft.session.findIndex((s) => s.id === sessionID)
+            if (index !== -1) {
+              draft.session[index] = { ...draft.session[index]!, time: { ...draft.session[index]!.time, archived: undefined } }
+              return
+            }
+            draft.session.push({ ...session, time: { ...session.time, archived: undefined } })
+          }),
+        )
+        navigate(`/${params.dir}/session/${sessionID}`)
+      })
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err),
+        })
+      })
+  }
+
   const deleteSession = async (sessionID: string) => {
     const session = sync.session.get(sessionID)
     if (!session) return false
@@ -1464,8 +1499,16 @@ export function MessageTimeline(props: {
                                 </DropdownMenu.ItemLabel>
                               </DropdownMenu.Item>
                             </Show>
-                            <DropdownMenu.Item onSelect={() => void archiveSession(id)}>
-                              <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+                            <DropdownMenu.Item
+                              onSelect={() =>
+                                void (isSessionArchived(info()?.time?.archived)
+                                  ? unarchiveSession(id)
+                                  : archiveSession(id))
+                              }
+                            >
+                              <DropdownMenu.ItemLabel>
+                                {language.t(archiveToggleLabelKey(info()?.time?.archived))}
+                              </DropdownMenu.ItemLabel>
                             </DropdownMenu.Item>
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item

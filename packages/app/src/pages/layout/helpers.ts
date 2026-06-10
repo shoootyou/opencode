@@ -116,6 +116,15 @@ export function projectForSession<T extends { id?: string; worktree: string; san
   )
 }
 
+// A session is archived when it carries an archived timestamp. Guard with `!= null` so an
+// epoch-zero timestamp still counts as archived instead of collapsing into the active bucket,
+// and so the nullable field is never mistaken for "active" when it is explicitly cleared.
+export const isSessionArchived = (archived: number | null | undefined) => archived != null
+
+// Pick the i18n key for the archive/unarchive toggle based on the current archived state.
+export const archiveToggleLabelKey = (archived: number | null | undefined) =>
+  isSessionArchived(archived) ? ("common.unarchive" as const) : ("common.archive" as const)
+
 export const errorMessage = (err: unknown, fallback: string) => {
   if (err && typeof err === "object" && "data" in err) {
     const data = (err as { data?: { message?: string } }).data

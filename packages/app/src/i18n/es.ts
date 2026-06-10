@@ -31,6 +31,7 @@ export const dict = {
   "command.session.previous.unseen": "Sesión no leída anterior",
   "command.session.next.unseen": "Siguiente sesión no leída",
   "command.session.archive": "Archivar sesión",
+  "command.session.unarchive": "Desarchivar sesión",
 
   "command.palette": "Paleta de comandos",
 
@@ -598,6 +599,7 @@ export const dict = {
   "common.rename": "Renombrar",
   "common.reset": "Restablecer",
   "common.archive": "Archivar",
+  "common.unarchive": "Desarchivar",
   "common.delete": "Eliminar",
   "common.close": "Cerrar",
   "common.edit": "Editar",

@@ -34,6 +34,7 @@ export const dict = {
   "command.session.previous.unseen": "Previous unread session",
   "command.session.next.unseen": "Next unread session",
   "command.session.archive": "Archive session",
+  "command.session.unarchive": "Unarchive session",
 
   "command.palette": "Command palette",
 
@@ -718,6 +719,7 @@ export const dict = {
   "common.rename": "Rename",
   "common.reset": "Reset",
   "common.archive": "Archive",
+  "common.unarchive": "Unarchive",
   "common.delete": "Delete",
   "common.close": "Close",
   "common.edit": "Edit",

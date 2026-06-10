@@ -990,6 +990,33 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  async function unarchiveSession(session: Session) {
+    const [, setStore] = serverSync.child(session.directory)
+
+    await serverSDK.client.session.update({
+      directory: session.directory,
+      sessionID: session.id,
+      // The generated SDK type advertises `archived?: number` and omits `null` because Effect
+      // Schema emits `optional(NullOr(Finite))` as a plain `{type:number}` in OpenAPI. The
+      // runtime accepts `null` to clear the timestamp and restore the session, so cast at the
+      // call site rather than regenerating or hand-editing the SDK.
+      time: { archived: null as never },
+    })
+
+    const restored = { ...session, time: { ...session.time, archived: undefined } }
+    setStore(
+      produce((draft) => {
+        const match = Binary.search(draft.session, session.id, (s) => s.id)
+        if (match.found) {
+          draft.session[match.index] = restored
+          return
+        }
+        draft.session.splice(match.index, 0, restored)
+      }),
+    )
+    navigate(`/${base64Encode(session.directory)}/session/${session.id}`)
+  }
+
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
@@ -1088,6 +1115,19 @@ export default function Layout(props: ParentProps) {
         onSelect: () => {
           const session = currentSessions().find((s) => s.id === params.id)
           if (session) void archiveSession(session)
+        },
+      },
+      {
+        id: "session.unarchive",
+        title: language.t("command.session.unarchive"),
+        category: language.t("command.category.session"),
+        disabled: !params.dir || !params.id,
+        onSelect: () => {
+          const directory = decode64(params.dir)
+          if (!directory) return
+          const [store] = serverSync.child(directory, { bootstrap: false })
+          const session = (store.session ?? []).find((s) => s.id === params.id)
+          if (session) void unarchiveSession(session)
         },
       },
       {

@@ -16,6 +16,7 @@ import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { isSessionArchived } from "@/pages/layout/helpers"
 import { decode64 } from "@/utils/base64"
 import { getRelativeTime } from "@/utils/time"
 
@@ -374,7 +375,26 @@ export function DialogSelectFile(props: {
 
     if (item.type === "session") {
       if (!item.directory || !item.sessionID) return
-      navigate(`/${base64Encode(item.directory)}/session/${item.sessionID}`)
+      const directory = item.directory
+      const sessionID = item.sessionID
+      const href = `/${base64Encode(directory)}/session/${sessionID}`
+      // Archived sessions are shown dimmed in the picker; selecting one restores it before
+      // navigating so the user lands on an active session rather than an archived shell.
+      if (isSessionArchived(item.archived)) {
+        void serverSDK.client.session
+          .update({
+            directory,
+            sessionID,
+            // The generated SDK type advertises `archived?: number` and omits `null` (Effect
+            // Schema emits `optional(NullOr(Finite))` as a plain number in OpenAPI). The runtime
+            // accepts `null` to clear the timestamp, so cast at the call site instead of
+            // regenerating the SDK.
+            time: { archived: null as never },
+          })
+          .finally(() => navigate(href))
+        return
+      }
+      navigate(href)
       return
     }
 
