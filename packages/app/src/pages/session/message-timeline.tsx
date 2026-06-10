@@ -59,7 +59,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
-import { archiveToggleLabelKey, isSessionArchived } from "@/pages/layout/helpers"
+import { archiveToggleLabelKey, isSessionArchived, unarchivePatch } from "@/pages/layout/helpers"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
@@ -882,21 +882,20 @@ export function MessageTimeline(props: {
     await sdk.client.session
       .update({
         sessionID,
-        // The generated SDK type advertises `archived?: number` and omits `null` because Effect
-        // Schema emits `optional(NullOr(Finite))` as a plain `{type:number}` in OpenAPI. The
-        // runtime accepts `null` to clear the timestamp and restore the session, so cast at the
-        // call site rather than regenerating or hand-editing the SDK.
-        time: { archived: null as never },
+        time: unarchivePatch,
       })
       .then(() => {
+        const restored = { ...session, time: { ...session.time, archived: undefined } }
         sync.set(
           produce((draft) => {
-            const index = draft.session.findIndex((s) => s.id === sessionID)
-            if (index !== -1) {
-              draft.session[index] = { ...draft.session[index]!, time: { ...draft.session[index]!.time, archived: undefined } }
+            // Keep the window list id-sorted (the event reducer maintains this invariant), so use
+            // the same Binary.search sorted-insert the layout uses instead of a tail `.push()`.
+            const match = Binary.search(draft.session, sessionID, (s) => s.id)
+            if (match.found) {
+              draft.session[match.index] = restored
               return
             }
-            draft.session.push({ ...session, time: { ...session.time, archived: undefined } })
+            draft.session.splice(match.index, 0, restored)
           }),
         )
         navigate(`/${params.dir}/session/${sessionID}`)

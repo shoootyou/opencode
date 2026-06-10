@@ -600,6 +600,7 @@ export const dict = {
   "common.closeTab": "Sekmeyi kapat",
   "common.dismiss": "Kapat",
   "common.requestFailed": "İstek başarısız",
+  "common.retry": "Yeniden dene",
   "common.moreOptions": "Daha fazla seçenek",
   "common.learnMore": "Daha fazla bilgi",
   "common.rename": "Yeniden adlandır",

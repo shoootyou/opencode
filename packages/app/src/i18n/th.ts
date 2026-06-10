@@ -588,6 +588,7 @@ export const dict = {
   "common.closeTab": "ปิดแท็บ",
   "common.dismiss": "ปิด",
   "common.requestFailed": "คำขอล้มเหลว",
+  "common.retry": "ลองใหม่",
   "common.moreOptions": "ตัวเลือกเพิ่มเติม",
   "common.learnMore": "เรียนรู้เพิ่มเติม",
   "common.rename": "เปลี่ยนชื่อ",

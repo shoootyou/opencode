@@ -22,6 +22,18 @@
  *   - All counting keys off the stable session id, never the nullable time.archived field
  *     (null/undefined collapse into one bucket), so distinct transitions each count once and an
  *     archive→unarchive→archive→unarchive round-trip leaves sessionTotal with zero drift.
+ *   - archivedRoots lifecycle (A1, corrected): the archivedRoots map is the authority for the
+ *     archive/unarchive count gate. Any terminal event for a tracked id MUST drop its entry so the
+ *     map cannot grow unbounded. A `session.deleted` for a root currently tracked in archivedRoots
+ *     MUST remove that id from archivedRoots (in addition to its existing window-splice, cache
+ *     cleanup, and clamped sessionTotal decrement). Otherwise the entry leaks forever and a later
+ *     stray unarchive event for a reused id could spuriously restore the count.
+ *   - Stale-tracking cleanup (F2): an in-window root found ACTIVE (falsy archived) on a
+ *     session.updated MUST clear any stale archivedRoots[id] entry and MUST NOT increment
+ *     sessionTotal — the active state proves no pending unarchive restore is owed.
+ *   - Idempotent unarchive (L2): unarchiving (session.updated clearing time.archived) a root that
+ *     is NOT tracked in archivedRoots is a no-op for sessionTotal, even if the event is replayed.
+ *     The +1 is gated on archivedRoots[id]; an untracked id can never produce a spurious increment.
  * @edge-cases
  *   - BUG 1 (HIGH): event-reducer.ts ~line 156 increments on EVERY not-found root insert, even
  *     a normal out-of-window touch → upward drift. Gate the +1 on a tracked prior-archived id.
@@ -38,6 +50,9 @@
  *     FIRST active→archived transition for an id decrements, exactly mirroring the unarchive +1
  *     gating (~line 177). Duplicate archive events for an already-tracked-archived id must be a
  *     no-op for sessionTotal. Count by the stable session id, never the nullable time.archived.
+ *   - A1 (LOW): event-reducer.ts "session.deleted" case (~lines 192-207) never clears
+ *     archivedRoots, so a delete of a previously-archived (tracked) root leaks its entry →
+ *     unbounded growth. FIX (Kou): delete archivedRoots[info.id] on session.deleted.
  * @see ./event-reducer.ts (applyDirectoryEvent, "session.updated" case ~lines 126-158)
  */
 import { describe, expect, test } from "bun:test"
@@ -553,6 +568,93 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
 
+    expect(store.sessionTotal).toBe(5)
+  })
+
+  test("removes a tracked archivedRoots entry when its root session is deleted", () => {
+    // A1 (LOW) — GENUINE RED: a root that was archived is tracked in archivedRoots (already
+    // spliced out of the window and decremented, awaiting a possible unarchive restore). If the
+    // user DELETES that archived root instead of unarchiving it, session.deleted must drop its
+    // archivedRoots entry. Current code (event-reducer.ts ~lines 192-207) never touches
+    // archivedRoots on delete, so the entry leaks forever (unbounded map growth) and a later
+    // stray unarchive for a reused id could spuriously restore the count. This assertion is RED
+    // today: store.archivedRoots.ses_1 is still `true` after the delete.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_2" })],
+        sessionTotal: 1,
+        archivedRoots: { ses_1: true },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.deleted", properties: { info: rootSession({ id: "ses_1", archived: 10 }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.archivedRoots?.ses_1).toBeUndefined()
+  })
+
+  test("clears a stale archivedRoots entry without incrementing on an in-window active root update", () => {
+    // F2 (CHARACTERIZATION / GUARD — currently GREEN): an in-window root found ACTIVE (falsy
+    // archived) on session.updated must NOT increment sessionTotal and must clear any stale
+    // archivedRoots[id] entry so it cannot trigger a later spurious +1. Current code already does
+    // both (event-reducer.ts ~lines 159-169); this test locks that behavior against a regression
+    // that forgot the stale-tracking cleanup or double-counted the active touch.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_1" }), rootSession({ id: "ses_2" })],
+        sessionTotal: 2,
+        // Stale: tracked as archived, but the session is actually present and active in the window.
+        archivedRoots: { ses_1: true },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1" }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.sessionTotal).toBe(2)
+    expect(store.archivedRoots?.ses_1).toBeUndefined()
+  })
+
+  test("keeps sessionTotal idempotent across repeated unarchive events for an untracked root", () => {
+    // L2 (CHARACTERIZATION / GUARD — currently GREEN): unarchiving (session.updated clearing
+    // time.archived) a root that is NOT tracked in archivedRoots must never add to the count, even
+    // if the event is delivered twice (reconnect replay / a follow-up update). The +1 is gated on
+    // archivedRoots[id] (event-reducer.ts ~line 182), so an untracked id is a no-op. This guards
+    // that gate against a regression that increments on every not-found insert (the original BUG 1).
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_a" }), rootSession({ id: "ses_b" })],
+        sessionTotal: 5,
+        limit: 2,
+      }),
+    )
+
+    const unarchiveUntracked = () =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z", archived: undefined }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    unarchiveUntracked()
+    expect(store.sessionTotal).toBe(5)
+    // A replay of the same untracked unarchive must remain a no-op for the count.
+    unarchiveUntracked()
     expect(store.sessionTotal).toBe(5)
   })
 

@@ -528,6 +528,7 @@ export const dict = {
   "common.closeTab": "탭 닫기",
   "common.dismiss": "닫기",
   "common.requestFailed": "요청 실패",
+  "common.retry": "다시 시도",
   "common.moreOptions": "더 많은 옵션",
   "common.learnMore": "더 알아보기",
   "common.rename": "이름 바꾸기",

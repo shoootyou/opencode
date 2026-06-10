@@ -542,6 +542,7 @@ export const dict = {
   "common.closeTab": "Tab schließen",
   "common.dismiss": "Verwerfen",
   "common.requestFailed": "Anfrage fehlgeschlagen",
+  "common.retry": "Wiederholen",
   "common.moreOptions": "Weitere Optionen",
   "common.learnMore": "Mehr erfahren",
   "common.rename": "Umbenennen",

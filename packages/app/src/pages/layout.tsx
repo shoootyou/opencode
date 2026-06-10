@@ -75,6 +75,7 @@ import {
   errorMessage,
   latestRootSession,
   sortedRootSessions,
+  unarchivePatch,
 } from "./layout/helpers"
 import {
   collectNewSessionDeepLinks,
@@ -996,11 +997,7 @@ export default function Layout(props: ParentProps) {
     await serverSDK.client.session.update({
       directory: session.directory,
       sessionID: session.id,
-      // The generated SDK type advertises `archived?: number` and omits `null` because Effect
-      // Schema emits `optional(NullOr(Finite))` as a plain `{type:number}` in OpenAPI. The
-      // runtime accepts `null` to clear the timestamp and restore the session, so cast at the
-      // call site rather than regenerating or hand-editing the SDK.
-      time: { archived: null as never },
+      time: unarchivePatch,
     })
 
     const restored = { ...session, time: { ...session.time, archived: undefined } }
@@ -1129,6 +1126,11 @@ export default function Layout(props: ParentProps) {
         id: "session.unarchive",
         title: language.t("command.session.unarchive"),
         category: language.t("command.category.session"),
+        // Mirrors `session.archive`: gated only on having a current session, NOT on archived
+        // state. Archiving splices the session out of the window list (`store.session`) and
+        // navigates away, so the in-window store can't reliably report whether `params.id` is
+        // archived — gating visibility on it would leave this command permanently disabled and
+        // unreachable. Kept symmetric with `session.archive` instead.
         disabled: !params.dir || !params.id,
         onSelect: () => {
           const directory = decode64(params.dir)

@@ -121,6 +121,12 @@ export function projectForSession<T extends { id?: string; worktree: string; san
 // and so the nullable field is never mistaken for "active" when it is explicitly cleared.
 export const isSessionArchived = (archived: number | null | undefined) => archived != null
 
+// Shared `time` patch that unarchives a session. The generated SDK type advertises
+// `archived?: number` and omits `null` because Effect Schema emits `optional(NullOr(Finite))` as a
+// plain `{type:number}` in OpenAPI. The runtime accepts `null` to clear the timestamp and restore
+// the session, so the cast lives here once and every call site reuses it instead of re-casting.
+export const unarchivePatch = { archived: null as never }
+
 // Pick the i18n key for the archive/unarchive toggle based on the current archived state.
 export const archiveToggleLabelKey = (archived: number | null | undefined) =>
   isSessionArchived(archived) ? ("common.unarchive" as const) : ("common.archive" as const)

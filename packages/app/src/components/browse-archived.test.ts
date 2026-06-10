@@ -19,7 +19,10 @@
  * @behavior
  *   - Root-only: sessions WITH a `parentID` (children) are EXCLUDED; only roots appear.
  *   - Archived-only: a session whose `time.archived` is `undefined` is EXCLUDED (not archived).
- *   - Sort: entries sorted by `archivedAt` DESCENDING (most-recently-archived first).
+ *   - Sort: entries sorted by `archivedAt` DESCENDING (most-recently-archived first), with an
+ *     explicit STABLE tie-break by `id` ASCENDING when two roots share the same `archivedAt`.
+ *     Relying on input order / ES stable-sort for ties is non-deterministic across fetch orders;
+ *     the secondary key (`a.id.localeCompare(b.id)` / id ascending) makes the order reproducible.
  *   - Fallback title: missing or empty `title` → `fallbackTitle`.
  *   - Directory preserved: each entry exposes `session.directory` verbatim.
  *   - Raw passthrough: `entry.session` is the original session reference.
@@ -156,5 +159,43 @@ describe("buildArchivedSessionEntries", () => {
     }
 
     expect(entry).toEqual(expected)
+  })
+
+  test("orders sessions with an equal archivedAt deterministically by id ascending", () => {
+    // Tie-break (LOW) — GENUINE RED: two+ roots archived at the SAME timestamp must have a
+    // STABLE, explicit order. The current comparator (b.archivedAt - a.archivedAt) returns 0 for
+    // ties, so the order is whatever fetch order the input arrived in (ES stable sort). The
+    // desired behavior is an explicit secondary sort by id ascending. Input here is in
+    // reverse-id order; current code preserves it (sess_c, sess_b, sess_a) instead of sorting by
+    // id, so this assertion is RED until Kou adds the tie-break.
+    const result = buildArchivedSessionEntries(
+      [
+        session({ id: "sess_c", time: { created: 0, updated: 0, archived: 100 } }),
+        session({ id: "sess_b", time: { created: 0, updated: 0, archived: 100 } }),
+        session({ id: "sess_a", time: { created: 0, updated: 0, archived: 100 } }),
+      ],
+      FALLBACK,
+    )
+
+    expect(result.map((entry) => entry.id)).toEqual(["sess_a", "sess_b", "sess_c"])
+  })
+
+  test("breaks archivedAt ties by id while keeping more-recent groups first", () => {
+    // Tie-break (LOW) — GENUINE RED: locks BOTH keys together. Primary key keeps the newer
+    // (200) group ahead of the older (100) group; secondary key orders ties within each group by
+    // id ascending. Each group's input is in reverse-id order, so current code emits
+    // [newer_b, newer_a, older_b, older_a]; the explicit tie-break must emit
+    // [newer_a, newer_b, older_a, older_b]. RED until the secondary sort exists.
+    const result = buildArchivedSessionEntries(
+      [
+        session({ id: "newer_b", time: { created: 0, updated: 0, archived: 200 } }),
+        session({ id: "older_b", time: { created: 0, updated: 0, archived: 100 } }),
+        session({ id: "newer_a", time: { created: 0, updated: 0, archived: 200 } }),
+        session({ id: "older_a", time: { created: 0, updated: 0, archived: 100 } }),
+      ],
+      FALLBACK,
+    )
+
+    expect(result.map((entry) => entry.id)).toEqual(["newer_a", "newer_b", "older_a", "older_b"])
   })
 })

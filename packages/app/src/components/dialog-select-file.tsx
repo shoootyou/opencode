@@ -16,7 +16,7 @@ import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { errorMessage, isSessionArchived } from "@/pages/layout/helpers"
+import { errorMessage, isSessionArchived, unarchivePatch } from "@/pages/layout/helpers"
 import { showToast } from "@/utils/toast"
 import { decode64 } from "@/utils/base64"
 import { getRelativeTime } from "@/utils/time"
@@ -386,11 +386,7 @@ export function DialogSelectFile(props: {
           .update({
             directory,
             sessionID,
-            // The generated SDK type advertises `archived?: number` and omits `null` (Effect
-            // Schema emits `optional(NullOr(Finite))` as a plain number in OpenAPI). The runtime
-            // accepts `null` to clear the timestamp, so cast at the call site instead of
-            // regenerating the SDK.
-            time: { archived: null as never },
+            time: unarchivePatch,
           })
           // Navigate only after the unarchive succeeds, so the user never lands on a still-
           // archived session. On failure, surface the error (mirroring the sibling unarchive call
@@ -478,14 +474,14 @@ export function DialogSelectFile(props: {
                   <div class="flex items-center gap-2 min-w-0">
                     <span
                       class="text-14-regular text-text-strong truncate"
-                      classList={{ "opacity-70": !!item.archived }}
+                      classList={{ "opacity-70": isSessionArchived(item.archived) }}
                     >
                       {item.title}
                     </span>
                     <Show when={item.description}>
                       <span
                         class="text-14-regular text-text-weak truncate"
-                        classList={{ "opacity-70": !!item.archived }}
+                        classList={{ "opacity-70": isSessionArchived(item.archived) }}
                       >
                         {item.description}
                       </span>

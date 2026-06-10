@@ -201,6 +201,15 @@ export function applyDirectoryEvent(input: {
         )
       }
       cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+      // Drop any archivedRoots tracking for a deleted root so the map can't grow unbounded and a
+      // later stray unarchive for a reused id can't spuriously restore the count.
+      if (input.store.archivedRoots?.[info.id]) {
+        input.setStore(
+          produce((draft) => {
+            delete draft.archivedRoots![info.id]
+          }),
+        )
+      }
       if (info.parentID) break
       input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
       break

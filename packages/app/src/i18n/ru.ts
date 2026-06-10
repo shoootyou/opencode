@@ -594,6 +594,7 @@ export const dict = {
   "common.closeTab": "Закрыть вкладку",
   "common.dismiss": "Закрыть",
   "common.requestFailed": "Запрос не выполнен",
+  "common.retry": "Повторить",
   "common.moreOptions": "Дополнительные опции",
   "common.learnMore": "Подробнее",
   "common.rename": "Переименовать",

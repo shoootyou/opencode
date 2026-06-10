@@ -590,6 +590,7 @@ export const dict = {
   "common.closeTab": "Luk fane",
   "common.dismiss": "Afvis",
   "common.requestFailed": "Forespørgsel mislykkedes",
+  "common.retry": "Prøv igen",
   "common.moreOptions": "Flere muligheder",
   "common.learnMore": "Lær mere",
   "common.rename": "Omdøb",

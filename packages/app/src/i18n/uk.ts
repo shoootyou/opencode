@@ -650,6 +650,7 @@ export const dict = {
   "common.dismiss": "Відхилити",
   "common.moreCountSuffix": " (ще {{count}})",
   "common.requestFailed": "Запит не виконано",
+  "common.retry": "Повторити",
   "common.moreOptions": "Більше опцій",
   "common.learnMore": "Дізнатися більше",
   "common.rename": "Перейменувати",
