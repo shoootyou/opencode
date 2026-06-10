@@ -114,6 +114,4 @@ const locationServiceMapNode = LayerNode.make(LocationServiceMap.layer, [])
 
 export const node = LayerNode.make(layer, [Skill.node, locationServiceMapNode])
 
-export const node = LayerNode.make(layer, [Skill.node])
-
 export * as SystemPrompt from "./system"
