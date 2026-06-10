@@ -16,7 +16,8 @@ import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { isSessionArchived } from "@/pages/layout/helpers"
+import { errorMessage, isSessionArchived } from "@/pages/layout/helpers"
+import { showToast } from "@/utils/toast"
 import { decode64 } from "@/utils/base64"
 import { getRelativeTime } from "@/utils/time"
 
@@ -391,7 +392,16 @@ export function DialogSelectFile(props: {
             // regenerating the SDK.
             time: { archived: null as never },
           })
-          .finally(() => navigate(href))
+          // Navigate only after the unarchive succeeds, so the user never lands on a still-
+          // archived session. On failure, surface the error (mirroring the sibling unarchive call
+          // sites) and stay put; the catch also prevents an unhandled promise rejection.
+          .then(() => navigate(href))
+          .catch((err) => {
+            showToast({
+              title: language.t("common.requestFailed"),
+              description: errorMessage(err, language.t("common.requestFailed")),
+            })
+          })
         return
       }
       navigate(href)

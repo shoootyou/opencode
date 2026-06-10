@@ -127,7 +127,10 @@ export function applyDirectoryEvent(input: {
       const info = (event.properties as { info: Session }).info
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (info.time.archived) {
-        if (input.store.session[result.index]!.time.archived === info.time.archived) break
+        // Guard the dedup read with result.found (BUG 2): archiving an out-of-window root makes
+        // Binary.search return index === store.session.length, where store.session[index] is
+        // undefined and reading .time.archived would throw a TypeError.
+        if (result.found && input.store.session[result.index]!.time.archived === info.time.archived) break
         if (result.found) {
           input.setStore(
             "session",
@@ -138,11 +141,27 @@ export function applyDirectoryEvent(input: {
         }
         cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
         if (info.parentID) break
+        // Track this root as archived so a later genuine archived→active transition restores the
+        // count exactly once. Keyed off the stable session id.
+        input.setStore(
+          produce((draft) => {
+            ;(draft.archivedRoots ??= {})[info.id] = true
+          }),
+        )
         input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
         break
       }
       if (result.found) {
         input.setStore("session", result.index, reconcile(info))
+        // An active, in-window root is no longer pending an unarchive restore; clear any stale
+        // tracked-archived entry so it cannot trigger a spurious later increment.
+        if (input.store.archivedRoots?.[info.id]) {
+          input.setStore(
+            produce((draft) => {
+              delete draft.archivedRoots![info.id]
+            }),
+          )
+        }
         break
       }
       const next = input.store.session.slice()
@@ -150,10 +169,19 @@ export function applyDirectoryEvent(input: {
       const trimmed = trimSessions(next, { limit, permission: input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
-      // Re-inserting a session that was removed when archived (unarchive). Mirror the archive
-      // decrement: restore the root-session count. Keyed off the stable session id (one event
-      // per id), never the nullable archived field, so distinct unarchives each increment.
-      if (!info.parentID) input.setStore("sessionTotal", (value) => value + 1)
+      // Restore the root-session count ONLY on a genuine archived→active transition: the id must
+      // have been tracked as archived. A normal out-of-window touch (title / model / cost / last
+      // message) hits this same not-found insert path and is trimmed back out, but MUST NOT drift
+      // sessionTotal upward (BUG 1). Keyed off the stable session id so each archive→unarchive
+      // round-trip nets to zero.
+      if (!info.parentID && input.store.archivedRoots?.[info.id]) {
+        input.setStore("sessionTotal", (value) => value + 1)
+        input.setStore(
+          produce((draft) => {
+            delete draft.archivedRoots![info.id]
+          }),
+        )
+      }
       break
     }
     case "session.deleted": {

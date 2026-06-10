@@ -1,18 +1,35 @@
 /**
  * @spec-handoff
- * @interface applyDirectoryEvent({ event: "session.updated", ... }) — unarchive branch
+ * @interface applyDirectoryEvent({ event: "session.updated", ... }) — archive / unarchive branch
  * @behavior
- *   - When a root session.updated arrives with a falsy time.archived for a session that is NOT
- *     currently in the store (it was removed when archived), the reducer re-inserts it AND
- *     increments store.sessionTotal by 1 (restoring the count the archive path decremented).
- *   - Child sessions (info.parentID set) re-insert but do NOT change sessionTotal.
- *   - The increment must key off the stable session id, never the nullable time.archived field
- *     (null/undefined collapse into one bucket), so two distinct unarchives increment twice.
+ *   - sessionTotal is seeded from the server's TOTAL root-session count and drives hasMore /
+ *     "load more". It must change by exactly +1 / -1 per genuine root archive-state transition,
+ *     never on incidental out-of-window touches.
+ *   - UNARCHIVE increment (archived→active): increment store.sessionTotal by 1 ONLY when a ROOT
+ *     session.updated with a falsy time.archived genuinely transitions a session OUT of the
+ *     archived state. The reducer MUST track the prior archived state (e.g. a set of archived
+ *     root ids populated on archive) and increment only when the incoming id was previously
+ *     archived. A normal out-of-window root update (title / model / cost / last-message touch on
+ *     a session that was already active) hits the same not-found insert path but MUST NOT
+ *     increment — otherwise sessionTotal drifts upward and hasMore is stuck true.
+ *   - ARCHIVE decrement (active→archived): decrement (clamped at 0) by 1 per genuine root
+ *     archive transition. The dedup/index access MUST be guarded by `result.found` BEFORE
+ *     reading `store.session[result.index]`. Archiving an out-of-window / not-found root (binary
+ *     search returns index === length) MUST NOT throw: never index the store with an
+ *     out-of-bounds `result.index`. The window list is left unchanged when the id is not present;
+ *     sessionTotal must never increase and never go negative on this path.
+ *   - Child sessions (info.parentID set) never change sessionTotal on either path.
+ *   - All counting keys off the stable session id, never the nullable time.archived field
+ *     (null/undefined collapse into one bucket), so distinct transitions each count once and an
+ *     archive→unarchive→archive→unarchive round-trip leaves sessionTotal with zero drift.
  * @edge-cases
- *   - Today the not-found insert path (event-reducer.ts ~lines 148-152) never increments
- *     sessionTotal, so unarchive leaves the count stale. Mirror the archive decrement guard:
- *     `if (!info.parentID) setStore("sessionTotal", (v) => v + 1)` on the unarchive insert.
- * @see ./event-reducer.ts (applyDirectoryEvent, "session.updated" case)
+ *   - BUG 1 (HIGH): event-reducer.ts ~line 156 increments on EVERY not-found root insert, even
+ *     a normal out-of-window touch → upward drift. Gate the +1 on a tracked prior-archived id.
+ *   - BUG 2 (MEDIUM): event-reducer.ts ~line 130 reads `store.session[result.index]!.time.archived`
+ *     before checking `result.found`; when index === store.session.length this is undefined and
+ *     throws TypeError. Guard with `result.found` before indexing.
+ *   - Round-trip integrity (M1): repeated archive↔unarchive of the same root must net to zero.
+ * @see ./event-reducer.ts (applyDirectoryEvent, "session.updated" case ~lines 126-158)
  */
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
@@ -239,14 +256,27 @@ describe("applyDirectoryEvent", () => {
     expect(store.session_status.ses_1).toBeUndefined()
   })
 
-  test("restores a root session and increments sessionTotal when unarchived", () => {
-    // ses_1 was archived earlier, so it is no longer in the list and sessionTotal was decremented.
+  test("restores a root session and increments sessionTotal when genuinely unarchived", () => {
+    // Genuine round-trip: ses_1 is active, gets archived (removed + decremented), then
+    // unarchived. Only the genuine archived→active transition restores the count.
     const [store, setStore] = createStore(
       baseState({
-        session: [rootSession({ id: "ses_2" })],
-        sessionTotal: 1,
+        session: [rootSession({ id: "ses_1" }), rootSession({ id: "ses_2" })],
+        sessionTotal: 2,
       }),
     )
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: 10 }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_2"])
+    expect(store.sessionTotal).toBe(1)
 
     applyDirectoryEvent({
       event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: undefined }) } },
@@ -259,6 +289,75 @@ describe("applyDirectoryEvent", () => {
 
     expect(store.session.map((x) => x.id)).toEqual(["ses_1", "ses_2"])
     expect(store.sessionTotal).toBe(2)
+  })
+
+  test("keeps sessionTotal stable across an archive→unarchive→archive→unarchive round-trip", () => {
+    // M1 integrity: every archive↔unarchive pair must net to zero, no upward or downward drift.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_1" })],
+        sessionTotal: 1,
+        limit: 10,
+      }),
+    )
+
+    const archive = (archived: number) =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+    const unarchive = () =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: undefined }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    archive(10)
+    expect(store.sessionTotal).toBe(0)
+    unarchive()
+    expect(store.sessionTotal).toBe(1)
+    archive(20)
+    expect(store.sessionTotal).toBe(0)
+    unarchive()
+
+    expect(store.session.map((x) => x.id)).toEqual(["ses_1"])
+    expect(store.sessionTotal).toBe(1)
+  })
+
+  test("does not change sessionTotal on a normal out-of-window root update that was never archived", () => {
+    // BUG 1 (HIGH): a root session OUTSIDE the loaded window receives a normal touch (title /
+    // model / cost / last-message change), NOT an archived→active transition. It hits the
+    // not-found insert path and is trimmed back out of the window. sessionTotal is seeded from
+    // the server's TOTAL root count, so it MUST NOT move. Current code increments → upward drift
+    // that wedges hasMore / "load more" permanently true. This assertion is RED today.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_b" }), rootSession({ id: "ses_c" })],
+        sessionTotal: 5,
+        limit: 2,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z" }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    // ses_z is out of window (old timestamp + full window) so it is trimmed back out.
+    expect(store.session.map((x) => x.id)).toEqual(["ses_b", "ses_c"])
+    expect(store.sessionTotal).toBe(5)
   })
 
   test("does not change sessionTotal when a child session is unarchived", () => {
@@ -286,9 +385,36 @@ describe("applyDirectoryEvent", () => {
   })
 
   test("counts each unarchived root session independently (not bucketed by archived field)", () => {
-    // Both events carry a falsy archived value. A reducer that aggregates by the nullable
-    // archived field would collapse them into one bucket and only increment once.
-    const [store, setStore] = createStore(baseState({ session: [], sessionTotal: 0 }))
+    // Both unarchive events carry a falsy archived value. A reducer that aggregates by the
+    // nullable archived field would collapse them into one bucket and only increment once.
+    // Genuine round-trip: archive both, then unarchive both — net zero, each id counted once.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_1" }), rootSession({ id: "ses_2" })],
+        sessionTotal: 2,
+        limit: 10,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: 10 }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_2", archived: 10 }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((x) => x.id)).toEqual([])
+    expect(store.sessionTotal).toBe(0)
 
     applyDirectoryEvent({
       event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: undefined }) } },
@@ -313,6 +439,37 @@ describe("applyDirectoryEvent", () => {
 
     expect(store.session.map((x) => x.id)).toEqual(["ses_1", "ses_2"])
     expect(store.sessionTotal).toBe(2)
+  })
+
+  test("does not throw when archiving an out-of-window root that sorts after every loaded session", () => {
+    // BUG 2 (MEDIUM): ses_z sorts after every loaded id, so Binary.search returns
+    // { found: false, index: store.session.length }. Current code reads
+    // `store.session[result.index]!.time.archived` BEFORE checking result.found → store.session
+    // [length] is undefined → TypeError. The unarchive feature makes this path reachable.
+    // The `.not.toThrow()` assertion is RED today.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_a" }), rootSession({ id: "ses_b" })],
+        sessionTotal: 2,
+        limit: 10,
+      }),
+    )
+
+    const run = () =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z", archived: 10 }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    expect(run).not.toThrow()
+    // Not in the window → nothing to remove; counting stays sane (no increase, never negative).
+    expect(store.session.map((x) => x.id)).toEqual(["ses_a", "ses_b"])
+    expect(store.sessionTotal).toBeGreaterThanOrEqual(0)
+    expect(store.sessionTotal).toBeLessThanOrEqual(2)
   })
 
   test("cleans session caches when deleted and decrements only root totals", () => {
