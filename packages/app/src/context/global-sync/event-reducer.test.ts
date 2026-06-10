@@ -29,6 +29,15 @@
  *     before checking `result.found`; when index === store.session.length this is undefined and
  *     throws TypeError. Guard with `result.found` before indexing.
  *   - Round-trip integrity (M1): repeated archive↔unarchive of the same root must net to zero.
+ *   - BUG 3 / F1 (MEDIUM): event-reducer.ts ~line 151 decrements sessionTotal on EVERY archive of
+ *     an out-of-window root. The dedup guard at ~line 133 only fires when result.found (in-window),
+ *     so a duplicate archive of an already-tracked OUT-OF-window id (reconnect replay, a follow-up
+ *     session.updated still carrying time.archived, or re-archiving an already-archived session)
+ *     decrements sessionTotal a SECOND time → under-count → hasMore wrongly false → "load more"
+ *     hides sessions. FIX (Kou): gate the decrement+track on `!archivedRoots[info.id]` so only the
+ *     FIRST active→archived transition for an id decrements, exactly mirroring the unarchive +1
+ *     gating (~line 177). Duplicate archive events for an already-tracked-archived id must be a
+ *     no-op for sessionTotal. Count by the stable session id, never the nullable time.archived.
  * @see ./event-reducer.ts (applyDirectoryEvent, "session.updated" case ~lines 126-158)
  */
 import { describe, expect, test } from "bun:test"
@@ -470,6 +479,81 @@ describe("applyDirectoryEvent", () => {
     expect(store.session.map((x) => x.id)).toEqual(["ses_a", "ses_b"])
     expect(store.sessionTotal).toBeGreaterThanOrEqual(0)
     expect(store.sessionTotal).toBeLessThanOrEqual(2)
+  })
+
+  test("decrements sessionTotal exactly once for duplicate archive events on the same out-of-window root", () => {
+    // BUG 3 / F1 (MEDIUM): ses_z is an OUT-OF-WINDOW root (sorts after every loaded id), so
+    // Binary.search returns { found: false, index: store.session.length }. The dedup guard only
+    // fires when result.found (in-window), so it does NOT cover this id. A SECOND archive event
+    // for the same id (reconnect replay, a follow-up session.updated still carrying time.archived,
+    // or re-archiving an already-archived session) re-tracks the id and decrements sessionTotal a
+    // SECOND time. The decrement MUST be idempotent per stable id: gated on !archivedRoots[id],
+    // mirroring the unarchive +1 gating. Current code double-decrements (5 → 4 → 3); this asserts
+    // exactly one decrement (5 → 4 → 4). RED today.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_a" }), rootSession({ id: "ses_b" })],
+        sessionTotal: 5,
+        limit: 2,
+      }),
+    )
+
+    const archiveOutOfWindow = () =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z", archived: 10 }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    archiveOutOfWindow()
+    expect(store.sessionTotal).toBe(4)
+
+    // Duplicate archive of the same already-tracked out-of-window id must be a no-op for the count.
+    archiveOutOfWindow()
+    expect(store.sessionTotal).toBe(4)
+
+    // The window is untouched on the archive path for a not-found id.
+    expect(store.session.map((x) => x.id)).toEqual(["ses_a", "ses_b"])
+  })
+
+  test("nets sessionTotal to zero when an out-of-window root is archived twice then unarchived once", () => {
+    // F1 symmetry lock: a duplicate out-of-window archive followed by a single genuine unarchive
+    // must return sessionTotal to its original value. With the unguarded decrement the count goes
+    // 5 → 4 → 3 → 4 (net -1, sessions silently hidden); with the idempotent guard it goes
+    // 5 → 4 → 4 → 5 (net zero). RED today.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_a" }), rootSession({ id: "ses_b" })],
+        sessionTotal: 5,
+        limit: 2,
+      }),
+    )
+
+    const archive = () =>
+      applyDirectoryEvent({
+        event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z", archived: 10 }) } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    archive()
+    archive()
+    applyDirectoryEvent({
+      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_z", archived: undefined }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.sessionTotal).toBe(5)
   })
 
   test("cleans session caches when deleted and decrements only root totals", () => {

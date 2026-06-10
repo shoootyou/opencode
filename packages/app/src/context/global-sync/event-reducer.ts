@@ -141,8 +141,13 @@ export function applyDirectoryEvent(input: {
         }
         cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
         if (info.parentID) break
-        // Track this root as archived so a later genuine archived→active transition restores the
-        // count exactly once. Keyed off the stable session id.
+        // Gate the decrement+track on an untracked id (F1): only the FIRST genuine active→archived
+        // transition for a stable id decrements sessionTotal and records it in archivedRoots. The
+        // dedup guard above only fires for in-window (result.found) ids, so a duplicate archive of
+        // an already-tracked OUT-OF-window id (reconnect replay, a follow-up session.updated still
+        // carrying time.archived, or re-archiving an already-archived session) must be a no-op for
+        // the count. This exactly mirrors the unarchive +1 gating below. Keyed off the stable id.
+        if (input.store.archivedRoots?.[info.id]) break
         input.setStore(
           produce((draft) => {
             ;(draft.archivedRoots ??= {})[info.id] = true
