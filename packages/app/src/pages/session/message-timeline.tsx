@@ -882,7 +882,7 @@ export function MessageTimeline(props: {
     await sdk.client.session
       .update({
         sessionID,
-        time: unarchivePatch,
+        time: unarchivePatch(),
       })
       .then(() => {
         const restored = { ...session, time: { ...session.time, archived: undefined } }

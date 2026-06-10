@@ -997,7 +997,7 @@ export default function Layout(props: ParentProps) {
     await serverSDK.client.session.update({
       directory: session.directory,
       sessionID: session.id,
-      time: unarchivePatch,
+      time: unarchivePatch(),
     })
 
     const restored = { ...session, time: { ...session.time, archived: undefined } }

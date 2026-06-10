@@ -386,7 +386,7 @@ export function DialogSelectFile(props: {
           .update({
             directory,
             sessionID,
-            time: unarchivePatch,
+            time: unarchivePatch(),
           })
           // Navigate only after the unarchive succeeds, so the user never lands on a still-
           // archived session. On failure, surface the error (mirroring the sibling unarchive call
