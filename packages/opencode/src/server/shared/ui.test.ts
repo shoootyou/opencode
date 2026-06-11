@@ -53,7 +53,7 @@ import { Effect } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 // RED PHASE: these named exports do not exist yet in ./ui.ts.
-import { resolveLocalUIFile, serveLocalUIEffect } from "./ui"
+import { resolveLocalUIFile, serveLocalUIEffect, serveEmbeddedUIEffect } from "./ui"
 import { tmpdir } from "../../../test/fixture/fixture"
 
 // Run an Effect that only needs the real FSUtil service against the node filesystem.
@@ -230,6 +230,119 @@ describe("serveLocalUIEffect", () => {
     // Must NOT contain the secret — traversal is rejected, SPA fallback served instead.
     expect(text).not.toContain("TOP SECRET")
     await fs.rm(secret, { force: true }).catch(() => {})
+  })
+})
+
+// ---------------------------------------------------------------------------
+// serveEmbeddedUIEffect — production embedded UI path (regression lock)
+//
+// REGRESSION GUARD (not a red test): the production binary embeds the UI as a
+// Record<request-path-key -> on-disk file path>. serveEmbeddedUIEffect strips
+// the leading "/" from the request path, looks the key up, and falls back to
+// the "index.html" entry when the key is absent. The MIME is derived from the
+// resolved on-disk file's extension. This block locks the proven behavior that
+// "/login" (and any extension-less SPA route) serves index.html as text/html,
+// so a future change to the embedded fallback can't silently break the login
+// page. These tests MUST pass against current, unmodified ui.ts.
+// ---------------------------------------------------------------------------
+
+// Build a temp "dist" mirroring the real embedded build, plus the embedded map
+// the production binary hands to serveEmbeddedUIEffect: keys are built dist
+// file paths ("index.html", "assets/app.js"), values are the absolute on-disk
+// paths FSUtil reads.
+async function makeEmbedded(dir: string) {
+  await fs.writeFile(path.join(dir, "index.html"), "<!doctype html><html><body>SPA</body></html>", "utf-8")
+  await fs.mkdir(path.join(dir, "assets"), { recursive: true })
+  await fs.writeFile(path.join(dir, "assets", "app.js"), "export const x = 1\n", "utf-8")
+  return {
+    "index.html": path.join(dir, "index.html"),
+    "assets/app.js": path.join(dir, "assets", "app.js"),
+  } as Record<string, string>
+}
+
+describe("serveEmbeddedUIEffect", () => {
+  test('"/login" falls back to index.html and is served as text/html (login regression lock)', async () => {
+    await using tmp = await tmpdir()
+    const map = await makeEmbedded(tmp.path)
+
+    const result = await runWithFs(
+      Effect.gen(function* () {
+        const fsutil = yield* FSUtil.Service
+        const response = yield* serveEmbeddedUIEffect("/login", fsutil, map)
+        return { status: response.status, contentType: response.headers["content-type"] }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.contentType).toContain("text/html")
+  })
+
+  test('"/" is served as index.html with text/html', async () => {
+    await using tmp = await tmpdir()
+    const map = await makeEmbedded(tmp.path)
+
+    const result = await runWithFs(
+      Effect.gen(function* () {
+        const fsutil = yield* FSUtil.Service
+        const response = yield* serveEmbeddedUIEffect("/", fsutil, map)
+        return { status: response.status, contentType: response.headers["content-type"] }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.contentType).toContain("text/html")
+  })
+
+  test('"/assets/app.js" serves the real asset directly with a javascript mime (no fallback)', async () => {
+    await using tmp = await tmpdir()
+    const map = await makeEmbedded(tmp.path)
+
+    const result = await runWithFs(
+      Effect.gen(function* () {
+        const fsutil = yield* FSUtil.Service
+        const response = yield* serveEmbeddedUIEffect("/assets/app.js", fsutil, map)
+        return { status: response.status, contentType: response.headers["content-type"] }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.contentType).toMatch(/javascript/)
+    // Asset is served directly, not as the index.html fallback.
+    expect(result.contentType).not.toContain("text/html")
+  })
+
+  test('unknown extension-less SPA route "/some/spa/route" falls back to index.html (text/html)', async () => {
+    await using tmp = await tmpdir()
+    const map = await makeEmbedded(tmp.path)
+
+    const result = await runWithFs(
+      Effect.gen(function* () {
+        const fsutil = yield* FSUtil.Service
+        const response = yield* serveEmbeddedUIEffect("/some/spa/route", fsutil, map)
+        return { status: response.status, contentType: response.headers["content-type"] }
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(result.contentType).toContain("text/html")
+  })
+
+  test("text/html responses carry a content-security-policy header", async () => {
+    await using tmp = await tmpdir()
+    const map = await makeEmbedded(tmp.path)
+
+    const csp = await runWithFs(
+      Effect.gen(function* () {
+        const fsutil = yield* FSUtil.Service
+        const response = yield* serveEmbeddedUIEffect("/login", fsutil, map)
+        expect(response.status).toBe(200)
+        expect(response.headers["content-type"]).toContain("text/html")
+        return response.headers["content-security-policy"]
+      }),
+    )
+
+    expect(csp).toBeDefined()
+    expect(csp).toMatch(/^default-src/)
   })
 })
 
