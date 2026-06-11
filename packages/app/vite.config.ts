@@ -2,6 +2,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
 import desktopPlugin from "./vite"
+import { navigateFallbackAllowlist } from "./src/pwa"
 
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
@@ -24,7 +25,7 @@ export default defineConfig({
   plugins: [
     desktopPlugin,
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       manifest: false,
       devOptions: {
         // SW disabled in dev — active SW intercepts Vite HMR requests and breaks hot reload
@@ -36,8 +37,8 @@ export default defineConfig({
         navigateFallback: "/index.html",
         // Only explicit SPA routes receive the navigation fallback.
         // All other paths (API, auth, events, etc.) pass to the network by default.
-        // SPA routes: / and /:dir/session/:id? (from app.tsx Route definitions).
-        navigateFallbackAllowlist: [/^\/$/, /^\/[^/]+\/session(\/[^/]+)?$/],
+        // Allowlist is the shared source of truth in ./src/pwa (assertable in tests).
+        navigateFallbackAllowlist,
       },
     }),
     sentry,
