@@ -28,15 +28,28 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
+import path from "node:path"
 import { ConfigProvider, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { PtyPaths } from "../../src/server/routes/instance/httpapi/groups/pty"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
+import { LOCAL_WEB_UI_DIR } from "../../src/server/shared/ui"
 import { ServerAuth } from "../../src/server/auth"
 import { PtyID } from "@opencode-ai/core/pty/schema"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+
+// The public-UI GREEN assertion drives the real uiRoute toward the offline
+// local-dist branch (localWebUi + disableEmbeddedWebUi), which reads
+// packages/app/dist/index.html via LOCAL_WEB_UI_DIR. When that build is absent
+// (e.g. fresh CI checkout with no `bun run build` for the app), serveLocalUIEffect
+// fails with a PlatformError and the route surfaces a 500 — a confusing failure
+// that has nothing to do with the auth wiring under test. Skip cleanly in that
+// case so the suite is deterministic regardless of build state; the assertion
+// stays intact and meaningful whenever the local UI bundle IS present.
+const localWebUiBuilt = existsSync(path.join(LOCAL_WEB_UI_DIR, "index.html"))
 
 function app(input: {
   password?: string
@@ -131,15 +144,22 @@ describe("HttpApi public UI route", () => {
   // RED against current code: uiRoute is wrapped with authOnlyRouterLayer, so the
   // auth router middleware short-circuits GET /login with status 401 before
   // serveUIEffect runs. GREEN once that wrapper is removed (uiRoute made public).
-  test("serves GET /login publicly (200 text/html) when a password is set and no credentials are provided", async () => {
-    const server = app({ password: "secret", localWebUi: true, disableEmbeddedWebUi: true })
+  //
+  // Skipped (not failed) when packages/app/dist/index.html is missing — see the
+  // localWebUiBuilt guard above. This keeps the assertion deterministic without
+  // weakening what it checks when the local UI bundle is present.
+  test.skipIf(!localWebUiBuilt)(
+    "serves GET /login publicly (200 text/html) when a password is set and no credentials are provided",
+    async () => {
+      const server = app({ password: "secret", localWebUi: true, disableEmbeddedWebUi: true })
 
-    const response = await server.request("/login")
-    await cancelBody(response)
+      const response = await server.request("/login")
+      await cancelBody(response)
 
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-type") ?? "").toContain("text/html")
-  })
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type") ?? "").toContain("text/html")
+    },
+  )
 
   // Guard the other direction: the public-UI change must NOT make authenticated
   // API routes public. With a password set and no credentials, an API route still

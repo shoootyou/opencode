@@ -12,4 +12,19 @@
 //   - `/`                       (root)
 //   - `/:dir/session/:id?`      (session view)
 //   - `/login`                  (custom login page rendered by entry.tsx)
-export const navigateFallbackAllowlist = [/^\/$/, /^\/[^/]+\/session(\/[^/]+)?$/, /^\/login$/]
+//   - `/new-session`            (draft route)
+//   - `/:dir`                   (bare directory; `:dir` is a URL-safe base64 slug,
+//                                a single `[A-Za-z0-9_-]+` segment — see
+//                                packages/core/src/util/encode.ts). The negative
+//                                lookahead excludes `/doc`, the one auth-protected
+//                                single-segment server route reachable by top-level
+//                                navigation (server.ts docRoute). Other API
+//                                single-segment paths are SSE/fetch/WS, never
+//                                navigation requests, so the SW fallback never fires.
+export const navigateFallbackAllowlist = [
+  /^\/$/,
+  /^\/[^/]+\/session(\/[^/]+)?$/,
+  /^\/login$/,
+  /^\/new-session$/,
+  /^\/(?!doc$)[A-Za-z0-9_-]+$/,
+]
