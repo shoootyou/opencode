@@ -12,7 +12,6 @@ import { Path } from "../global"
 import { FSUtil } from "../fs-util"
 import { Git } from "../git"
 import { Location } from "../location"
-import { lazy } from "../util/lazy"
 import { Ignore } from "./ignore"
 import { Protected } from "./protected"
 
@@ -38,7 +37,7 @@ function tryRequire(id: string) {
   }
 }
 
-const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
+function loadWatcher() {
   try {
     const libc = typeof OPENCODE_LIBC === "undefined" ? undefined : OPENCODE_LIBC
     const pkgName = `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${libc || "glibc"}` : ""}`
@@ -50,9 +49,19 @@ const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
     if (!binding) return undefined
     return createWrapper(binding) as typeof import("@parcel/watcher")
   } catch {
-    return
+    return undefined
   }
-})
+}
+
+// Not using `lazy` here: undefined results are not cached so that a binding
+// installed after layer init (e.g. from a background npm install) is picked up
+// on the next watch() call.
+let _watcher: ReturnType<typeof loadWatcher>
+function getWatcher() {
+  if (_watcher !== undefined) return _watcher
+  _watcher = loadWatcher()
+  return _watcher
+}
 
 function getBackend() {
   if (process.platform === "win32") return "windows"
@@ -67,7 +76,7 @@ function protecteds(dir: string) {
   })
 }
 
-export const hasNativeBinding = () => !!watcher()
+export const hasNativeBinding = () => !!getWatcher()
 
 /**
  * Returns the npm package name for the platform-specific @parcel/watcher native binding,
@@ -106,9 +115,6 @@ export const layer = Layer.effect(
       return Service.of({ watch: () => Effect.void })
     }
 
-    const w = watcher()
-    if (!w) return Service.of({ watch: () => Effect.void })
-
     yield* Effect.logInfo("watcher backend", { directory: location.directory, platform: process.platform, backend })
     const events = yield* EventV2.Service
     const fs = yield* FSUtil.Service
@@ -128,16 +134,20 @@ export const layer = Layer.effect(
       }
     }
 
-    // wrap w.subscribe() inside Effect.promise so the OS-level
-    // subscription is created during Effect execution, not at construction time.
+    // Binding is checked per-call so that a npm install completing after
+    // layer init is picked up on the next watch() invocation.
     const subscribe = (directory: string, ignore: string[]) =>
-      Effect.promise(() => w.subscribe(directory, callback, { ignore, backend })).pipe(
-        Effect.tap((subscription) => Effect.sync(() => subscriptions.push(subscription))),
-        Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
-        Effect.catchCause((cause) =>
-          Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) }),
-        ),
-      )
+      Effect.gen(function* () {
+        const w = getWatcher()
+        if (!w) return
+        yield* Effect.promise(() => w.subscribe(directory, callback, { ignore, backend })).pipe(
+          Effect.tap((subscription) => Effect.sync(() => subscriptions.push(subscription))),
+          Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
+          Effect.catchCause((cause) =>
+            Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) }),
+          ),
+        )
+      })
 
     const config = (yield* (yield* Config.Service).entries())
       .filter((entry): entry is Config.Document => entry.type === "document")
