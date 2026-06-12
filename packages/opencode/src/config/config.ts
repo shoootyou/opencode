@@ -34,6 +34,7 @@ import { ConfigPaths } from "./paths"
 import { ConfigPlugin } from "./plugin"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@opencode-ai/core/npm"
+import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 
 // Custom merge function that concatenates array fields instead of replacing them
@@ -441,6 +442,9 @@ export const layer = Layer.effect(
                   name: "@opencode-ai/plugin",
                   version: InstallationLocal ? undefined : InstallationVersion,
                 },
+                ...(Watcher.nativeBindingPackageName()
+                  ? [{ name: Watcher.nativeBindingPackageName()! }]
+                  : []),
               ],
             })
             .pipe(

@@ -69,6 +69,16 @@ function protecteds(dir: string) {
 
 export const hasNativeBinding = () => !!watcher()
 
+/**
+ * Returns the npm package name for the platform-specific @parcel/watcher native binding,
+ * or undefined if the platform is not supported.
+ */
+export const nativeBindingPackageName = (): string | undefined => {
+  if (!getBackend()) return undefined
+  const libc = typeof OPENCODE_LIBC === "undefined" ? undefined : OPENCODE_LIBC
+  return `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${libc || "glibc"}` : ""}`
+}
+
 export interface Interface {
   /**
    * Subscribe to filesystem events for the given directory.
