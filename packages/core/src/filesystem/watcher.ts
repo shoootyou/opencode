@@ -56,14 +56,22 @@ function protecteds(dir: string) {
 
 export const hasNativeBinding = () => !!watcher()
 
-export interface Interface {}
+export interface Interface {
+  /**
+   * Subscribe to filesystem events for the given directory.
+   * NOTE: This method is NOT idempotent — calling it twice with the same
+   * directory will create two OS-level subscriptions, doubling events.
+   * Callers are responsible for deduplication (e.g., via a Set of watched dirs).
+   */
+  readonly watch: (directory: string) => Effect.Effect<void>
+}
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileWatcher") {}
 
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    if (yield* Flag.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER) return Service.of({})
+    if (yield* Flag.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER) return Service.of({ watch: () => Effect.void })
 
     const backend = getBackend()
     const location = yield* Location.Service
@@ -72,11 +80,11 @@ export const layer = Layer.effect(
         directory: location.directory,
         platform: process.platform,
       })
-      return Service.of({})
+      return Service.of({ watch: () => Effect.void })
     }
 
     const w = watcher()
-    if (!w) return Service.of({})
+    if (!w) return Service.of({ watch: () => Effect.void })
 
     yield* Effect.logInfo("watcher backend", { directory: location.directory, platform: process.platform, backend })
     const events = yield* EventV2.Service
@@ -97,17 +105,16 @@ export const layer = Layer.effect(
       }
     }
 
-    const subscribe = (directory: string, ignore: string[]) => {
-      const pending = w.subscribe(directory, callback, { ignore, backend })
-      return Effect.promise(() => pending).pipe(
+    // wrap w.subscribe() inside Effect.promise so the OS-level
+    // subscription is created during Effect execution, not at construction time.
+    const subscribe = (directory: string, ignore: string[]) =>
+      Effect.promise(() => w.subscribe(directory, callback, { ignore, backend })).pipe(
         Effect.tap((subscription) => Effect.sync(() => subscriptions.push(subscription))),
         Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
-        Effect.catchCause((cause) => {
-          pending.then((subscription) => subscription.unsubscribe()).catch(() => {})
-          return Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) })
-        }),
+        Effect.catchCause((cause) =>
+          Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) }),
+        ),
       )
-    }
 
     const config = (yield* (yield* Config.Service).entries())
       .filter((entry): entry is Config.Document => entry.type === "document")
@@ -129,14 +136,19 @@ export const layer = Layer.effect(
       }
     }
 
-    return Service.of({})
+    return Service.of({ watch: (directory) => subscribe(directory, []) })
   }).pipe(
     Effect.catchCause((cause) => {
       return Effect.logError("failed to init watcher service", { cause: Cause.pretty(cause) }).pipe(
-        Effect.as(Service.of({})),
+        Effect.as(Service.of({ watch: () => Effect.void })),
       )
     }),
   ),
 )
 
-export const locationLayer = layer.pipe(Layer.provide(Config.locationLayer), Layer.provide(Git.defaultLayer))
+// Watcher.layer hard-deps EventV2.Service (line: `const events = yield* EventV2.Service`)
+export const locationLayer = layer.pipe(
+  Layer.provide(Config.locationLayer),
+  Layer.provide(Git.defaultLayer),
+  Layer.provide(EventV2.defaultLayer),
+)
