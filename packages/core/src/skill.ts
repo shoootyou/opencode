@@ -162,7 +162,11 @@ export const layer = Layer.effect(
         // forkIn(layerScope): fiber is tied to the layer scope (cleaned up on close)
         // without adding Scope to list()'s own requirements.
         if (source.type === "directory" && !watched.has(key)) {
-          watched.add(key)
+          if (Watcher.hasNativeBinding()) {
+            // Only mark as watched when we can actually create an OS subscription.
+            // If the binding is not yet available, skip so the next list() call retries.
+            watched.add(key)
+          }
           yield* Effect.forkIn(watcher.watch(source.path), layerScope)
         }
         let loaded = cache.get(key)
