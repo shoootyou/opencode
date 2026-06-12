@@ -8,6 +8,7 @@ import path from "path"
 import { Config } from "../config"
 import { EventV2 } from "../event"
 import { Flag } from "../flag/flag"
+import { Path } from "../global"
 import { FSUtil } from "../fs-util"
 import { Git } from "../git"
 import { Location } from "../location"
@@ -29,12 +30,24 @@ export const Event = {
   }),
 }
 
+function tryRequire(id: string) {
+  try {
+    return require(id)
+  } catch {
+    return undefined
+  }
+}
+
 const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
   try {
     const libc = typeof OPENCODE_LIBC === "undefined" ? undefined : OPENCODE_LIBC
-    const binding = require(
-      `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${libc || "glibc"}` : ""}`,
-    )
+    const pkgName = `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${libc || "glibc"}` : ""}`
+    // Try standard require first, then fall back to config dir node_modules
+    // (config dir node_modules is managed by opencode for plugins and optional bindings)
+    const binding =
+      tryRequire(pkgName) ??
+      tryRequire(path.join(process.env["OPENCODE_CONFIG_DIR"] ?? Path.config, "node_modules", pkgName))
+    if (!binding) return undefined
     return createWrapper(binding) as typeof import("@parcel/watcher")
   } catch {
     return
