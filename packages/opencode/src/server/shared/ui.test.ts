@@ -52,13 +52,14 @@ import fs from "fs/promises"
 import { Effect } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 // RED PHASE: these named exports do not exist yet in ./ui.ts.
 import { resolveLocalUIFile, serveLocalUIEffect, serveEmbeddedUIEffect } from "./ui"
 import { tmpdir } from "../../../test/fixture/fixture"
 
 // Run an Effect that only needs the real FSUtil service against the node filesystem.
 function runWithFs<A, E>(effect: Effect.Effect<A, E, FSUtil.Service>) {
-  return Effect.runPromise(effect.pipe(Effect.provide(FSUtil.defaultLayer)) as Effect.Effect<A, E, never>)
+  return Effect.runPromise(effect.pipe(Effect.provide(LayerNode.compile(FSUtil.node))) as Effect.Effect<A, E, never>)
 }
 
 // Build a fake dist dir with the shape packages/app/dist has.

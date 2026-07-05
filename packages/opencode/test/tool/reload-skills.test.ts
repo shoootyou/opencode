@@ -27,9 +27,8 @@ import fs from "fs/promises"
 import { describe, expect } from "bun:test"
 import { Effect, Layer, PubSub, Stream } from "effect"
 import { EventV2 } from "@opencode-ai/core/event"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Global } from "@opencode-ai/core/global"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Config } from "@/config/config"
 import { Discovery } from "@/skill/discovery"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -62,10 +61,8 @@ const makeEventBridgeMock = Effect.gen(function* () {
         Stream.map((e) => e as EventV2.Payload<typeof definition>),
       ),
     all: () => Stream.empty,
-    aggregateEvents: () => Stream.empty,
-    sync: () => Effect.succeed(Effect.void),
+    durable: () => Stream.empty,
     listen: () => Effect.succeed(Effect.void),
-    beforeCommit: () => Effect.void,
     project: () => Effect.void,
     replay: () => Effect.void,
     replayAll: () => Effect.succeed(undefined),
@@ -98,16 +95,12 @@ const makeConfigLayer = (scanDir: string) =>
  * for testing refresh() in isolation.
  */
 const buildSkillLayer = (scanDir: string, eventLayer: Layer.Layer<EventV2Bridge.Service>) =>
-  Skill.layer.pipe(
-    Layer.provide(
-      Layer.succeed(Discovery.Service, Discovery.Service.of({ pull: () => Effect.succeed([]) })),
-    ),
-    Layer.provide(makeConfigLayer(scanDir)),
-    Layer.provide(eventLayer),
-    Layer.provide(FSUtil.defaultLayer),
-    Layer.provide(Global.layer),
-    Layer.provide(RuntimeFlags.layer({ disableExternalSkills: true, disableClaudeCodeSkills: true })),
-  )
+  LayerNode.compile(Skill.node, [
+    [Discovery.node, Layer.succeed(Discovery.Service, Discovery.Service.of({ pull: () => Effect.succeed([]) }))],
+    [Config.node, makeConfigLayer(scanDir)],
+    [EventV2Bridge.node, eventLayer],
+    [RuntimeFlags.node, RuntimeFlags.layer({ disableExternalSkills: true, disableClaudeCodeSkills: true })],
+  ])
 
 /** Write a SKILL.md file with frontmatter under `dir/SKILL.md`. */
 const writeSkill = (dir: string, name: string, body: string) =>
@@ -122,7 +115,7 @@ const skillSubdir = (scanRoot: string, name: string) => path.join(scanRoot, "ski
 // Runner: needs InstanceStore + CrossSpawnSpawner (for git init in tmpdirScoped)
 // ---------------------------------------------------------------------------
 
-const it = testEffect(Layer.mergeAll(testInstanceStoreLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(testInstanceStoreLayer, LayerNode.compile(CrossSpawnSpawner.node)))
 
 // ---------------------------------------------------------------------------
 // Tests
