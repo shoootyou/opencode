@@ -65,14 +65,21 @@ const withHome = <A, E, R>(home: string, self: Effect.Effect<A, E, R>) =>
   )
 
 describe("skill", () => {
-  it.effect("formats verbose locations as XML-safe filesystem paths", () =>
+  // Updated for the Point 3 reconciliation (spec-reconciliation.md, dev <- v1.17.13):
+  // upstream's escapeHtml now wraps the fork's own pathToFileURL(location).href
+  // extension. A disk location is rendered as an ESCAPED file:// URL (not the raw
+  // filesystem path this test asserted pre-merge), and the "<built-in>" sentinel is
+  // passed through literally — unescaped, un-pathToFileURL'd — per the explicit
+  // "location (built-in)" row of the Point 3 contract table.
+  it.effect("formats verbose locations as an escaped file:// URL, except the literal <built-in> sentinel", () =>
     Effect.sync(() => {
+      const diskPath = "/tmp/plugin.git#v1.3.0/SKILL.md"
       const output = Skill.fmt(
         [
           {
             name: "tagged-skill",
             description: "A tagged skill.",
-            location: "/tmp/plugin.git#v1.3.0/SKILL.md",
+            location: diskPath,
             content: "",
           },
           {
@@ -85,10 +92,9 @@ describe("skill", () => {
         { verbose: true },
       )
 
-      expect(output).toContain("<location>/tmp/plugin.git#v1.3.0/SKILL.md</location>")
-      expect(output).toContain("<location>&lt;built-in&gt;</location>")
-      expect(output).not.toContain("file://")
-      expect(output).not.toContain("%23")
+      expect(output).toContain(`<location>${pathToFileURL(diskPath).href}</location>`)
+      expect(output).toContain("<location><built-in></location>")
+      expect(output).not.toContain("&lt;built-in&gt;")
     }),
   )
 

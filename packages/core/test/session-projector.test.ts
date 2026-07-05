@@ -20,6 +20,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 
@@ -528,6 +529,133 @@ describe("SessionProjector", () => {
           time: { created },
         }),
       ])
+    }),
+  )
+})
+
+// ---------------------------------------------------------------------------
+// sessionRow() — Point 7 reconciliation (spec-reconciliation.md): 5 null-coercion
+// fields (share_url, summary_additions, permission, time_compacting, time_archived)
+// plus revert.messageID re-branded via SessionMessage.ID.make(...).
+// ---------------------------------------------------------------------------
+
+describe("sessionRow — null coercion and revert.messageID rebranding (Point 7)", () => {
+  const projectorSessionID = SessionV2.ID.make("ses_projector_null_coercion")
+
+  const minimalInfo = (overrides: Partial<SessionV1.SessionInfo> = {}) =>
+    SessionV1.SessionInfo.make({
+      id: projectorSessionID,
+      slug: "test",
+      projectID: Project.ID.global,
+      directory: "/project",
+      title: "test",
+      version: "test",
+      time: { created: 0, updated: 0 },
+      ...overrides,
+    })
+
+  it.effect(
+    "clearing share/summary/permission/time.compacting/time.archived on an update persists NULL, not the stale value",
+    () =>
+      Effect.gen(function* () {
+        const { db } = yield* Database.Service
+        yield* db
+          .insert(ProjectTable)
+          .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+          .run()
+          .pipe(Effect.orDie)
+        const events = yield* EventV2.Service
+
+        // First: a session WITH real values for all 5 fields, so there is a
+        // genuinely stale value in the DB for the clearing update to overwrite.
+        yield* events.publish(SessionV1.Event.Created, {
+          sessionID: projectorSessionID,
+          info: minimalInfo({
+            time: { created: 0, updated: 0, compacting: 42, archived: 99 },
+            share: { url: "https://opencode.ai/s/stale" },
+            summary: { additions: 3, deletions: 1, files: 2, diffs: [] },
+            permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+          }),
+        })
+
+        // Then: an update where these 5 fields are genuinely absent (undefined) on
+        // the wire — the "cleared" case. Drizzle's `.set()` omits `undefined` keys
+        // from the UPDATE SET clause entirely, so without explicit `?? null`
+        // coercion in sessionRow(), the STALE values above would silently survive.
+        yield* events.publish(SessionV1.Event.Updated, {
+          sessionID: projectorSessionID,
+          info: minimalInfo({ time: { created: 0, updated: 1 } }),
+        })
+
+        const row = yield* db
+          .select()
+          .from(SessionTable)
+          .where(eq(SessionTable.id, projectorSessionID))
+          .get()
+          .pipe(Effect.orDie)
+
+        expect(row).toMatchObject({
+          share_url: null,
+          summary_additions: null,
+          summary_deletions: null,
+          summary_files: null,
+          summary_diffs: null,
+          permission: null,
+          time_compacting: null,
+          time_archived: null,
+          revert: null,
+        })
+      }),
+  )
+
+  it.effect("persists share/summary/permission/time.compacting/time.archived and rebrands revert.messageID", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      yield* events.publish(SessionV1.Event.Created, { sessionID: projectorSessionID, info: minimalInfo() })
+
+      const revertMessageIDRaw = "msg_revert_boundary"
+      yield* events.publish(SessionV1.Event.Updated, {
+        sessionID: projectorSessionID,
+        info: minimalInfo({
+          time: { created: 0, updated: 1, compacting: 42, archived: 99 },
+          share: { url: "https://opencode.ai/s/abc" },
+          summary: { additions: 3, deletions: 1, files: 2, diffs: [] },
+          permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+          // Input carries the V1-branded MessageID — sessionRow() must rebrand
+          // this to the current SessionMessage.ID (a genuinely different brand,
+          // "Session.Message.ID" vs "MessageID"), not just pass the raw string through.
+          revert: { messageID: SessionV1.MessageID.make(revertMessageIDRaw) },
+        }),
+      })
+
+      const row = yield* db
+        .select()
+        .from(SessionTable)
+        .where(eq(SessionTable.id, projectorSessionID))
+        .get()
+        .pipe(Effect.orDie)
+
+      expect(row).toMatchObject({
+        share_url: "https://opencode.ai/s/abc",
+        summary_additions: 3,
+        summary_deletions: 1,
+        summary_files: 2,
+        summary_diffs: [],
+        permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+        time_compacting: 42,
+        time_archived: 99,
+      })
+      // revert.messageID must be the SAME string value, re-branded through
+      // SessionMessage.ID.make(...) rather than dropped or left as a raw string type.
+      const expectedMessageID = SessionMessage.ID.make(revertMessageIDRaw)
+      expect(row?.revert).toMatchObject({ messageID: expectedMessageID })
+      expect(row?.revert?.messageID).toBe(expectedMessageID)
     }),
   )
 })
