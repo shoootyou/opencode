@@ -31,11 +31,11 @@ export function DialogArchivedSessions(props: { onUnarchive: (session: Session) 
   // Fetch the global archived list ONCE when the dialog opens, then filter client-side. Passing an
   // async fetch directly to `<List items>` would re-issue this cross-project query on every keystroke
   // (the list re-invokes `items` per filter change), so we cache it in a resource instead.
-  const [archived, { refetch }] = createResource(async () => {
+  const [archived, { refetch }] = createResource<ArchivedEntry<GlobalSession>[]>(async () => {
     // `archived` lives on the experimental list endpoint (`/experimental/session`), which is the
     // GLOBAL cross-project list — exactly what discovery needs since archived sessions span every
     // project. The non-experimental `session.list` is project-scoped and omits the archived filter.
-    const response = await serverSDK.client.experimental.session.list({ archived: true, roots: true })
+    const response = await serverSDK().client.experimental.session.list({ archived: true, roots: true })
     return buildArchivedSessionEntries(response.data ?? [], language.t("command.session.new"))
   })
 
@@ -113,7 +113,7 @@ export function DialogArchivedSessions(props: { onUnarchive: (session: Session) 
           onSelect={handleSelect}
         >
           {(entry) => {
-            const home = serverSync.data.path.home
+            const home = serverSync().data.path.home
             const directory = home ? entry.directory.replace(home, "~") : entry.directory
             return (
               <div class="w-full flex items-center justify-between rounded-md pl-1">

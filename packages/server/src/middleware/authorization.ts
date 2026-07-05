@@ -1,14 +1,12 @@
 import { ServerAuth } from "../auth"
+import { UnauthorizedError } from "@opencode-ai/protocol/errors"
+import { Authorization } from "@opencode-ai/protocol/middleware/authorization"
+export { Authorization } from "@opencode-ai/protocol/middleware/authorization"
+import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
-import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { UnauthorizedError } from "../errors"
 
 const AUTH_TOKEN_QUERY = "auth_token"
-
-export class Authorization extends HttpApiMiddleware.Service<Authorization>()("@opencode/HttpApiAuthorization", {
-  error: UnauthorizedError,
-}) {}
 
 function emptyCredential() {
   return { username: "", password: Redacted.make("") }
@@ -50,6 +48,9 @@ export const authorizationLayer = Layer.effect(
     return Authorization.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
+        // credential checks here; the connect handler consumes and validates the ticket.
+        if (hasPtyConnectTicketURL(new URL(request.url, "http://localhost"))) return yield* effect
         const credential = yield* credentialFromRequest(request)
         if (ServerAuth.authorized(credential, config)) return yield* effect
         return yield* new UnauthorizedError({ message: "Authentication required" })

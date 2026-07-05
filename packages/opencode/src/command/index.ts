@@ -1,8 +1,8 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
 import type { InstanceContext } from "@/project/instance-context"
-import { SessionID, MessageID } from "@/session/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
 import { MCP } from "../mcp"
@@ -10,21 +10,14 @@ import { Skill } from "../skill"
 import { EventV2 } from "@opencode-ai/core/event"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
   commands: Record<string, Info>
 }
 
 export const Event = {
-  Executed: EventV2.define({
-    type: "command.executed",
-    schema: {
-      name: Schema.String,
-      sessionID: SessionID,
-      arguments: Schema.String,
-      messageID: MessageID,
-    },
-  }),
+  Executed: LegacyEvent.CommandExecuted,
   CatalogUpdated: EventV2.define({
     type: "command.catalog.updated" as const,
     schema: {},
@@ -67,7 +60,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Command") {}
 
-export const layer = Layer.effect(
+const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
@@ -164,12 +157,19 @@ export const layer = Layer.effect(
       if (Object.hasOwn(s.commands, name)) return s.commands[name]
       const item = yield* skill.get(name)
       if (!item) return undefined
+      const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
       return {
         name: item.name,
         description: item.description ?? "",
         source: "skill" as const,
         get template() {
-          return item.content
+          if (!dir) return item.content
+          return [
+            item.content,
+            "",
+            `Base directory for this skill: ${dir}`,
+            "Relative paths in this skill (e.g., scripts/, references/) are relative to this base directory.",
+          ].join("\n")
         },
         hints: [] as string[],
       }
@@ -180,15 +180,24 @@ export const layer = Layer.effect(
       const skills = yield* skill.all()
       const skillCmds = skills
         .filter((item) => !Object.hasOwn(s.commands, item.name) && item.description)
-        .map((item) => ({
-          name: item.name,
-          description: item.description ?? "",
-          source: "skill" as const,
-          get template() {
-            return item.content
-          },
-          hints: [] as string[],
-        }))
+        .map((item) => {
+          const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
+          return {
+            name: item.name,
+            description: item.description ?? "",
+            source: "skill" as const,
+            get template() {
+              if (!dir) return item.content
+              return [
+                item.content,
+                "",
+                `Base directory for this skill: ${dir}`,
+                "Relative paths in this skill (e.g., scripts/, references/) are relative to this base directory.",
+              ].join("\n")
+            },
+            hints: [] as string[],
+          }
+        })
       return [...Object.values(s.commands), ...skillCmds]
     })
 
@@ -196,12 +205,6 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(
-  Layer.provide(Config.defaultLayer),
-  Layer.provide(MCP.defaultLayer),
-  Layer.provide(Skill.defaultLayer),
-)
-
-export const node = LayerNode.make(layer, [Config.node, MCP.node, Skill.node])
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node] })
 
 export * as Command from "."
