@@ -21,7 +21,11 @@ class Index extends Schema.Class<Index>("Index")({
 }) {}
 
 // Validates that a skill name is a simple directory name with no traversal components.
-const isSafeName = (name: string) =>
+// "." is rejected explicitly: it contains none of "/", "\\", or "..", but
+// `path.join(cache, ".")` normalizes to exactly `cache`, which would otherwise
+// defeat the resolved-boundary check below (see Point 1, Ei audit r1).
+export const isSafeName = (name: string) =>
+  name !== "." &&
   !name.includes("/") &&
   !name.includes("\\") &&
   !name.includes("..") &&
@@ -30,7 +34,10 @@ const isSafeName = (name: string) =>
 
 // Validates that a file path from a remote manifest contains no traversal components.
 // Subdirectory separators are allowed (e.g. "assets/icon.png"), but ".." and absolute paths are not.
-const isSafeFilePath = (file: string) =>
+// "." is rejected explicitly for the same reason as isSafeName: `path.join(root, ".")`
+// normalizes to exactly `root`, defeating the resolved-boundary check.
+export const isSafeFilePath = (file: string) =>
+  file !== "." &&
   !file.includes("..") &&
   !file.startsWith("/") &&
   !file.startsWith("\\") &&
@@ -101,7 +108,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Path.Path | HttpClient
             }
 
             const root = path.join(cache, skill.name)
-            if (!root.startsWith(resolvedCache + path.sep) && root !== resolvedCache) {
+            if (!root.startsWith(resolvedCache + path.sep)) {
               yield* Effect.logWarning("skipping skill: name escapes cache boundary", { name: skill.name, url: index })
               return null
             }
@@ -124,7 +131,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Path.Path | HttpClient
                       return
                     }
                     const dest = path.join(root, file)
-                    if (!dest.startsWith(resolvedRoot + path.sep) && dest !== resolvedRoot) {
+                    if (!dest.startsWith(resolvedRoot + path.sep)) {
                       yield* Effect.logWarning("skipping file: path escapes skill root", { name: skill.name, file, url: index })
                       return
                     }
@@ -147,7 +154,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Path.Path | HttpClient
                         return false
                       }
                       const dest = path.join(staging, file)
-                      if (!dest.startsWith(resolvedStaging + path.sep) && dest !== resolvedStaging) {
+                      if (!dest.startsWith(resolvedStaging + path.sep)) {
                         yield* Effect.logWarning("skipping file: path escapes staging root", {
                           name: skill.name,
                           file,
