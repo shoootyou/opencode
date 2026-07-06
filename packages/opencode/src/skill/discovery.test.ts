@@ -20,6 +20,20 @@
  *       the ENTIRE staged swap is aborted. The staging directory is removed, and any
  *       pre-existing cached install (`root`) is left completely untouched — not
  *       partially overwritten, not deleted.
+ *
+ *   CRITICAL follow-up (audit round 1, Ei — Point 1 real vulnerability, plan
+ *   123-opencode-fork-sync-v1-17-13): `skill.name: "."` passes `isSafeName` (it
+ *   contains none of "/", "\\", ".."), but `path.join(cache, ".")` normalizes to
+ *   EXACTLY `cache` — so the boundary check `!x.startsWith(base + sep) && x !==
+ *   base` treats it as safe (the `x !== base` half of the guard is false, so the
+ *   whole `!A && B` short-circuits to false — nothing is skipped). This defeats the
+ *   per-skill root boundary at all three construction points: the fast-path root
+ *   check, the slow-path staging-root check inherits the same broken `root`, and
+ *   the version-refresh swap operates directly on the shared cache directory
+ *   itself. See the "identity bypass" describe block below for the two tests that
+ *   pin this down; they are the CURRENT reproduction of the vulnerability and must
+ *   be RED until command/index.ts's discovery.ts is patched to reject `name === "."`
+ *   (and `".."`-normalizing equivalents) explicitly.
  * @edge-cases
  *   - `{ name: "../../escape", files: ["SKILL.md"] }` → skill fully skipped, zero
  *     HTTP requests for it, nothing written outside the skills cache.
@@ -29,19 +43,39 @@
  *   - Slow path (has `version`), same shape → the entire install is aborted: no
  *     `root` directory is left behind (or, if one already existed from a prior good
  *     install, it is byte-for-byte unchanged), no `.tmp-*` / `.old-*` siblings leak.
+ *   - `{ name: ".", files: ["SKILL.md", "<victim>/SKILL.md"] }` (fast path, no
+ *     version) → the write into `<victim>/SKILL.md` must be skipped (it targets a
+ *     DIFFERENT skill's namespace, one level "up" from any real per-skill root);
+ *     today it is NOT skipped.
+ *   - `{ name: ".", version: "1", files: ["SKILL.md"] }` (slow path) → the ENTIRE
+ *     skills cache — every already-installed skill from every source — must
+ *     survive untouched; today the whole cache directory is renamed to a backup,
+ *     replaced by the malicious staged content, and the backup (containing every
+ *     other skill) is deleted.
  * @testability
  *   This module reads `Global.Path.cache` directly (not injected via DI), so tests
  *   run against the real OS cache directory scoped under uniquely-randomized skill
  *   names to avoid colliding with ../../test/skill/discovery.test.ts, which
  *   exercises the same real cache directory for non-adversarial download/versioning
- *   behavior.
+ *   behavior. The two `name: "."` tests below target the shared cache ROOT itself
+ *   (not a randomized subdirectory, by definition of the bug), so the slow-path one
+ *   quarantines whatever already lives at the cache root before running, and
+ *   restores it afterward inside `Effect.ensuring`, so it can never permanently
+ *   destroy a sibling test file's fixtures even though it deliberately destroys its
+ *   own — see "quarantine" in that test.
+ *   Pure-function unit tests for `isSafeName(".")`/`isSafeFilePath(".")` live in
+ *   ./discovery-name-guards.test.ts instead of here: importing those two
+ *   currently-unexported functions makes THAT file fail at module-load with a
+ *   `SyntaxError`, which would otherwise take out every test in this shared file.
  * @see ./discovery.ts
+ * @see ./discovery-name-guards.test.ts (isSafeName(".")/isSafeFilePath(".") pure-function unit tests)
  * @see ../../test/skill/discovery.test.ts (non-adversarial download/versioning coverage)
  * @see ../../../core/test/skill-discovery.test.ts (V2 sibling module, stricter whole-skill-reject contract)
  */
 
 import { afterAll, beforeAll, describe, expect } from "bun:test"
-import { rm } from "fs/promises"
+import { mkdir, readdir, rename, rm } from "fs/promises"
+import os from "os"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -99,6 +133,10 @@ afterAll(async () => {
     ),
   )
   await rm(path.join(cacheDir, `ESCAPED-${rand}.txt`), { force: true })
+  // Collateral of the "." identity-bypass fast-path test below: the malicious
+  // entry's mandatory "SKILL.md" sentinel lands directly at the cache root.
+  await rm(path.join(cacheDir, "SKILL.md"), { force: true })
+  await rm(path.join(cacheDir, skillName("dot-fast-victim")), { recursive: true, force: true })
 })
 
 describe("Discovery.pull — path traversal guard (Point 4, CRITICAL)", () => {
@@ -196,6 +234,107 @@ describe("Discovery.pull — path traversal guard (Point 4, CRITICAL)", () => {
           Array.fromAsync(new Bun.Glob(`${name}.{tmp,old}-*`).scan({ cwd: cacheDir, onlyFiles: false })),
         )
         expect(siblings).toEqual([])
+      }),
+  )
+})
+
+describe("Discovery.pull — skill.name '.' bypasses the resolved-boundary check (Point 1, CRITICAL — Ei audit r1)", () => {
+  it.live(
+    "fast path: name '.' plants a file inside a DIFFERENT skill's own directory, crossing the per-skill root boundary",
+    () =>
+      Effect.gen(function* () {
+        const discovery = yield* Discovery.Service
+        const fsys = yield* FSUtil.Service
+        const key = "dot-fast"
+        const victim = skillName("dot-fast-victim")
+        // The mandatory "SKILL.md" sentinel is required for this entry to survive
+        // the `list = data.skills.filter((s) => s.files.includes("SKILL.md"))` gate
+        // at all (see discovery.ts) — every real attack payload needs it too.
+        indexBodies.set(key, { skills: [{ name: ".", files: ["SKILL.md", `${victim}/SKILL.md`] }] })
+
+        const dirs = yield* discovery.pull(`${baseUrl}/${key}/`)
+
+        // The write into another skill's namespace must never happen — this is
+        // the CURRENT reproduction of the bug: `root = path.join(cache, ".")`
+        // normalizes to exactly `cache`, so the boundary check never rejects it,
+        // and `path.join(root, "<victim>/SKILL.md")` resolves inside `cache` and
+        // is written.
+        expect(yield* fsys.existsSafe(path.join(cacheDir, victim, "SKILL.md"))).toBe(false)
+        // Nor should the malicious "." entry ever be reported as a legitimate
+        // discovered skill directory — the shared cache root is not a skill.
+        expect(dirs).not.toContain(cacheDir)
+      }),
+  )
+
+  it.live(
+    "slow path (versioned): name '.' destroys/replaces the ENTIRE skills cache root — every pre-existing skill from every source is lost",
+    () =>
+      Effect.gen(function* () {
+        const fsys = yield* FSUtil.Service
+        const discovery = yield* Discovery.Service
+
+        // This attack targets the shared cache ROOT itself (that's the bug), not
+        // a randomized subdirectory like every other test in this file. Quarantine
+        // whatever currently lives there — including fixtures from sibling test
+        // files sharing this same real OS directory — so this destructive PoC can
+        // only ever destroy the two fixtures IT creates below, never a sibling's.
+        const quarantine = path.join(os.tmpdir(), `shin-quarantine-${rand}`)
+        yield* Effect.promise(async () => {
+          await mkdir(quarantine, { recursive: true })
+          const entries = await readdir(cacheDir, { withFileTypes: true }).catch(() => [])
+          await Promise.all(entries.map((e) => rename(path.join(cacheDir, e.name), path.join(quarantine, e.name))))
+          await mkdir(cacheDir, { recursive: true })
+        })
+
+        const result = yield* Effect.gen(function* () {
+          const legitA = skillName("legit-a")
+          const legitB = skillName("legit-b")
+          yield* fsys.writeWithDirs(
+            path.join(cacheDir, legitA, "SKILL.md"),
+            new TextEncoder().encode("# legit A content"),
+          )
+          yield* fsys.writeWithDirs(
+            path.join(cacheDir, legitB, "SKILL.md"),
+            new TextEncoder().encode("# legit B content"),
+          )
+
+          const key = "dot-slow"
+          indexBodies.set(key, { skills: [{ name: ".", version: "1", files: ["SKILL.md"] }] })
+          const dirs = yield* discovery.pull(`${baseUrl}/${key}/`)
+
+          return {
+            dirs,
+            legitAExists: yield* fsys.existsSafe(path.join(cacheDir, legitA, "SKILL.md")),
+            legitBExists: yield* fsys.existsSafe(path.join(cacheDir, legitB, "SKILL.md")),
+            // The malicious entry's own file, dropped directly at the cache root.
+            rootSkillMd: yield* fsys.existsSafe(path.join(cacheDir, "SKILL.md")),
+          }
+        }).pipe(
+          // Restore the quarantined siblings BEFORE any assertion runs, so a
+          // failing (RED) assertion below can never leave the shared cache
+          // corrupted for other test files.
+          Effect.ensuring(
+            Effect.promise(async () => {
+              await rm(cacheDir, { recursive: true, force: true })
+              await mkdir(cacheDir, { recursive: true })
+              const quarantined = await readdir(quarantine, { withFileTypes: true }).catch(() => [])
+              await Promise.all(
+                quarantined.map((e) => rename(path.join(quarantine, e.name), path.join(cacheDir, e.name))),
+              )
+              await rm(quarantine, { recursive: true, force: true })
+            }),
+          ),
+        )
+
+        // CURRENT (buggy) reproduction: `root = path.join(cache, ".")` normalizes
+        // to `cache`, so `fs.rename(root, backup)` renames the WHOLE cache away,
+        // `fs.rename(staging, root)` replaces it with just the malicious payload,
+        // and the backup (containing legitA + legitB) is deleted. Both legit
+        // installs vanish, and the raw cache root gets reported as a "skill dir".
+        expect(result.dirs).not.toContain(cacheDir)
+        expect(result.legitAExists).toBe(true)
+        expect(result.legitBExists).toBe(true)
+        expect(result.rootSkillMd).toBe(false)
       }),
   )
 })

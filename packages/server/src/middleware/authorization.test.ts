@@ -26,7 +26,15 @@
  *     (the request would incorrectly bypass and return 200).
  * @see ./authorization.ts
  * @see ../../protocol/src/groups/pty.ts (hasPtyConnectTicketURL, PTY_CONNECT_TICKET_QUERY)
- * @see ../../opencode/src/server/routes/instance/httpapi/middleware/authorization.test.ts (fork's enriched layer)
+ * @see ../../../opencode/src/server/routes/instance/httpapi/middleware/authorization.ts (fork's
+ *   ptyConnectAuthorizationLayer, a SEPARATE middleware guarding the fork's own unprefixed
+ *   `/pty/:id/connect` instance route — NOT exercised by this file's tests, which only cover
+ *   this package's own `authorizationLayer`/`hasPtyConnectTicketURL` regex-prefix assumption).
+ * @see ../../../opencode/test/server/httpapi-instance-route-auth.test.ts (real ticket-bypass
+ *   coverage for ptyConnectAuthorizationLayer against the production `/pty/:id/connect` route —
+ *   corrected citation: the `middleware/authorization.test.ts` file in packages/opencode only
+ *   covers `authorizationRouterMiddleware` (the `/doc` guard), never ptyConnectAuthorizationLayer;
+ *   Sho r1 flagged the prior version of this citation as implying coverage that did not exist)
  */
 
 import { describe, expect, test } from "bun:test"
