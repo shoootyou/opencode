@@ -2,6 +2,8 @@
  * @spec-handoff
  * @interface uiRoute — the catch-all `GET /*` static-frontend fallback in
  *   packages/opencode/src/server/routes/instance/httpapi/server.ts (~line 193).
+ * @interface ptyConnectAuthorizationLayer — packages/opencode/src/server/routes/instance/httpapi/middleware/authorization.ts,
+ *   guards the fork's real unprefixed `/pty/:id/connect` route (PtyConnectApi, groups/pty.ts).
  * @behavior
  *   - uiRoute MUST be PUBLIC: remove the `.pipe(Layer.provide(authOnlyRouterLayer))`
  *     wrapper from the uiRoute layer so no auth router middleware gates the static
@@ -13,6 +15,12 @@
  *     password set and no credentials they still return 401. This is already
  *     covered by the EventPaths.event assertion in the "HttpApi instance route
  *     authorization" describe below (referenced, not duplicated).
+ *   - ptyConnectAuthorizationLayer (Sho r1 HIGH finding): a `ticket` query param on
+ *     the real, unprefixed `/pty/:id/connect` route bypasses credential checks
+ *     entirely — NO existing test in the repo exercised this positive bypass path
+ *     before this addition (the pre-existing "requires configured auth" test below
+ *     only covered the Basic-Auth positive case and the no-credentials negative
+ *     case, never the ticket-bypass positive case).
  * @edge-cases
  *   - PUBLIC_UI_PATHS (server/shared/public-ui.ts) is intentionally empty — the
  *     whole bundle is public via route wiring, not a per-path bypass.
@@ -22,9 +30,18 @@
  *     The local web UI build must exist for the GREEN assertion. The RED state
  *     needs no UI artifact: the buggy auth layer short-circuits with 401 before
  *     serveUIEffect ever runs.
+ *   - ptyConnectAuthorizationLayer ticket bypass: `?ticket=<any value>` on the
+ *     exact `/pty/:id/connect` shape, NO credentials → NOT a bare 401 (currently
+ *     surfaces 404 because the PTY session id doesn't exist, i.e. the request
+ *     passed auth and reached the handler). No ticket, no credentials, same
+ *     route → still a bare 401. This is a coverage-gap fix, not a bug fix: Sho
+ *     verified the production code is already correct; this test only pins that
+ *     correctness down so a future refactor of the ticket regex or the auth
+ *     layer can't silently break the bypass again.
  * @see ../../src/server/routes/instance/httpapi/server.ts
  * @see ../../src/server/shared/public-ui.ts
  * @see ../../src/server/routes/instance/httpapi/middleware/authorization.ts
+ * @see ../../src/server/shared/pty-ticket.ts (hasPtyConnectTicketURL, PTY_CONNECT_TICKET_QUERY)
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
@@ -128,6 +145,33 @@ describe("HttpApi instance route authorization", () => {
     })
     await cancelBody(authed)
     expect(authed.status).toBe(404)
+  })
+
+  // Sho r1 HIGH finding: ptyConnectAuthorizationLayer's ticket bypass (the risk
+  // Taku explicitly flagged for the fork's unprefixed `/pty/:id/connect` route)
+  // had zero test coverage anywhere in the repo. The Basic-Auth assertions above
+  // exercise the credential path; this test exercises the OTHER bypass branch —
+  // a `ticket` query param with NO credentials at all.
+  test("a ticket query param bypasses PTY connect auth without any credentials (ptyConnectAuthorizationLayer)", async () => {
+    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    const server = app({ password: "secret" })
+    const route = PtyPaths.connect.replace(":ptyID", PtyID.ascending())
+    const headers = { "x-opencode-directory": tmp.path }
+
+    // Valid ticket shape on the REAL, unprefixed fork route, no credentials at
+    // all → must NOT be blocked with 401. (Surfaces 404 because the referenced
+    // PTY session id doesn't exist — i.e. the request cleared auth and reached
+    // the handler, same as the authed Basic-Auth case above.)
+    const withTicket = await server.request(`${route}?ticket=anything`, { headers })
+    await cancelBody(withTicket)
+    expect(withTicket.status).not.toBe(401)
+    expect(withTicket.status).toBe(404)
+
+    // Same route, no ticket, no credentials → still blocked. Guards against a
+    // regression where the bypass check accidentally becomes unconditional.
+    const withoutTicket = await server.request(route, { headers })
+    await cancelBody(withoutTicket)
+    expect(withoutTicket.status).toBe(401)
   })
 })
 

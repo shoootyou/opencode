@@ -285,6 +285,11 @@ export const dict = {
   "dialog.directory.empty": "Nenhuma pasta encontrada",
   "dialog.archivedSessions.title": "Sessões arquivadas",
   "dialog.archivedSessions.empty": "Nenhuma sessão arquivada",
+  "dialog.directory.action.selectFile": "Selecionar arquivo",
+  "dialog.directory.action.selectFolder": "Selecionar pasta",
+  "dialog.directory.root": "Raiz",
+  "dialog.directory.parent": "Pasta superior",
+  "dialog.directory.readError": "Não foi possível ler esta pasta",
   "dialog.server.title": "Servidores",
   "dialog.server.description": "Trocar para qual servidor OpenCode este aplicativo se conecta.",
   "dialog.server.search.placeholder": "Buscar servidores",
@@ -599,9 +604,6 @@ export const dict = {
   "settings.general.row.editToolPartsExpanded.title": "Expandir partes da ferramenta de edição",
   "settings.general.row.editToolPartsExpanded.description":
     "Mostrar partes das ferramentas de edição, escrita e patch expandidas por padrão na linha do tempo",
-  "settings.general.row.showSessionProgressBar.title": "Mostrar barra de progresso da sessão",
-  "settings.general.row.showSessionProgressBar.description":
-    "Exibir a barra de progresso animada no topo da sessão quando o agente estiver trabalhando",
   "settings.general.row.wayland.title": "Usar Wayland nativo",
   "settings.general.row.wayland.description": "Desabilitar fallback X11 no Wayland. Requer reinicialização.",
   "settings.general.row.wayland.tooltip":

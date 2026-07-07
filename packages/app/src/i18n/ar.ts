@@ -285,6 +285,11 @@ export const dict = {
   "dialog.directory.empty": "لم يتم العثور على مجلدات",
   "dialog.archivedSessions.title": "الجلسات المؤرشفة",
   "dialog.archivedSessions.empty": "لا توجد جلسات مؤرشفة",
+  "dialog.directory.action.selectFile": "اختيار ملف",
+  "dialog.directory.action.selectFolder": "اختيار مجلد",
+  "dialog.directory.root": "الجذر",
+  "dialog.directory.parent": "المجلد الأصل",
+  "dialog.directory.readError": "تعذرت قراءة هذا المجلد",
   "dialog.server.title": "الخوادم",
   "dialog.server.description": "تبديل خادم OpenCode الذي يتصل به هذا التطبيق.",
   "dialog.server.search.placeholder": "البحث في الخوادم",
@@ -591,8 +596,6 @@ export const dict = {
   "settings.general.row.editToolPartsExpanded.title": "توسيع أجزاء أداة edit",
   "settings.general.row.editToolPartsExpanded.description":
     "إظهار أجزاء أدوات edit و write و patch موسعة بشكل افتراضي في الشريط الزمني",
-  "settings.general.row.showSessionProgressBar.title": "إظهار شريط تقدم الجلسة",
-  "settings.general.row.showSessionProgressBar.description": "عرض شريط التقدم المتحرك أعلى الجلسة أثناء عمل الوكيل",
   "settings.general.row.wayland.title": "استخدام Wayland الأصلي",
   "settings.general.row.wayland.description": "تعطيل التراجع إلى X11 على Wayland. يتطلب إعادة التشغيل.",
   "settings.general.row.wayland.tooltip":

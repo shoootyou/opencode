@@ -26,7 +26,7 @@ function guardedApp(input?: { password?: string; username?: string }) {
     HttpRouter.use((router) =>
       router.add("GET", "/guarded", () => Effect.succeed(HttpServerResponse.text("ok"))),
     ).pipe(
-      Layer.provide(authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.defaultLayer))),
+      Layer.provide(authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.layer))),
       Layer.provide([
         HttpServer.layerServices,
         ConfigProvider.layer(

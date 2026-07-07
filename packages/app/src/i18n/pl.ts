@@ -286,6 +286,11 @@ export const dict = {
   "dialog.directory.empty": "Nie znaleziono folderów",
   "dialog.archivedSessions.title": "Zarchiwizowane sesje",
   "dialog.archivedSessions.empty": "Brak zarchiwizowanych sesji",
+  "dialog.directory.action.selectFile": "Wybierz plik",
+  "dialog.directory.action.selectFolder": "Wybierz folder",
+  "dialog.directory.root": "Katalog główny",
+  "dialog.directory.parent": "Nadrzędny",
+  "dialog.directory.readError": "Nie można odczytać tego folderu",
   "dialog.server.title": "Serwery",
   "dialog.server.description": "Przełącz serwer OpenCode, z którym łączy się ta aplikacja.",
   "dialog.server.search.placeholder": "Szukaj serwerów",
@@ -597,9 +602,6 @@ export const dict = {
   "settings.general.row.editToolPartsExpanded.title": "Rozwijaj elementy narzędzia edit",
   "settings.general.row.editToolPartsExpanded.description":
     "Domyślnie pokazuj rozwinięte elementy narzędzi edit, write i patch na osi czasu",
-  "settings.general.row.showSessionProgressBar.title": "Pokazuj pasek postępu sesji",
-  "settings.general.row.showSessionProgressBar.description":
-    "Wyświetlaj animowany pasek postępu u góry sesji, gdy agent pracuje",
   "settings.general.row.wayland.title": "Użyj natywnego Wayland",
   "settings.general.row.wayland.description": "Wyłącz fallback X11 na Wayland. Wymaga restartu.",
   "settings.general.row.wayland.tooltip":
