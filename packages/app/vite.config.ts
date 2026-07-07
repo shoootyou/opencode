@@ -34,6 +34,10 @@ export default defineConfig({
       includeAssets: ["favicon*.{ico,png,svg}", "apple-touch-icon*.png", "web-app-manifest-*.png", "site.webmanifest"],
       workbox: {
         globPatterns: ["**/*.{js,css,html,woff,woff2,ttf,eot,png,svg,ico}"],
+        // Default Workbox limit is 2 MiB; the v1.17.13 upstream merge grew the main
+        // bundle past that (~2.68 MB), which made precaching fail the build.
+        // Raised with headroom for reasonable future growth.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "/index.html",
         // Only explicit SPA routes receive the navigation fallback.
         // All other paths (API, auth, events, etc.) pass to the network by default.
