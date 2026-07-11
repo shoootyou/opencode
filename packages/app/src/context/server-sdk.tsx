@@ -234,14 +234,15 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             await wait(0)
           }
         } catch (error) {
-          // Mirror the onSseError ownership: 401 has priority so the CF recovery
-          // branch only fires for a non-401 error (mutually exclusive branches).
-          if (isUnauthorizedSseError(error)) {
+          const streamClosed = isStreamClosed(error, attempt?.signal)
+          // Mirror the onSseError ownership: closed streams are ignored first, and
+          // 401 has priority so the CF recovery branch only fires for a non-401 error.
+          if (!streamClosed && isUnauthorizedSseError(error)) {
             if (shouldRedirectToLogin(server.http.url, location.origin, location.pathname)) redirectToLogin()
-          } else if (isCloudflareAccessSessionExpiredSseError(error)) {
+          } else if (!streamClosed && isCloudflareAccessSessionExpiredSseError(error)) {
             void recoverFromCloudflareAccessSessionExpiry()
           }
-          if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {
+          if (!streamClosed && !streamErrorLogged) {
             streamErrorLogged = true
             console.error("[global-sdk] event stream failed", {
               url: server.http.url,
