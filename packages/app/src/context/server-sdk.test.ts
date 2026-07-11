@@ -49,6 +49,13 @@
  *   The two classifiers are orthogonal so wiring both branches cannot double-fire:
  *   a 401 SSE error is NOT a CF error, and a CF-marker error is NOT a 401 error
  *   (isUnauthorizedSseError stays false for CF markers with no "401" token).
+ * @overlap-ownership (r1 audit remediation)
+ *   When a single error message carries BOTH a "401" token AND a Cloudflare
+ *   marker (e.g. "SSE failed: 401 Unauthorized redirect to team.cloudflareaccess.com"),
+ *   the 401 classifier OWNS it: isUnauthorizedSseError → true and
+ *   isCloudflareAccessSessionExpiredSseError → false. The branches are mutually
+ *   exclusive with 401 priority, so the wiring resolves to a single owner and the
+ *   CF recovery navigation never competes with the /login redirect.
  * @see ../utils/server.ts (recoverFromCloudflareAccessSessionExpiry — the CF branch action)
  */
 
@@ -183,6 +190,17 @@ describe("SSE classifier orthogonality (401 vs Cloudflare)", () => {
     const error = new Error("SSE failed: redirect to team.cloudflareaccess.com/cdn-cgi/access/login")
     expect(isCloudflareAccessSessionExpiredSseError(error)).toBe(true)
     expect(isUnauthorizedSseError(error)).toBe(false)
+  })
+
+  // --- item 11: overlap ownership — an error carrying BOTH a 401 token AND a CF
+  //     marker must be owned by the 401 classifier (mutually-exclusive branches,
+  //     401 has priority so the two SSE branches cannot double-fire). ---
+  test("an error with BOTH a 401 token and a Cloudflare marker is owned by 401", () => {
+    const error = new Error("SSE failed: 401 Unauthorized redirect to team.cloudflareaccess.com")
+    // 401 owns it.
+    expect(isUnauthorizedSseError(error)).toBe(true)
+    // The CF classifier must yield ownership so the wiring resolves to a single owner.
+    expect(isCloudflareAccessSessionExpiredSseError(error)).toBe(false)
   })
 })
 
