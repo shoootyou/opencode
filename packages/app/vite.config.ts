@@ -2,7 +2,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
 import desktopPlugin from "./vite"
-import { navigateFallbackAllowlist } from "./src/pwa"
+import { navigateFallbackAllowlist, navigateFallbackDenylist } from "./src/pwa"
 
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
@@ -43,6 +43,10 @@ export default defineConfig({
         // All other paths (API, auth, events, etc.) pass to the network by default.
         // Allowlist is the shared source of truth in ./src/pwa (assertable in tests).
         navigateFallbackAllowlist,
+        // Denylist wins over the allowlist: Workbox evaluates it first, so
+        // `/cdn-cgi/` navigations always bypass the SPA fallback and reach the CF
+        // edge for Cloudflare Access reauth. Shared source of truth in ./src/pwa.
+        navigateFallbackDenylist,
       },
     }),
     sentry,

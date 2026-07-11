@@ -3,7 +3,12 @@ import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { type Accessor, batch, createMemo, onCleanup, onMount } from "solid-js"
-import { createSdkForServer, redirectToLogin, shouldRedirectToLogin } from "@/utils/server"
+import {
+  createSdkForServer,
+  recoverFromCloudflareAccessSessionExpiry,
+  redirectToLogin,
+  shouldRedirectToLogin,
+} from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { ServerConnection, useServer } from "./server"
@@ -82,6 +87,17 @@ export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () 
 // does not match).
 export function isUnauthorizedSseError(error: unknown): boolean {
   return error instanceof Error && /\b401\b/.test(error.message)
+}
+
+// Detects a Cloudflare Access expiry from the generic SSE error. Orthogonal to
+// isUnauthorizedSseError with 401 priority: only explicit Cloudflare Access/
+// challenge markers match, and a message that also carries a `401` token is
+// yielded to the 401 branch (returns false) so the two SSE branches are mutually
+// exclusive and can never double-fire on a single error.
+export function isCloudflareAccessSessionExpiredSseError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (/\b401\b/.test(error.message)) return false
+  return /cloudflareaccess\.com|cloudflare access|cf-mitigated|__cf_chl|cdn-cgi\/access/i.test(error.message)
 }
 
 function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope) {
@@ -186,8 +202,13 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             signal: attempt.signal,
             onSseError: (error) => {
               if (isStreamClosed(error, attempt?.signal)) return
-              if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
-                redirectToLogin()
+              // 401 owns an overlapping error: the CF branch is only reached when
+              // the error is NOT a 401, so the two recoveries can never double-fire.
+              if (isUnauthorizedSseError(error)) {
+                if (shouldRedirectToLogin(server.http.url, location.origin, location.pathname)) redirectToLogin()
+              } else if (isCloudflareAccessSessionExpiredSseError(error)) {
+                void recoverFromCloudflareAccessSessionExpiry()
+              }
               if (streamErrorLogged) return
               streamErrorLogged = true
               console.error("[global-sdk] event stream error", {
@@ -213,9 +234,15 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             await wait(0)
           }
         } catch (error) {
-          if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
-            redirectToLogin()
-          if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {
+          const streamClosed = isStreamClosed(error, attempt?.signal)
+          // Mirror the onSseError ownership: closed streams are ignored first, and
+          // 401 has priority so the CF recovery branch only fires for a non-401 error.
+          if (!streamClosed && isUnauthorizedSseError(error)) {
+            if (shouldRedirectToLogin(server.http.url, location.origin, location.pathname)) redirectToLogin()
+          } else if (!streamClosed && isCloudflareAccessSessionExpiredSseError(error)) {
+            void recoverFromCloudflareAccessSessionExpiry()
+          }
+          if (!streamClosed && !streamErrorLogged) {
             streamErrorLogged = true
             console.error("[global-sdk] event stream failed", {
               url: server.http.url,
