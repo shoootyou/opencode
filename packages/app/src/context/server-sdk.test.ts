@@ -60,7 +60,9 @@ import type { Event } from "@opencode-ai/sdk/v2/client"
 // ./server-sdk. A dynamic import binds the missing export to `undefined` so ONLY
 // the new Cloudflare SSE tests fail (with "not a function") while the existing
 // green tests in this file keep passing. E3 adds the helper.
-const { isCloudflareAccessSessionExpiredSseError } = await import("./server-sdk")
+const { isCloudflareAccessSessionExpiredSseError } = (await import("./server-sdk")) as typeof import("./server-sdk") & {
+  isCloudflareAccessSessionExpiredSseError: (error: unknown) => boolean
+}
 
 describe("resumeStreamAfterPageShow", () => {
   test("restarts a stream only after a back-forward cache restore", () => {

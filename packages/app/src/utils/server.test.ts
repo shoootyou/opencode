@@ -106,7 +106,22 @@ const {
   isCloudflareAccessSessionExpiredResponse,
   recoverFromCloudflareAccessSessionExpiry,
   resetCloudflareRecoveryInFlight,
-} = await import("./server")
+} = (await import("./server")) as typeof import("./server") & {
+  createGuardedFetch: (
+    baseFetch: typeof fetch,
+    deps?: {
+      location?: ReturnType<typeof fakeRecoveryLocation>
+      recover?: (deps?: { location?: ReturnType<typeof fakeRecoveryLocation> }) => Promise<void>
+    },
+  ) => typeof fetch
+  isCloudflareAccessSessionExpiredResponse: (response: Response, currentOrigin: string) => Promise<boolean>
+  recoverFromCloudflareAccessSessionExpiry: (deps?: {
+    location?: ReturnType<typeof fakeRecoveryLocation>
+    serviceWorker?: { getRegistrations(): Promise<Array<{ unregister(): Promise<boolean> }>> }
+    cacheBust?: () => string
+  }) => Promise<void>
+  resetCloudflareRecoveryInFlight: () => void
+}
 
 // A minimal stand-in for `window.location` that records href assignments.
 // happy-dom's real `location` is about:blank, origin=null, and immutable in this
@@ -177,6 +192,12 @@ function fakeResponse(input: {
   if (input.redirected !== undefined) Object.defineProperty(response, "redirected", { value: input.redirected })
   if (input.url !== undefined) Object.defineProperty(response, "url", { value: input.url })
   return response
+}
+
+function fakeBaseFetch(response: Response) {
+  const baseFetch = (async () => response) as unknown as typeof fetch
+  baseFetch.preconnect = fetch.preconnect
+  return baseFetch
 }
 
 describe("authFromToken", () => {
@@ -425,7 +446,7 @@ describe("createGuardedFetch", () => {
     const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
     let recovered = 0
     const cfResponse = fakeResponse({ status: 403, headers: { "cf-mitigated": "challenge" } })
-    const guarded = createGuardedFetch(async () => cfResponse, {
+    const guarded = createGuardedFetch(fakeBaseFetch(cfResponse), {
       location: loc,
       recover: async () => {
         recovered += 1
@@ -440,7 +461,7 @@ describe("createGuardedFetch", () => {
     const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
     let recovered = 0
     const unauthorized = fakeResponse({ status: 401, url: `${origin}/api/session` })
-    const guarded = createGuardedFetch(async () => unauthorized, {
+    const guarded = createGuardedFetch(fakeBaseFetch(unauthorized), {
       location: loc,
       recover: async () => {
         recovered += 1
@@ -457,7 +478,7 @@ describe("createGuardedFetch", () => {
     const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
     let recovered = 0
     const ok = fakeResponse({ status: 200, url: `${origin}/api/session`, body: "ok" })
-    const guarded = createGuardedFetch(async () => ok, {
+    const guarded = createGuardedFetch(fakeBaseFetch(ok), {
       location: loc,
       recover: async () => {
         recovered += 1
@@ -471,7 +492,7 @@ describe("createGuardedFetch", () => {
   })
 
   test("preserves the Bun fetch preconnect property", () => {
-    const guarded = createGuardedFetch(async () => fakeResponse({ status: 200 }), { location: fakeRecoveryLocation() })
+    const guarded = createGuardedFetch(fakeBaseFetch(fakeResponse({ status: 200 })), { location: fakeRecoveryLocation() })
     expect(guarded.preconnect).toBe(fetch.preconnect)
   })
 })

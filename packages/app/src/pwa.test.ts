@@ -89,7 +89,9 @@ import { navigateFallbackAllowlist } from "./pwa"
 // E2 red phase: navigateFallbackDenylist does not exist yet in ./pwa. A dynamic
 // import binds the missing export to `undefined` so ONLY the new denylist tests
 // fail (the allowlist tests and drift guard keep passing). E4 adds the export.
-const { navigateFallbackDenylist } = await import("./pwa")
+const { navigateFallbackDenylist } = (await import("./pwa")) as typeof import("./pwa") & {
+  navigateFallbackDenylist: RegExp[]
+}
 
 const viteConfigPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "vite.config.ts")
 
