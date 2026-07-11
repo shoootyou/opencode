@@ -101,6 +101,11 @@ export async function isCloudflareAccessSessionExpiredResponse(
   }
   if (response.status !== 403) return false
   if (response.headers.has("cf-mitigated")) return true
+  // Gate body-marker inspection on content-type: only an HTML challenge page is a
+  // real Access signal. A JSON/API 403 whose payload merely mentions a CF string
+  // must NOT be treated as expiry, so false positives can't trigger a reload loop.
+  const contentType = response.headers.get("content-type")
+  if (!contentType || !contentType.includes("text/html")) return false
   return CLOUDFLARE_ACCESS_MARKER.test(await response.clone().text())
 }
 
@@ -120,19 +125,35 @@ export async function recoverFromCloudflareAccessSessionExpiry(
     cacheBust?: () => string
   } = {},
 ): Promise<void> {
+  const loc = deps.location ?? location
+  // Cross-document loop cap: if this document already arrived via a recovery
+  // reload it carries __cf_access_recover, so a second recovery is a no-op. Without
+  // this, an edge that keeps re-challenging would spin an infinite reload loop
+  // across document lifecycles. Checked before the guard so it never locks it.
+  if (new URLSearchParams(loc.search).has("__cf_access_recover")) return
   if (cloudflareRecoveryInFlight) return
   // Set synchronously before the first await so concurrent callers are debounced.
   cloudflareRecoveryInFlight = true
-  const loc = deps.location ?? location
   const serviceWorker =
     deps.serviceWorker ?? (typeof navigator === "undefined" ? undefined : navigator.serviceWorker)
   const cacheBust = deps.cacheBust ?? (() => Date.now().toString())
   if (serviceWorker) {
-    const registrations = await serviceWorker.getRegistrations()
-    await Promise.all(registrations.map((registration) => registration.unregister()))
+    // Resilience: neither a rejecting getRegistrations() nor a rejecting
+    // unregister() may block navigation, so swallow both with allSettled and a
+    // catch. Recovery MUST still reload even when SW teardown fails.
+    const registrations = await serviceWorker.getRegistrations().catch(() => [])
+    await Promise.allSettled(registrations.map((registration) => registration.unregister()))
   }
-  const separator = loc.search ? "&" : "?"
-  loc.replace(`${loc.pathname}${loc.search}${separator}__cf_access_recover=${cacheBust()}${loc.hash}`)
+  // Build the target through the URL API so the cache-bust param REPLACES any prior
+  // value (no accumulation), the hash is preserved after the search, and a
+  // protocol-relative pathname (`//evil`) cannot escape the current origin.
+  const target = new URL(loc.pathname + loc.search + loc.hash, loc.origin)
+  target.searchParams.set("__cf_access_recover", cacheBust())
+  // Defensive same-origin assertion: the origin base should always keep us on
+  // origin, but if a parse ever yields a foreign origin, fall back to the root.
+  const destination =
+    target.origin === loc.origin ? `${target.pathname}${target.search}${target.hash}` : `${loc.origin}/`
+  loc.replace(destination)
 }
 
 // Test-only seam to clear the module-level cloudflareRecoveryInFlight guard.
