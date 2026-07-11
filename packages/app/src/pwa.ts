@@ -28,3 +28,17 @@ export const navigateFallbackAllowlist = [
   /^\/new-session$/,
   /^\/(?!doc$)[A-Za-z0-9_-]+$/,
 ]
+
+// Workbox `navigateFallbackDenylist` for the PWA service worker.
+//
+// Workbox evaluates the denylist with precedence over the allowlist, so any
+// navigation matching one of these patterns bypasses the SPA `/index.html`
+// fallback and reaches the network/edge — even if the allowlist would match it.
+//
+// `/cdn-cgi/` is Cloudflare's reserved edge path. Cloudflare Access reauth
+// document navigations (e.g. `/cdn-cgi/access/authorized`, `/cdn-cgi/access/login`)
+// MUST reach the CF edge to complete the challenge; serving the cached SPA shell
+// for them is the root cause of the session-reload loop. This is the single
+// source of truth: `vite.config.ts` imports it into
+// `VitePWA({ workbox: { navigateFallbackDenylist } })`.
+export const navigateFallbackDenylist = [/^\/cdn-cgi\//]
