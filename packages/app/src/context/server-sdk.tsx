@@ -3,7 +3,12 @@ import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { type Accessor, batch, createMemo, onCleanup, onMount } from "solid-js"
-import { createSdkForServer, redirectToLogin, shouldRedirectToLogin } from "@/utils/server"
+import {
+  createSdkForServer,
+  recoverFromCloudflareAccessSessionExpiry,
+  redirectToLogin,
+  shouldRedirectToLogin,
+} from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { ServerConnection, useServer } from "./server"
@@ -82,6 +87,14 @@ export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () 
 // does not match).
 export function isUnauthorizedSseError(error: unknown): boolean {
   return error instanceof Error && /\b401\b/.test(error.message)
+}
+
+// Detects a Cloudflare Access expiry from the generic SSE error. Orthogonal to
+// isUnauthorizedSseError: only explicit Cloudflare Access/challenge markers
+// match, so a bare 401 or 403 message never triggers CF recovery (and a CF
+// marker with no "401" token never triggers the /login branch).
+export function isCloudflareAccessSessionExpiredSseError(error: unknown): boolean {
+  return error instanceof Error && /cloudflareaccess\.com|cloudflare access|cf-mitigated|__cf_chl|cdn-cgi\/access/i.test(error.message)
 }
 
 function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope) {
@@ -188,6 +201,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
               if (isStreamClosed(error, attempt?.signal)) return
               if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
                 redirectToLogin()
+              if (isCloudflareAccessSessionExpiredSseError(error)) void recoverFromCloudflareAccessSessionExpiry()
               if (streamErrorLogged) return
               streamErrorLogged = true
               console.error("[global-sdk] event stream error", {
@@ -215,6 +229,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         } catch (error) {
           if (isUnauthorizedSseError(error) && shouldRedirectToLogin(server.http.url, location.origin, location.pathname))
             redirectToLogin()
+          if (isCloudflareAccessSessionExpiredSseError(error)) void recoverFromCloudflareAccessSessionExpiry()
           if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {
             streamErrorLogged = true
             console.error("[global-sdk] event stream failed", {
