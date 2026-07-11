@@ -32,11 +32,35 @@
  *     isUnauthorizedSseError (this file) + shouldRedirectToLogin (server.test.ts).
  * @see ./server-sdk.tsx
  * @see ../utils/server.ts (shouldRedirectToLogin + redirectToLogin shared by the guard)
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (E2 additive — Cloudflare Access SSE expiry classifier)
+ * @interface isCloudflareAccessSessionExpiredSseError(error: unknown): boolean
+ *   Pure, synchronous. Returns true ONLY for Error instances whose message
+ *   contains an explicit Cloudflare Access/challenge marker (case-insensitive):
+ *     /cloudflareaccess\.com/i, /cloudflare access/i, /cf-mitigated/i,
+ *     /__cf_chl/i, or /cdn-cgi\/access/i.
+ * @behavior (negatives → false)
+ *   - "SSE failed: 401 Unauthorized" (owned by isUnauthorizedSseError);
+ *   - "SSE failed: 403 Forbidden" (bare 403 is ambiguous — must not loop);
+ *   - generic network errors, aborts, stream-closed;
+ *   - null, undefined, and non-Error values.
+ * @orthogonality
+ *   The two classifiers are orthogonal so wiring both branches cannot double-fire:
+ *   a 401 SSE error is NOT a CF error, and a CF-marker error is NOT a 401 error
+ *   (isUnauthorizedSseError stays false for CF markers with no "401" token).
+ * @see ../utils/server.ts (recoverFromCloudflareAccessSessionExpiry — the CF branch action)
  */
 
 import { describe, expect, test } from "bun:test"
 import { coalesceServerEvents, enqueueServerEvent, isUnauthorizedSseError, resumeStreamAfterPageShow } from "./server-sdk"
 import type { Event } from "@opencode-ai/sdk/v2/client"
+
+// E2 red phase: isCloudflareAccessSessionExpiredSseError does not exist yet in
+// ./server-sdk. A dynamic import binds the missing export to `undefined` so ONLY
+// the new Cloudflare SSE tests fail (with "not a function") while the existing
+// green tests in this file keep passing. E3 adds the helper.
+const { isCloudflareAccessSessionExpiredSseError } = await import("./server-sdk")
 
 describe("resumeStreamAfterPageShow", () => {
   test("restarts a stream only after a back-forward cache restore", () => {
@@ -78,6 +102,85 @@ describe("isUnauthorizedSseError", () => {
 
   test("does not match 401 embedded in a larger number (word boundary)", () => {
     expect(isUnauthorizedSseError(new Error("SSE failed: 1401 Weird"))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isCloudflareAccessSessionExpiredSseError — E2 red: classify a Cloudflare
+// Access expiry from the generic SSE error, distinct from the textual 401 branch.
+// ---------------------------------------------------------------------------
+
+describe("isCloudflareAccessSessionExpiredSseError", () => {
+  // --- positive markers (case-insensitive) ---
+  test("true for a cloudflareaccess.com marker", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: redirect to team.cloudflareaccess.com"))).toBe(
+      true,
+    )
+  })
+
+  test("true for a cf-mitigated marker", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: cf-mitigated challenge"))).toBe(true)
+  })
+
+  test("true for a 'cloudflare access' marker regardless of case", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: Cloudflare Access denied"))).toBe(true)
+  })
+
+  test("true for a __cf_chl challenge marker", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: __cf_chl_opt"))).toBe(true)
+  })
+
+  test("true for a cdn-cgi/access marker", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: GET /cdn-cgi/access/login"))).toBe(true)
+  })
+
+  // --- negatives ---
+  test("false for a bare 401 SSE error (owned by isUnauthorizedSseError)", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: 401 Unauthorized"))).toBe(false)
+  })
+
+  test("false for a bare 403 SSE error (ambiguous, must not loop)", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("SSE failed: 403 Forbidden"))).toBe(false)
+  })
+
+  test("false for a generic network error", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("network down"))).toBe(false)
+  })
+
+  test("false for an abort error", () => {
+    const abort = new Error("The operation was aborted")
+    abort.name = "AbortError"
+    expect(isCloudflareAccessSessionExpiredSseError(abort)).toBe(false)
+  })
+
+  test("false for a stream-closed error", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(new Error("stream closed"))).toBe(false)
+  })
+
+  test("false for null, undefined, and non-Error values", () => {
+    expect(isCloudflareAccessSessionExpiredSseError(null)).toBe(false)
+    expect(isCloudflareAccessSessionExpiredSseError(undefined)).toBe(false)
+    expect(isCloudflareAccessSessionExpiredSseError("cloudflareaccess.com")).toBe(false)
+    expect(isCloudflareAccessSessionExpiredSseError(403)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Orthogonality: the 401 classifier and the Cloudflare classifier must never
+// both fire on the same error, so wiring both SSE branches cannot double-fire.
+// ---------------------------------------------------------------------------
+
+describe("SSE classifier orthogonality (401 vs Cloudflare)", () => {
+  test("a 401 SSE error is a 401 but not a Cloudflare error", () => {
+    const error = new Error("SSE failed: 401 Unauthorized")
+    expect(isUnauthorizedSseError(error)).toBe(true)
+    expect(isCloudflareAccessSessionExpiredSseError(error)).toBe(false)
+  })
+
+  test("a Cloudflare marker error is a Cloudflare error but not a 401 error", () => {
+    const error = new Error("SSE failed: redirect to team.cloudflareaccess.com/cdn-cgi/access/login")
+    expect(isCloudflareAccessSessionExpiredSseError(error)).toBe(true)
+    expect(isUnauthorizedSseError(error)).toBe(false)
   })
 })
 

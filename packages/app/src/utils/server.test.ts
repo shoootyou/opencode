@@ -37,6 +37,53 @@
  * @see ./server.ts
  * @see ../context/server-sdk.tsx (isUnauthorizedSseError shares redirectToLogin)
  * @see ../pages/login-utils.ts (safeRedirect reads the ?redirect= param this produces)
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (E2 additive — Cloudflare Access session-expiry recovery)
+ *   Additive to the RFC 017 401→/login contract above. MUST NOT change it:
+ *   same-origin 401 still redirects to /login; remote-origin 401 still does not;
+ *   /login still does not redirect to itself; the CF branch returns false for 401.
+ *
+ * @interface isCloudflareAccessSessionExpiredResponse(response: Response, currentOrigin: string): Promise<boolean>
+ *   Pure classifier (no browser globals). Async only because the 403 body-marker
+ *   check must read response.clone().text(). Returns true when:
+ *     1. response.type === "opaqueredirect".
+ *     2. response.redirected === true AND response.url is parseable AND
+ *        (new URL(response.url).origin !== currentOrigin
+ *         OR hostname === "cloudflareaccess.com" / ends with ".cloudflareaccess.com").
+ *     3. response.status === 403 AND response.headers.has("cf-mitigated").
+ *     4. response.status === 403 AND response.clone().text() matches a CF marker:
+ *        /cloudflareaccess\.com/i, /cloudflare access/i, /cf-mitigated/i,
+ *        /__cf_chl/i, or /cdn-cgi\/access/i.
+ *     5. otherwise false.
+ *   MUST use response.clone() for the body check so the original body stays
+ *   consumable by the caller.
+ * @behavior (negatives → false)
+ *   - ordinary same-origin 403 (no cf-mitigated header, no body marker);
+ *   - same-origin redirect (redirected true, same origin, no CF host);
+ *   - HTTP 401 (owned by the existing 401 branch); remote-origin 401;
+ *   - any 2xx.
+ *
+ * @interface recoverFromCloudflareAccessSessionExpiry(deps?: {
+ *     location?: { origin; pathname; search; hash; href; replace(url); reload() }
+ *     serviceWorker?: { getRegistrations(): Promise<Array<{ unregister(): Promise<boolean> }>> }
+ *     cacheBust?: () => string
+ *   }): Promise<void>
+ *   Full-document recovery that bypasses the PWA service worker:
+ *     1. if cloudflareRecoveryInFlight → return (idempotent).
+ *     2. set the guard synchronously before any await.
+ *     3. if serviceWorker dep present → unregister all registrations.
+ *     4. location.replace(cache-busted current path+search+hash) — NOT assign/href,
+ *        so no history entry is added.
+ * @interface resetCloudflareRecoveryInFlight(): void  // test-only guard reset
+ *
+ * @interface createGuardedFetch(baseFetch: typeof fetch, deps?: {
+ *     location?: {...}; recover?: typeof recoverFromCloudflareAccessSessionExpiry
+ *   }): typeof fetch
+ *   Extracts the inline guardedFetch. Order: await baseFetch → CF check (void
+ *   recover) → existing 401 shouldRedirectToLogin/redirectToLogin → return
+ *   response. The CF check runs first but returns false for 401 so the 401 branch
+ *   is preserved. Retains { preconnect: fetch.preconnect }.
  */
 
 import { beforeEach, describe, expect, test } from "bun:test"
@@ -48,6 +95,18 @@ import {
   resetRedirectInFlight,
   shouldRedirectToLogin,
 } from "./server"
+
+// E2 red phase: these helpers do not exist yet in ./server. A static named
+// import of a missing export throws at module link time and would break the
+// existing (green) tests in this file. A dynamic import binds each missing
+// export to `undefined`, so ONLY the new Cloudflare tests fail — and they fail
+// for the right reason ("not a function") until E3 implements the helpers.
+const {
+  createGuardedFetch,
+  isCloudflareAccessSessionExpiredResponse,
+  recoverFromCloudflareAccessSessionExpiry,
+  resetCloudflareRecoveryInFlight,
+} = await import("./server")
 
 // A minimal stand-in for `window.location` that records href assignments.
 // happy-dom's real `location` is about:blank, origin=null, and immutable in this
@@ -65,6 +124,59 @@ function fakeLocation(input: { origin: string; pathname: string; search: string 
       assignedHref = value
     },
   }
+}
+
+// A richer location stand-in for the Cloudflare recovery path: it records
+// replace()/reload() calls and href assignments so tests can assert the helper
+// uses replace() (no new history entry) rather than assign/href.
+function fakeRecoveryLocation(
+  input: { origin: string; pathname: string; search: string; hash: string } = {
+    origin: "http://localhost:4096",
+    pathname: "/session/abc",
+    search: "?x=1",
+    hash: "",
+  },
+) {
+  const calls = { replace: [] as string[], reload: 0, href: [] as string[] }
+  return {
+    calls,
+    origin: input.origin,
+    pathname: input.pathname,
+    search: input.search,
+    hash: input.hash,
+    get href() {
+      return calls.href[calls.href.length - 1] ?? ""
+    },
+    set href(value: string) {
+      calls.href.push(value)
+    },
+    replace(url: string) {
+      calls.replace.push(url)
+    },
+    reload() {
+      calls.reload += 1
+    },
+  }
+}
+
+// Builds a Response with overridable read-only fields (type, redirected, url).
+// happy-dom / Bun expose these as read-only getters, so tests define them.
+function fakeResponse(input: {
+  status?: number
+  headers?: Record<string, string>
+  body?: string
+  type?: string
+  redirected?: boolean
+  url?: string
+}) {
+  const response = new Response(input.body ?? "", {
+    status: input.status ?? 200,
+    headers: input.headers ?? {},
+  })
+  if (input.type !== undefined) Object.defineProperty(response, "type", { value: input.type })
+  if (input.redirected !== undefined) Object.defineProperty(response, "redirected", { value: input.redirected })
+  if (input.url !== undefined) Object.defineProperty(response, "url", { value: input.url })
+  return response
 }
 
 describe("authFromToken", () => {
@@ -166,5 +278,200 @@ describe("redirectToLogin", () => {
     const second = fakeLocation({ origin: "http://localhost:4096", pathname: "/second", search: "" })
     redirectToLogin(second)
     expect(second.href).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isCloudflareAccessSessionExpiredResponse — E2 red: Cloudflare Access expiry
+// detection on fetch responses. Additive; MUST return false for the 401 branch.
+// ---------------------------------------------------------------------------
+
+describe("isCloudflareAccessSessionExpiredResponse", () => {
+  const origin = "http://localhost:4096"
+
+  // --- positive signals ---
+  test("true for an opaqueredirect response", async () => {
+    const response = fakeResponse({ status: 0, type: "opaqueredirect" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  test("true for a redirect to a different origin", async () => {
+    const response = fakeResponse({ status: 200, redirected: true, url: "https://remote.example.com/landing" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  test("true for a redirect to a cloudflareaccess.com host", async () => {
+    const response = fakeResponse({ status: 200, redirected: true, url: "https://team.cloudflareaccess.com/cdn-cgi/access/login" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  test("true for a 403 carrying a cf-mitigated header", async () => {
+    const response = fakeResponse({ status: 403, headers: { "cf-mitigated": "challenge" } })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  test("true for a 403 whose body contains a Cloudflare Access marker", async () => {
+    const response = fakeResponse({ status: 403, body: "<html>Redirecting to cloudflareaccess.com …</html>" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  test("true for a 403 whose body contains a __cf_chl challenge marker", async () => {
+    const response = fakeResponse({ status: 403, body: "window.__cf_chl_opt = {}" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(true)
+  })
+
+  // --- negative signals ---
+  test("false for an ordinary same-origin 403 with no cf marker", async () => {
+    const response = fakeResponse({ status: 403, body: "Forbidden: you lack permission" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(false)
+  })
+
+  test("false for a same-origin redirect with no cloudflareaccess host", async () => {
+    const response = fakeResponse({ status: 200, redirected: true, url: `${origin}/session/abc` })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(false)
+  })
+
+  test("false for a same-origin HTTP 401 (owned by the existing 401 branch)", async () => {
+    const response = fakeResponse({ status: 401, url: `${origin}/api/session` })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(false)
+  })
+
+  test("false for a remote-origin HTTP 401", async () => {
+    const response = fakeResponse({ status: 401, url: "https://remote.example.com/api/session" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(false)
+  })
+
+  test("false for a normal 2xx response", async () => {
+    const response = fakeResponse({ status: 200, url: `${origin}/api/session`, body: "ok" })
+    expect(await isCloudflareAccessSessionExpiredResponse(response, origin)).toBe(false)
+  })
+
+  // --- body preservation: the detector must clone, never consume ---
+  test("leaves the original 403 body readable for the caller (uses response.clone())", async () => {
+    const response = fakeResponse({ status: 403, body: "contains cloudflareaccess.com marker" })
+    await isCloudflareAccessSessionExpiredResponse(response, origin)
+    expect(response.bodyUsed).toBe(false)
+    expect(await response.text()).toBe("contains cloudflareaccess.com marker")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// recoverFromCloudflareAccessSessionExpiry — E2 red: full-document recovery
+// that bypasses the service worker with an injectable location/serviceWorker.
+// ---------------------------------------------------------------------------
+
+describe("recoverFromCloudflareAccessSessionExpiry", () => {
+  beforeEach(() => {
+    resetCloudflareRecoveryInFlight()
+  })
+
+  test("navigates with location.replace (not assign) using a cache-bust param on the current path", async () => {
+    const loc = fakeRecoveryLocation()
+    await recoverFromCloudflareAccessSessionExpiry({ location: loc, cacheBust: () => "seed" })
+    expect(loc.calls.replace).toHaveLength(1)
+    expect(loc.calls.href).toHaveLength(0)
+    const target = loc.calls.replace[0] ?? ""
+    expect(target).toContain("/session/abc")
+    expect(target).toContain("seed")
+  })
+
+  test("is idempotent: a second in-flight call does not navigate again", async () => {
+    const loc = fakeRecoveryLocation()
+    // Do not await the first call: its guard must be set synchronously before any await.
+    const first = recoverFromCloudflareAccessSessionExpiry({ location: loc, cacheBust: () => "seed" })
+    await recoverFromCloudflareAccessSessionExpiry({ location: loc, cacheBust: () => "seed" })
+    await first
+    expect(loc.calls.replace).toHaveLength(1)
+  })
+
+  test("unregisters service worker registrations when a serviceWorker dep is provided", async () => {
+    const loc = fakeRecoveryLocation()
+    let unregistered = 0
+    const serviceWorker = {
+      getRegistrations: async () => [
+        { unregister: async () => (unregistered++, true) },
+        { unregister: async () => (unregistered++, true) },
+      ],
+    }
+    await recoverFromCloudflareAccessSessionExpiry({ location: loc, serviceWorker, cacheBust: () => "seed" })
+    expect(unregistered).toBe(2)
+    expect(loc.calls.replace).toHaveLength(1)
+  })
+
+  test("resetCloudflareRecoveryInFlight clears the guard so a later call navigates again", async () => {
+    const loc = fakeRecoveryLocation()
+    await recoverFromCloudflareAccessSessionExpiry({ location: loc, cacheBust: () => "seed" })
+    expect(loc.calls.replace).toHaveLength(1)
+    resetCloudflareRecoveryInFlight()
+    await recoverFromCloudflareAccessSessionExpiry({ location: loc, cacheBust: () => "seed" })
+    expect(loc.calls.replace).toHaveLength(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createGuardedFetch — E2 red: guarded fetch factory wiring. CF expiry triggers
+// recovery; same-origin 401 keeps the existing /login path; 2xx passes through.
+// ---------------------------------------------------------------------------
+
+describe("createGuardedFetch", () => {
+  const origin = "http://localhost:4096"
+
+  beforeEach(() => {
+    resetRedirectInFlight()
+    resetCloudflareRecoveryInFlight()
+  })
+
+  test("a Cloudflare-expiry response triggers recovery and still returns the response", async () => {
+    const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
+    let recovered = 0
+    const cfResponse = fakeResponse({ status: 403, headers: { "cf-mitigated": "challenge" } })
+    const guarded = createGuardedFetch(async () => cfResponse, {
+      location: loc,
+      recover: async () => {
+        recovered += 1
+      },
+    })
+    const result = await guarded("http://localhost:4096/api/session")
+    expect(recovered).toBe(1)
+    expect(result).toBe(cfResponse)
+  })
+
+  test("a same-origin 401 still triggers the existing redirectToLogin path, not CF recovery", async () => {
+    const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
+    let recovered = 0
+    const unauthorized = fakeResponse({ status: 401, url: `${origin}/api/session` })
+    const guarded = createGuardedFetch(async () => unauthorized, {
+      location: loc,
+      recover: async () => {
+        recovered += 1
+      },
+    })
+    const result = await guarded("http://localhost:4096/api/session")
+    expect(recovered).toBe(0)
+    expect(loc.calls.href).toHaveLength(1)
+    expect(loc.calls.href[0]).toBe("/login?redirect=%2Fsession%2Fabc")
+    expect(result).toBe(unauthorized)
+  })
+
+  test("a normal 2xx response passes through untouched", async () => {
+    const loc = fakeRecoveryLocation({ origin, pathname: "/session/abc", search: "", hash: "" })
+    let recovered = 0
+    const ok = fakeResponse({ status: 200, url: `${origin}/api/session`, body: "ok" })
+    const guarded = createGuardedFetch(async () => ok, {
+      location: loc,
+      recover: async () => {
+        recovered += 1
+      },
+    })
+    const result = await guarded("http://localhost:4096/api/session")
+    expect(recovered).toBe(0)
+    expect(loc.calls.href).toHaveLength(0)
+    expect(loc.calls.replace).toHaveLength(0)
+    expect(result).toBe(ok)
+  })
+
+  test("preserves the Bun fetch preconnect property", () => {
+    const guarded = createGuardedFetch(async () => fakeResponse({ status: 200 }), { location: fakeRecoveryLocation() })
+    expect(guarded.preconnect).toBe(fetch.preconnect)
   })
 })
