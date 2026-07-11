@@ -88,6 +88,7 @@ export async function isCloudflareAccessSessionExpiredResponse(
   currentOrigin: string,
 ): Promise<boolean> {
   if (response.type === "opaqueredirect") return true
+  if (response.status === 401) return false
   if (response.redirected) {
     const url = URL.parse(response.url)
     if (
