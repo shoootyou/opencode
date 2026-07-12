@@ -21,17 +21,24 @@ export const UI_UPSTREAM = new URL("https://app.opencode.ai")
 // call site) so import.meta.dirname always resolves relative to this file.
 export const LOCAL_WEB_UI_DIR = path.resolve(import.meta.dirname, "../../../../app/dist")
 
-export const csp = (hash = "") =>
-  `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src * data:`
+export const csp = (hashes: string[] = []) =>
+  `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hashes.map((hash) => ` 'sha256-${hash}'`).join("")}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src * data:`
 export const DEFAULT_CSP = csp()
 
-export function themePreloadHash(body: string) {
-  return body.match(/<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i)
+// Matches every inline (no `src` attribute) `<script id="oc-*-preload-script">`
+// tag, e.g. oc-theme-preload-script and oc-viewport-preload-script — see
+// packages/app/vite.js's inlinePreloadScript plugin, which inlines each
+// preload script under this id naming convention at build time.
+const PRELOAD_SCRIPT_PATTERN =
+  /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-[\w-]*-preload-script\1[^>]*>([\s\S]*?)<\/script>/gi
+
+export function preloadScriptBodies(body: string) {
+  return [...body.matchAll(PRELOAD_SCRIPT_PATTERN)].map((match) => match[2])
 }
 
 export function cspForHtml(body: string) {
-  const match = themePreloadHash(body)
-  return csp(match ? createHash("sha256").update(match[2]).digest("base64") : "")
+  const hashes = preloadScriptBodies(body).map((script) => createHash("sha256").update(script).digest("base64"))
+  return csp(hashes)
 }
 
 function requestBody(request: HttpServerRequest.HttpServerRequest) {
