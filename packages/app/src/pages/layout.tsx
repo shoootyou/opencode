@@ -2304,7 +2304,13 @@ export default function LegacyLayout(props: ParentProps) {
   )
 
   return (
-    <div class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
+    <div
+      class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
+      style={{
+        "padding-top": "env(safe-area-inset-top, 0px)",
+        "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+      }}
+    >
       {autoselecting() ?? ""}
       <Titlebar update={titlebarUpdate} />
       <Show when={updateVersion() !== undefined}>
