@@ -19,6 +19,11 @@
  *   - The safe-area padding MUST use the `env()` CSS function with an explicit `0px` fallback
  *     (matches `NewLayout`'s pattern exactly), not a bare `env(safe-area-inset-top)` without a
  *     fallback, and not a hardcoded pixel value.
+ *   - The root div's class marker MUST occur EXACTLY ONCE in the file. `extractRootDivOpenTag`
+ *     locates the element via `source.indexOf(classMarker)`, which only ever inspects the
+ *     FIRST match — a second render path introduced later (e.g. a mobile-specific branch)
+ *     reusing the same class string would silently go unpatched while this test kept passing
+ *     against the first instance. This uniqueness guard closes that gap (E6 audit finding).
  * @testability
  *   `env()` and computed styles are not observable via DOM mount under `bun test`'s environment
  *   (happy-dom does not resolve `env()`), and `LegacyLayout` pulls in heavy app-wide context
@@ -41,11 +46,14 @@ const layoutPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "layo
 
 // The root shell div's stable class string (unique in the file — used as an anchor to locate
 // the exact JSX element under test, independent of line-number drift elsewhere in this large
-// file). Captures from the class attribute up to the next `>` that closes the opening tag,
-// tolerating either a self-closing single-line div or one with a subsequent `style={{...}}`.
+// file). Module-level so both the extraction helper and the uniqueness guard test below share
+// the exact same literal — never duplicate this string.
+const classMarker =
+  'class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"'
+
+// Captures from the class attribute up to the next `>` that closes the opening tag, tolerating
+// either a self-closing single-line div or one with a subsequent `style={{...}}`.
 function extractRootDivOpenTag(source: string): string {
-  const classMarker =
-    'class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"'
   const classIndex = source.indexOf(classMarker)
   if (classIndex === -1) return ""
   // Walk back to the start of the opening tag ("<div").
@@ -63,6 +71,17 @@ describe("LegacyLayout root shell — safe-area-inset padding (Safari standalone
     const source = await readFile(layoutPath, "utf8")
     const openTag = extractRootDivOpenTag(source)
     expect(openTag).not.toBe("")
+  })
+
+  test("root shell div's class marker occurs exactly once in the file (uniqueness guard)", async () => {
+    // extractRootDivOpenTag() locates the element via source.indexOf(classMarker), which only
+    // ever inspects the FIRST match. If a second render path were introduced later reusing the
+    // same class string, indexOf would keep resolving to the first instance and every test
+    // above would silently validate only that one — an unpatched second instance would regress
+    // undetected. This guard fails loudly the moment that assumption is violated.
+    const source = await readFile(layoutPath, "utf8")
+    const occurrences = source.split(classMarker).length - 1
+    expect(occurrences).toBe(1)
   })
 
   test("root shell div applies env(safe-area-inset-top, 0px) as padding-top", async () => {

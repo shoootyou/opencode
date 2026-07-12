@@ -16,6 +16,10 @@
  *   - Uses the same source-text-parsing approach as `./layout.test.tsx` and `../pwa.test.ts`
  *     for consistency, and so both layouts are asserted the identical way (apples-to-apples
  *     parity check).
+ *   - The root div's class marker MUST occur EXACTLY ONCE in the file, mirroring the same
+ *     uniqueness guard added to `./layout.test.tsx` (E6 audit finding) — protects against
+ *     `extractRootDivOpenTag`'s first-match `indexOf` behavior silently validating the wrong
+ *     render path if this file ever grows a second one.
  * @testability
  *   Same rationale as `./layout.test.tsx`: `env()` is not observable via DOM mount under
  *   `bun test`'s happy-dom environment, so this parses source text rather than mounting.
@@ -31,9 +35,12 @@ import { fileURLToPath } from "node:url"
 
 const layoutNewPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "layout-new.tsx")
 
+// Module-level so both the extraction helper and the uniqueness guard test below share the
+// exact same literal — never duplicate this string.
+const classMarker =
+  'class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"'
+
 function extractRootDivOpenTag(source: string): string {
-  const classMarker =
-    'class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"'
   const classIndex = source.indexOf(classMarker)
   if (classIndex === -1) return ""
   const tagStart = source.lastIndexOf("<div", classIndex)
@@ -48,6 +55,15 @@ describe("NewLayout root shell — safe-area-inset padding (non-regression pin)"
     const source = await readFile(layoutNewPath, "utf8")
     const openTag = extractRootDivOpenTag(source)
     expect(openTag).not.toBe("")
+  })
+
+  test("root shell div's class marker occurs exactly once in the file (uniqueness guard)", async () => {
+    // Mirrors the same guard added to ./layout.test.tsx (E6 audit finding): protects against
+    // extractRootDivOpenTag()'s first-match indexOf() behavior silently validating the wrong
+    // render path if this file ever grows a second one reusing the same class string.
+    const source = await readFile(layoutNewPath, "utf8")
+    const occurrences = source.split(classMarker).length - 1
+    expect(occurrences).toBe(1)
   })
 
   test("root shell div applies env(safe-area-inset-top, 0px) as padding-top", async () => {
