@@ -101,28 +101,36 @@
  *
  * ---------------------------------------------------------------------------
  * @spec-handoff (plan 135 — Safari standalone PWA viewport-clipping fix)
- *   Drift guard for `index.css`'s `@media (display-mode: standalone) { #root { height: 100vh } }`
+ *   Drift guard for `index.css`'s `@media (display-mode: standalone) { #root { height: ... } }`
  *   rule. Confirmed root cause (E1) and locked spec (E2): this rule is the VALIDATED-FINE
  *   trigger that, combined with `LegacyLayout`'s missing safe-area padding (see
- *   `./pages/layout.test.tsx`), causes the reported clipping. The fix is scoped entirely to
- *   `LegacyLayout`'s root div — this CSS rule is explicitly NOT changed by E4.
- * @interface index.css `@media (display-mode: standalone) { #root { height: 100vh } }`
+ *   `./pages/layout.test.tsx`), causes the reported clipping. The fix was scoped entirely to
+ *   `LegacyLayout`'s root div at E4 — this CSS rule was explicitly NOT changed by E4.
+ *
+ *   E10 is the deliberate, spec-driven follow-up: Safari's dynamic toolbar/keyboard changes
+ *   fire `visualViewport` resize without necessarily firing `window` resize, so a bare `100vh`
+ *   fallback still drifts stale between those events. The rule now reads its height from the
+ *   `--app-viewport-height` custom property (kept in sync by `oc-viewport-preload.js`, see
+ *   `./viewport-preload.test.ts`), falling back to the original literal `100vh` via `var()`'s
+ *   second argument when the property is unset (e.g. JS disabled, or non-standalone mode).
+ *   This is an intentional, additive change to the previously-pinned rule — not drift.
+ * @interface index.css `@media (display-mode: standalone) { #root { height: var(--app-viewport-height, 100vh) } }`
  *   File: packages/app/src/index.css, lines ~20-25.
  * @behavior
- *   This test is a non-regression / drift-guard PIN, not a red-phase test: it MUST pass today,
- *   against current `dev`, AND continue to pass after E4's LegacyLayout fix lands (E4 never
- *   touches `index.css`). It exists so a future incidental edit to this block (e.g. someone
- *   "cleaning up" the CSS while touching the safe-area fix) fails loudly instead of silently
- *   drifting the fix's other validated-fine half out from under it.
+ *   This test is a non-regression / drift-guard PIN: it MUST pass after E10/E12 land the
+ *   `var(--app-viewport-height, 100vh)` form, and continue to pass afterward. It exists so a
+ *   future incidental edit to this block fails loudly instead of silently drifting either half
+ *   of the fix (the CSS consumer or the `--app-viewport-height` fallback) out from under it.
  * @edge-cases
  *   - The rule MUST remain scoped to the `@media (display-mode: standalone)` block (not
  *     applied unconditionally to `#root`), and MUST still target `#root` specifically (not a
  *     class or a different selector).
- *   - The declared value MUST remain exactly `100vh` (not `100dvh`, not a calc() expression) -
- *     any change here is a deliberate, separate decision requiring its own spec, not a
- *     drive-by edit alongside the safe-area padding fix.
+ *   - The declared value MUST be `var(--app-viewport-height, 100vh)` — the fallback inside
+ *     `var()` MUST remain exactly `100vh` (not `100dvh`, not a calc() expression), and no bare
+ *     un-`var()`-wrapped `height: 100vh` declaration may remain in the block.
  * @see ./index.css
- * @see ./pages/layout.test.tsx (the companion red-phase test for the actual fix)
+ * @see ./viewport-preload.test.ts (the oc-viewport-preload.js contract that feeds this property)
+ * @see ./pages/layout.test.tsx (the companion E4 red-phase test for the safe-area fix)
  * @see ../../../.yui-soul/plans/wip/135-opencode-safari-pwa-viewport-fix/e1-root-cause-investigation.md
  */
 
@@ -352,8 +360,8 @@ function extractStandaloneMediaBlock(source: string): string {
 
 describe("index.css standalone-mode #root height drift guard (plan 135)", () => {
   // Non-regression pin: this rule is the confirmed-fine half of the viewport-clipping fix
-  // (E1/E2). It MUST stay exactly as-is, scoped to the standalone media query, targeting
-  // #root, at 100vh — both before AND after E4's LegacyLayout safe-area padding fix lands.
+  // (E1/E2), additively revised at E10/E12 to read `--app-viewport-height` (kept in sync by
+  // oc-viewport-preload.js) with the original `100vh` literal kept as the var() fallback.
   const indexCssPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.css")
 
   test("the standalone-mode media block exists and is not empty", async () => {
@@ -362,10 +370,10 @@ describe("index.css standalone-mode #root height drift guard (plan 135)", () => 
     expect(block).not.toBe("")
   })
 
-  test("the standalone-mode block still targets #root with height: 100vh", async () => {
+  test("the standalone-mode block still targets #root with height: var(--app-viewport-height, 100vh)", async () => {
     const source = await readFile(indexCssPath, "utf8")
     const block = extractStandaloneMediaBlock(source)
-    expect(block).toMatch(/#root\s*\{[^}]*height:\s*100vh[^}]*\}/)
+    expect(block).toMatch(/#root\s*\{[^}]*height:\s*var\(--app-viewport-height,\s*100vh\)[^}]*\}/)
   })
 
   test("the height:100vh rule is NOT applied to #root outside the standalone media query", async () => {
@@ -378,10 +386,21 @@ describe("index.css standalone-mode #root height drift guard (plan 135)", () => 
     expect(rest).not.toMatch(/#root\s*\{[^}]*height:\s*100vh[^}]*\}/)
   })
 
-  test("the rule uses exactly 100vh, not 100dvh or a calc() expression", async () => {
+  test("the rule's var() fallback uses exactly 100vh, not 100dvh or a calc() expression", async () => {
     const source = await readFile(indexCssPath, "utf8")
     const block = extractStandaloneMediaBlock(source)
     expect(block).not.toMatch(/height:\s*100dvh/)
     expect(block).not.toMatch(/height:\s*calc\(/)
+    // The fallback value INSIDE var(--app-viewport-height, ...) must itself be exactly 100vh.
+    expect(block).toMatch(/var\(--app-viewport-height,\s*100vh\)/)
+    expect(block).not.toMatch(/var\(--app-viewport-height,\s*100dvh\)/)
+    expect(block).not.toMatch(/var\(--app-viewport-height,\s*calc\([^)]*\)\)/)
+  })
+
+  test("the block references --app-viewport-height and has no bare un-var()-wrapped height: 100vh", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    expect(block).toContain("--app-viewport-height")
+    expect(block).not.toMatch(/height:\s*100vh\s*;/)
   })
 })
