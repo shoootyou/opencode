@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js"
+import { createSignal, type JSX } from "solid-js"
 import { createComponent, Show, template } from "solid-js/web"
 import { useRegisterSW } from "virtual:pwa-register/solid"
 
@@ -26,7 +26,11 @@ export function PwaUpdatePrompt() {
     setShow(false)
   }
 
-  return createComponent(Show, {
+  // `Show` is an overloaded function (keyed/non-keyed). Both `Parameters<typeof Show>`
+  // and generic inference on `createComponent`'s `Comp` parameter resolve to the last
+  // (keyed) overload, so the props type is pinned explicitly to the actual non-keyed
+  // shape instead of relying on inference.
+  return createComponent<{ when: unknown; keyed?: false; fallback?: JSX.Element; children: JSX.Element }>(Show, {
     get when() {
       return show() && needRefresh()
     },
@@ -39,5 +43,5 @@ export function PwaUpdatePrompt() {
       _dismissBtn.addEventListener("click", handleDismiss)
       return _el
     },
-  } as Parameters<typeof Show>[0])
+  })
 }
