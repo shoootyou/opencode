@@ -18,9 +18,14 @@
 }
 
 @media (display-mode: standalone) {
-  /* WebKit excludes safe-area insets from dvh in installed apps. */
+  /* WebKit excludes safe-area insets from dvh in installed apps, and on some
+     iOS/device geometries 100vh itself renders taller than the true visible
+     viewport (WebKit bug #313800). oc-viewport-preload.js sets
+     --app-viewport-height from window.visualViewport before first paint and
+     keeps it in sync on resize/orientation/keyboard changes; 100vh is kept
+     ONLY as the fallback for the (normally unreachable) pre-script instant. */
   #root {
-    height: 100vh;
+    height: var(--app-viewport-height, 100vh);
   }
 }
 
