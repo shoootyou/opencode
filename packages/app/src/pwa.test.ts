@@ -132,6 +132,26 @@
  * @see ./viewport-preload.test.ts (the oc-viewport-preload.js contract that feeds this property)
  * @see ./pages/layout.test.tsx (the companion E4 red-phase test for the safe-area fix)
  * @see ../../../.yui-soul/plans/wip/135-opencode-safari-pwa-viewport-fix/e1-root-cause-investigation.md
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (E14 remediation — cross-file custom-property name consistency)
+ *   The `--app-viewport-height` property name is duplicated across FOUR
+ *   independent locations: oc-viewport-preload.js (as `PROPERTY`), index.css
+ *   (inside `var(...)`), and each production file's own co-located test with
+ *   its OWN hardcoded copy of the string. Renaming the property in the JS
+ *   file plus its own test's hardcoded copy leaves ALL other tests green
+ *   while silently breaking the fix, because nothing ever compares the two
+ *   PRODUCTION sources against each other.
+ * @interface (test-only) extracts the property name literal from the actual
+ *   source of oc-viewport-preload.js (`PROPERTY = "([^"]+)"`) and from the
+ *   actual source of index.css (`var\((--[\w-]+),`), then asserts equality.
+ * @behavior
+ *   MUST pass today (the two production files currently agree). Its value is
+ *   as a drift guard: if either file's property name changes without the
+ *   other, this test — reading real source, not a third hardcoded copy —
+ *   fails loudly instead of leaving the suite green.
+ * @see ./viewport-preload.test.ts
+ * @see ../public/oc-viewport-preload.js
  */
 
 import { describe, expect, test } from "bun:test"
@@ -402,5 +422,34 @@ describe("index.css standalone-mode #root height drift guard (plan 135)", () => 
     const block = extractStandaloneMediaBlock(source)
     expect(block).toContain("--app-viewport-height")
     expect(block).not.toMatch(/height:\s*100vh\s*;/)
+  })
+})
+
+describe("oc-viewport-preload.js ↔ index.css custom-property name consistency (E14 remediation)", () => {
+  const jsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "oc-viewport-preload.js")
+  const indexCssPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.css")
+
+  test("the CSS custom property name is IDENTICAL between the JS source and the CSS source", async () => {
+    const jsSource = await readFile(jsPath, "utf8")
+    const cssSource = await readFile(indexCssPath, "utf8")
+
+    const jsMatch = jsSource.match(/PROPERTY\s*=\s*"([^"]+)"/)
+    const cssMatch = cssSource.match(/var\((--[\w-]+),/)
+
+    expect(jsMatch).not.toBeNull()
+    expect(cssMatch).not.toBeNull()
+
+    const jsProperty = jsMatch?.[1]
+    const cssProperty = cssMatch?.[1]
+
+    // Both values are extracted from the ACTUAL production source files (not
+    // a third hardcoded copy in this test), so if either file's property name
+    // drifts from the other, this assertion fails — closing the gap where
+    // renaming the JS property (and its own co-located test's hardcoded
+    // string) left every existing test green while silently breaking the fix
+    // end-to-end. If this test is ever renamed/removed such that neither side
+    // reads live source, it stops being load-bearing — keep both regexes
+    // pointed at the real files, never at literals.
+    expect(jsProperty).toBe(cssProperty)
   })
 })
