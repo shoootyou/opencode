@@ -61,6 +61,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { coalesceServerEvents, enqueueServerEvent, isUnauthorizedSseError, resumeStreamAfterPageShow } from "./server-sdk"
+import { createSdkForServer } from "@/utils/server"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 
 // E2 red phase: isCloudflareAccessSessionExpiredSseError does not exist yet in
@@ -346,5 +347,42 @@ describe("enqueueServerEvent", () => {
     enqueue("busy")
 
     expect(events).toHaveLength(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Plan 136 E2 RED — redirect: "manual" wiring on the SSE (eventSdk) path.
+//
+// Captures the actual Request reaching baseFetch on the SSE call path and
+// asserts .redirect === "manual". Must fail on current code (redirect defaults
+// to "follow" because createSdkForServer does not yet set redirect:"manual").
+// Must pass after E3 without modification.
+// ---------------------------------------------------------------------------
+
+describe("createSdkForServer — SSE path: Request reaching baseFetch has redirect === 'manual' (Plan 136 E2)", () => {
+  test("SSE (eventSdk) path: Request reaching baseFetch has redirect === 'manual'", async () => {
+    // Spy at baseFetch level: captures the Request before createGuardedFetch's wrapper
+    // returns it up the chain. Returns a null-body 200 so the SSE generator immediately
+    // throws "No body in SSE response"; sseMaxRetryAttempts:0 stops the retry loop so
+    // the test does not block. capturedRequest is already set at that point.
+    let capturedRequest: Request | undefined
+    const spyFetch = async (input: Parameters<typeof fetch>[0]) => {
+      capturedRequest = input instanceof Request ? input : new Request(input)
+      return new Response(null, { status: 200 })
+    }
+    const sdk = createSdkForServer({
+      server: { url: "http://localhost:4096" },
+      fetch: spyFetch as typeof fetch,
+    })
+    // global.event() is the SSE call. sseMaxRetryAttempts:0 ensures the generator
+    // exits after the first failed fetch so stream.next() resolves promptly.
+    const result = await sdk.global.event({ sseMaxRetryAttempts: 0 } as never)
+    // Advance the async generator one step: this triggers the first _fetch(request)
+    // call inside createStream(), setting capturedRequest before the generator
+    // throws for the missing body and terminates.
+    await result.stream.next()
+    // MUST FAIL on current code: redirect defaults to "follow".
+    // MUST PASS after E3 adds redirect:"manual" to createSdkForServer's config.
+    expect(capturedRequest?.redirect).toBe("manual")
   })
 })
