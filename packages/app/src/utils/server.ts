@@ -212,6 +212,11 @@ export function createSdkForServer({
 
   return createOpencodeClient({
     ...config,
+    // "manual" is required so Cloudflare Access redirects produce an opaqueredirect
+    // Response instead of a CORS TypeError, making isCloudflareAccessSessionExpiredResponse's
+    // opaqueredirect branch reachable for recovery. Must come after ...config so it
+    // deterministically wins over any caller-supplied redirect value.
+    redirect: "manual",
     fetch: createGuardedFetch(baseFetch),
     headers: {
       ...(config.headers instanceof Headers ? Object.fromEntries(config.headers.entries()) : config.headers),
