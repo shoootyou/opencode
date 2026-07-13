@@ -44,17 +44,39 @@
  *
  * @see ./ui.ts (serveEmbeddedUIEffect is the structural sibling for the embedded path)
  * @see ../../effect/runtime-flags.ts (add OPENCODE_LOCAL_WEB_UI -> localWebUi flag)
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (plan 135 E14 remediation — CSP hash allowlist must cover ALL
+ *   inline preload scripts, not just the theme one)
+ * @interface cspForHtml(body: string): string
+ * @behavior
+ *   packages/app/vite.js's inlinePreloadScript plugin inlines BOTH
+ *   oc-theme-preload-script and oc-viewport-preload-script as `<script
+ *   id="...">body</script>` tags with no `src` attribute in the built HTML
+ *   (packages/app/index.html has both as `src=` tags pre-build; vite rewrites
+ *   them at build time). cspForHtml's script-src directive MUST allowlist the
+ *   SHA-256 hash of EVERY such inline script found in the body, not only the
+ *   first/hardcoded `oc-theme-preload-script` id — otherwise the browser
+ *   silently blocks execution of any inline script whose hash is missing.
+ * @edge-cases
+ *   - HTML with only the theme script → one hash (existing, unchanged).
+ *   - HTML with BOTH theme and viewport inline scripts → TWO hashes, one per
+ *     script body, both present in script-src.
+ * @see ./ui.ts (csp, themePreloadHash, cspForHtml)
+ * @see ../../../../app/vite.js (inlinePreloadScript — the build-time inliner
+ *   that produces the multi-inline-script HTML this test reproduces)
  */
 
 import { describe, expect, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
+import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 // RED PHASE: these named exports do not exist yet in ./ui.ts.
-import { resolveLocalUIFile, serveLocalUIEffect, serveEmbeddedUIEffect } from "./ui"
+import { resolveLocalUIFile, serveLocalUIEffect, serveEmbeddedUIEffect, cspForHtml } from "./ui"
 import { tmpdir } from "../../../test/fixture/fixture"
 
 // Run an Effect that only needs the real FSUtil service against the node filesystem.
@@ -344,6 +366,50 @@ describe("serveEmbeddedUIEffect", () => {
 
     expect(csp).toBeDefined()
     expect(csp).toMatch(/^default-src/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// cspForHtml — multi-inline-script hash allowlist (plan 135 E14 remediation)
+// ---------------------------------------------------------------------------
+
+describe("cspForHtml multi-script hash allowlist (E14 remediation)", () => {
+  test("includes SHA-256 hashes for BOTH inline preload scripts (theme + viewport), not just one", () => {
+    const themeBody = "document.documentElement.dataset.theme = 'dark'"
+    const viewportBody = "document.documentElement.style.setProperty('--app-viewport-height', '100px')"
+    // Shape mirrors packages/app/vite.js's inlinePreloadScript output: both
+    // preload scripts inlined with no `src` attribute.
+    const html = [
+      "<!doctype html><html><head>",
+      `<script id="oc-theme-preload-script">${themeBody}</script>`,
+      `<script id="oc-viewport-preload-script">${viewportBody}</script>`,
+      "</head><body></body></html>",
+    ].join("\n")
+
+    const header = cspForHtml(html)
+
+    const themeHash = createHash("sha256").update(themeBody).digest("base64")
+    const viewportHash = createHash("sha256").update(viewportBody).digest("base64")
+
+    // RED: current cspForHtml only ever hashes the hardcoded
+    // oc-theme-preload-script id, so the viewport script's hash is missing
+    // and the browser blocks it under this CSP.
+    expect(header).toContain(`'sha256-${themeHash}'`)
+    expect(header).toContain(`'sha256-${viewportHash}'`)
+
+    const hashCount = (header.match(/'sha256-/g) ?? []).length
+    expect(hashCount).toBe(2)
+  })
+
+  test("still hashes the theme script alone when it is the only inline script present", () => {
+    const themeBody = "document.documentElement.dataset.theme = 'dark'"
+    const html = `<!doctype html><html><head><script id="oc-theme-preload-script">${themeBody}</script></head></html>`
+
+    const header = cspForHtml(html)
+    const themeHash = createHash("sha256").update(themeBody).digest("base64")
+
+    expect(header).toContain(`'sha256-${themeHash}'`)
+    expect((header.match(/'sha256-/g) ?? []).length).toBe(1)
   })
 })
 

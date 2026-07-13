@@ -98,6 +98,60 @@
  *       consumed INSIDE the `workbox: { ... }` options block (scoped parse), not
  *       merely imported at the top of the file. The existing "no re-inlined
  *       literal array" assertions are kept.
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (plan 135 — Safari standalone PWA viewport-clipping fix)
+ *   Drift guard for `index.css`'s `@media (display-mode: standalone) { #root { height: ... } }`
+ *   rule. Confirmed root cause (E1) and locked spec (E2): this rule is the VALIDATED-FINE
+ *   trigger that, combined with `LegacyLayout`'s missing safe-area padding (see
+ *   `./pages/layout.test.tsx`), causes the reported clipping. The fix was scoped entirely to
+ *   `LegacyLayout`'s root div at E4 — this CSS rule was explicitly NOT changed by E4.
+ *
+ *   E10 is the deliberate, spec-driven follow-up: Safari's dynamic toolbar/keyboard changes
+ *   fire `visualViewport` resize without necessarily firing `window` resize, so a bare `100vh`
+ *   fallback still drifts stale between those events. The rule now reads its height from the
+ *   `--app-viewport-height` custom property (kept in sync by `oc-viewport-preload.js`, see
+ *   `./viewport-preload.test.ts`), falling back to the original literal `100vh` via `var()`'s
+ *   second argument when the property is unset (e.g. JS disabled, or non-standalone mode).
+ *   This is an intentional, additive change to the previously-pinned rule — not drift.
+ * @interface index.css `@media (display-mode: standalone) { #root { height: var(--app-viewport-height, 100vh) } }`
+ *   File: packages/app/src/index.css, lines ~20-25.
+ * @behavior
+ *   This test is a non-regression / drift-guard PIN: it MUST pass after E10/E12 land the
+ *   `var(--app-viewport-height, 100vh)` form, and continue to pass afterward. It exists so a
+ *   future incidental edit to this block fails loudly instead of silently drifting either half
+ *   of the fix (the CSS consumer or the `--app-viewport-height` fallback) out from under it.
+ * @edge-cases
+ *   - The rule MUST remain scoped to the `@media (display-mode: standalone)` block (not
+ *     applied unconditionally to `#root`), and MUST still target `#root` specifically (not a
+ *     class or a different selector).
+ *   - The declared value MUST be `var(--app-viewport-height, 100vh)` — the fallback inside
+ *     `var()` MUST remain exactly `100vh` (not `100dvh`, not a calc() expression), and no bare
+ *     un-`var()`-wrapped `height: 100vh` declaration may remain in the block.
+ * @see ./index.css
+ * @see ./viewport-preload.test.ts (the oc-viewport-preload.js contract that feeds this property)
+ * @see ./pages/layout.test.tsx (the companion E4 red-phase test for the safe-area fix)
+ * @see ../../../.yui-soul/plans/wip/135-opencode-safari-pwa-viewport-fix/e1-root-cause-investigation.md
+ *
+ * ---------------------------------------------------------------------------
+ * @spec-handoff (E14 remediation — cross-file custom-property name consistency)
+ *   The `--app-viewport-height` property name is duplicated across FOUR
+ *   independent locations: oc-viewport-preload.js (as `PROPERTY`), index.css
+ *   (inside `var(...)`), and each production file's own co-located test with
+ *   its OWN hardcoded copy of the string. Renaming the property in the JS
+ *   file plus its own test's hardcoded copy leaves ALL other tests green
+ *   while silently breaking the fix, because nothing ever compares the two
+ *   PRODUCTION sources against each other.
+ * @interface (test-only) extracts the property name literal from the actual
+ *   source of oc-viewport-preload.js (`PROPERTY = "([^"]+)"`) and from the
+ *   actual source of index.css (`var\((--[\w-]+),`), then asserts equality.
+ * @behavior
+ *   MUST pass today (the two production files currently agree). Its value is
+ *   as a drift guard: if either file's property name changes without the
+ *   other, this test — reading real source, not a third hardcoded copy —
+ *   fails loudly instead of leaving the suite green.
+ * @see ./viewport-preload.test.ts
+ * @see ../public/oc-viewport-preload.js
  */
 
 import { describe, expect, test } from "bun:test"
@@ -302,5 +356,100 @@ describe("PWA allowlist drift guard (vite.config.ts ↔ src/pwa.ts)", () => {
     expect(workbox).not.toBe("")
     expect(workbox).toMatch(/\bnavigateFallbackDenylist\b/)
     expect(workbox).not.toMatch(/navigateFallbackDenylist\s*:\s*\[/)
+  })
+})
+
+// Extracts the body of a `@media (display-mode: standalone) { ... }` block from raw CSS
+// source via brace-counting, mirroring extractWorkboxBlock's approach for vite.config.ts.
+// Returns "" if not found.
+function extractStandaloneMediaBlock(source: string): string {
+  const marker = source.match(/@media\s*\(display-mode:\s*standalone\)\s*\{/)
+  if (!marker || marker.index === undefined) return ""
+  const start = marker.index + marker[0].length
+  let depth = 1
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === "{") depth++
+    else if (ch === "}") {
+      depth--
+      if (depth === 0) return source.slice(start, i)
+    }
+  }
+  return ""
+}
+
+describe("index.css standalone-mode #root height drift guard (plan 135)", () => {
+  // Non-regression pin: this rule is the confirmed-fine half of the viewport-clipping fix
+  // (E1/E2), additively revised at E10/E12 to read `--app-viewport-height` (kept in sync by
+  // oc-viewport-preload.js) with the original `100vh` literal kept as the var() fallback.
+  const indexCssPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.css")
+
+  test("the standalone-mode media block exists and is not empty", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    expect(block).not.toBe("")
+  })
+
+  test("the standalone-mode block still targets #root with height: var(--app-viewport-height, 100vh)", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    expect(block).toMatch(/#root\s*\{[^}]*height:\s*var\(--app-viewport-height,\s*100vh\)[^}]*\}/)
+  })
+
+  test("the height:100vh rule is NOT applied to #root outside the standalone media query", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    // Remove the standalone block from the source, then confirm no stray unscoped
+    // `#root { ... height: 100vh ... }` rule was ALSO added elsewhere (would defeat the
+    // "WebKit excludes safe-area insets from dvh" scoping rationale documented inline).
+    const rest = source.replace(block, "")
+    expect(rest).not.toMatch(/#root\s*\{[^}]*height:\s*100vh[^}]*\}/)
+  })
+
+  test("the rule's var() fallback uses exactly 100vh, not 100dvh or a calc() expression", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    expect(block).not.toMatch(/height:\s*100dvh/)
+    expect(block).not.toMatch(/height:\s*calc\(/)
+    // The fallback value INSIDE var(--app-viewport-height, ...) must itself be exactly 100vh.
+    expect(block).toMatch(/var\(--app-viewport-height,\s*100vh\)/)
+    expect(block).not.toMatch(/var\(--app-viewport-height,\s*100dvh\)/)
+    expect(block).not.toMatch(/var\(--app-viewport-height,\s*calc\([^)]*\)\)/)
+  })
+
+  test("the block references --app-viewport-height and has no bare un-var()-wrapped height: 100vh", async () => {
+    const source = await readFile(indexCssPath, "utf8")
+    const block = extractStandaloneMediaBlock(source)
+    expect(block).toContain("--app-viewport-height")
+    expect(block).not.toMatch(/height:\s*100vh\s*;/)
+  })
+})
+
+describe("oc-viewport-preload.js ↔ index.css custom-property name consistency (E14 remediation)", () => {
+  const jsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "oc-viewport-preload.js")
+  const indexCssPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.css")
+
+  test("the CSS custom property name is IDENTICAL between the JS source and the CSS source", async () => {
+    const jsSource = await readFile(jsPath, "utf8")
+    const cssSource = await readFile(indexCssPath, "utf8")
+
+    const jsMatch = jsSource.match(/PROPERTY\s*=\s*"([^"]+)"/)
+    const cssMatch = cssSource.match(/var\((--[\w-]+),/)
+
+    expect(jsMatch).not.toBeNull()
+    expect(cssMatch).not.toBeNull()
+
+    const jsProperty = jsMatch?.[1]
+    const cssProperty = cssMatch?.[1]
+
+    // Both values are extracted from the ACTUAL production source files (not
+    // a third hardcoded copy in this test), so if either file's property name
+    // drifts from the other, this assertion fails — closing the gap where
+    // renaming the JS property (and its own co-located test's hardcoded
+    // string) left every existing test green while silently breaking the fix
+    // end-to-end. If this test is ever renamed/removed such that neither side
+    // reads live source, it stops being load-bearing — keep both regexes
+    // pointed at the real files, never at literals.
+    expect(jsProperty).toBe(cssProperty)
   })
 })
