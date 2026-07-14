@@ -139,6 +139,7 @@ import {
   authFromToken,
   authTokenFromCredentials,
   buildLoginRedirectUrl,
+  createSdkForServer,
   redirectToLogin,
   resetRedirectInFlight,
   shouldRedirectToLogin,
@@ -779,5 +780,40 @@ describe("createGuardedFetch", () => {
     expect(loc.calls.replace).toHaveLength(1)
     const value = new URL(loc.calls.replace[0] ?? "", loc.origin).searchParams.get("__cf_access_recover")
     expect(value).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Plan 136 E2 RED — redirect: "manual" wiring on the regular SDK call path.
+//
+// These tests capture the actual Request object that reaches baseFetch and
+// assert its .redirect property is "manual". This is distinct from the plan-132
+// tests above, which supply an already-opaque mock Response and test the
+// classifier. The tests below prove the WIRING gap: current code never sets
+// redirect in createSdkForServer's config, so the Request defaults to
+// redirect="follow". E3 will add `redirect: "manual"` to the config, turning
+// these RED tests GREEN.
+// ---------------------------------------------------------------------------
+
+describe("createSdkForServer — redirect mode on Request reaching baseFetch (Plan 136 E2)", () => {
+  test("regular SDK call: Request reaching baseFetch has redirect === 'manual'", async () => {
+    // Spy sits at baseFetch level — NOT inside createGuardedFetch — so it captures
+    // the Request exactly as the SDK constructed it, with .redirect already baked in.
+    let capturedRequest: Request | undefined
+    const spyFetch = async (input: Parameters<typeof fetch>[0]) => {
+      capturedRequest = input instanceof Request ? input : new Request(input)
+      // Return a minimal valid JSON response so the SDK parser does not throw.
+      return new Response("{}", { status: 200 })
+    }
+    const sdk = createSdkForServer({
+      server: { url: "http://localhost:4096" },
+      fetch: spyFetch as typeof fetch,
+    })
+    // global.health() is a GET — the lowest-friction regular (non-SSE) call.
+    await sdk.global.health()
+    // MUST FAIL on current code: redirect defaults to "follow" because
+    // createSdkForServer does not yet pass redirect:"manual" in the config.
+    // MUST PASS after E3 adds redirect:"manual" to createSdkForServer's config.
+    expect(capturedRequest?.redirect).toBe("manual")
   })
 })
