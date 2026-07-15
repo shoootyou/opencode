@@ -12,8 +12,22 @@ import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
+// Internal-only — never serialized, never produced by deserialization.
+// The handler lives here, NOT on the public Command.Info schema, to prevent any
+// config/MCP/markdown deserialization path from ever producing an arbitrary handler
+// (ACE-prevention control — see RFC 001 §A / Ei F1).
+type CommandResult = { title: string; output: string }
+type CommandError = { _tag: "CommandError"; message: string }
+type CommandHandler = (input: {
+  sessionID: string
+  arguments: string
+  subcommand?: string
+  args: string[]
+}) => Effect.Effect<CommandResult, CommandError>
+type BuiltinCommand = Info & { readonly handler: CommandHandler }
+
 type State = {
-  commands: Record<string, Info>
+  commands: Record<string, BuiltinCommand | Info>
 }
 
 export const Event = {
@@ -93,13 +107,38 @@ const layer = Layer.effect(
       }
       commands["reload"] = {
         name: "reload",
-        description: "Reload available skills from disk without restarting",
+        description: "Reload available skills (and in future, plugins) without restarting",
         source: "command",
-        get template() {
-          return "Run reload_skills."
-        },
+        template: "",
         hints: [],
-      }
+        handler: ((input: Parameters<CommandHandler>[0]) =>
+          Effect.gen(function* () {
+            const { subcommand } = input
+            if (subcommand === "plugins")
+              return { title: "/reload plugins", output: "plugins: not available until Phase 2" } as CommandResult
+            if (subcommand !== undefined && subcommand !== "skills")
+              return {
+                title: "/reload",
+                output: `unknown subcommand '${subcommand}'. Valid: skills, plugins`,
+              } as CommandResult
+            // subcommand === "skills" or undefined (bare /reload) → reload skills
+            return yield* skill.refresh().pipe(
+              Effect.map(
+                (list): CommandResult => ({
+                  title: "/reload skills",
+                  output: `skills: reloaded (${list.length} skills)`,
+                }),
+              ),
+              Effect.catchDefect(
+                (err): Effect.Effect<CommandResult> =>
+                  Effect.succeed({
+                    title: "/reload skills",
+                    output: `skills: FAILED (${err instanceof Error ? err.message : String(err)})`,
+                  }),
+              ),
+            )
+          })) as CommandHandler,
+      } as unknown as BuiltinCommand
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
         commands[name] = {

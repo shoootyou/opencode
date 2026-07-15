@@ -1,7 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Ref } from "effect"
+import { Effect, Layer, Context, Schema, Ref, Clock, Semaphore } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import type { Agent } from "@/agent/agent"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -400,5 +400,37 @@ export const node = LayerNode.make({
   layer: layer,
   deps: [Discovery.node, Config.node, EventV2Bridge.node, FSUtil.node, Global.node, RuntimeFlags.node],
 })
+
+// ─── Cooldown + serialization guard ──────────────────────────────────────────
+
+/** Minimum interval between full skill reloads. Must be >= DISPOSE_TIMEOUT_MS. */
+export const RELOAD_COOLDOWN_MS = 5000
+
+/**
+ * Wraps a `doRefresh` Effect with:
+ *  - A binary semaphore (at most one doRefresh running at a time)
+ *  - A cooldown: if the last reload completed < RELOAD_COOLDOWN_MS ago,
+ *    returns the cached result without triggering a new doRefresh.
+ *
+ * Exported for unit-testing (skill/index.test.ts).
+ */
+export function makeRefreshWithGuards(doRefresh: Effect.Effect<Info[]>): Effect.Effect<Info[]> {
+  const sem = Semaphore.makeUnsafe(1)
+  let lastCompletedAt = -Infinity
+  let cachedResult: Info[] = []
+
+  return Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis
+    if (now - lastCompletedAt < RELOAD_COOLDOWN_MS) return cachedResult
+    return yield* sem.withPermits(1)(
+      Effect.gen(function* () {
+        const result = yield* doRefresh
+        lastCompletedAt = yield* Clock.currentTimeMillis
+        cachedResult = result
+        return result
+      }),
+    )
+  })
+}
 
 export * as Skill from "."

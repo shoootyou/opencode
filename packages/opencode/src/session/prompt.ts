@@ -1366,6 +1366,17 @@ const layer = Layer.effect(
         yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
       }
+      if ("handler" in cmd) {
+        const { subcommand, args: parsedArgs } = parseSubcommand(input.arguments ?? "")
+        const handler = (cmd as unknown as { handler: (i: { sessionID: string; arguments: string; subcommand?: string; args: string[] }) => Effect.Effect<CommandResult, never> }).handler
+        const result = yield* handler({
+          sessionID: input.sessionID,
+          arguments: input.arguments ?? "",
+          subcommand,
+          args: parsedArgs,
+        })
+        return buildBuiltinResult(result)
+      }
       const agentName = cmd.agent ?? input.agent
 
       const raw = input.arguments.match(argsRegex) ?? []
@@ -1626,5 +1637,50 @@ export const node = LayerNode.make({
     Database.node,
   ],
 })
+
+// ─── Deterministic command dispatch helpers ───────────────────────────────────
+
+/** The output shape returned by a BuiltinCommand handler. */
+export type CommandResult = { title: string; output: string }
+
+/**
+ * Parse the raw arguments string from a command invocation into a structured
+ * subcommand + rest-args tuple.  Empty / whitespace-only input returns
+ * `{ subcommand: undefined, args: [] }`.
+ */
+export function parseSubcommand(args: string): { subcommand: string | undefined; args: string[] } {
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return { subcommand: undefined, args: [] }
+  return { subcommand: tokens[0], args: tokens.slice(1) }
+}
+
+/**
+ * Wrap a `CommandResult` in a `SessionV1.WithParts` that looks like an
+ * assistant message that terminated cleanly.  Zero token-usage path — no
+ * model stream involved.
+ */
+export function buildBuiltinResult(result: CommandResult): SessionV1.WithParts {
+  const msgID = MessageID.ascending()
+  const sesID = SessionID.descending()
+  const partID = PartID.ascending()
+  return {
+    info: {
+      id: msgID,
+      sessionID: sesID,
+      role: "assistant",
+      time: { created: Date.now() },
+      parentID: msgID,
+      modelID: "" as SessionV1.Assistant["modelID"],
+      providerID: "" as SessionV1.Assistant["providerID"],
+      mode: "",
+      agent: "",
+      path: { cwd: "", root: "" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      finish: "stop",
+    },
+    parts: [{ id: partID, sessionID: sesID, messageID: msgID, type: "text", text: `${result.title}\n${result.output}` }],
+  }
+}
 
 export * as SessionPrompt from "./prompt"
