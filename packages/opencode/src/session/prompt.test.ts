@@ -1,14 +1,15 @@
 /**
  * @spec-handoff
  * @interface parseSubcommand(arguments: string): { subcommand: string | undefined; args: string[] }
- * @interface buildBuiltinResult(result: CommandResult): SessionV1.WithParts
+ * @interface buildBuiltinResult(result: CommandResult, sessionID?: SessionID): SessionV1.WithParts
  * @interface CommandHandler(input: { sessionID: string; arguments: string; subcommand?: string; args: string[] }): Effect.Effect<CommandResult, CommandError>
  * @interface BuiltinCommand = Command.Info & { readonly handler: CommandHandler }
  *
  * @behavior
  *   - When `SessionPrompt.command` resolves a `BuiltinCommand` (i.e. `"handler" in cmd`),
  *     it MUST take the deterministic branch: invoke `cmd.handler(...)`, construct a
- *     `WithParts` via `buildBuiltinResult`, and return immediately — never calling `prompt()`.
+ *     `WithParts` via `buildBuiltinResult`, persist it via `sessions.updateMessage` +
+ *     `sessions.updatePart`, and return it — never calling `prompt()`.
  *   - `parseSubcommand("")` → `{ subcommand: undefined, args: [] }`
  *   - `parseSubcommand("skills")` → `{ subcommand: "skills", args: [] }`
  *   - `parseSubcommand("plugins")` → `{ subcommand: "plugins", args: [] }`
@@ -29,10 +30,16 @@
  *   - After `updateMessage`, it MUST call `Session.Service.updatePart(withParts.parts[0])` exactly
  *     once with `type: "text"` and `text` containing the handler output.
  *   - The `sessionID` field on both the message and the part MUST equal `input.sessionID` exactly.
- *     (Currently broken: `buildBuiltinResult` uses `SessionID.descending()` — a fresh random ID.)
  *   - These two calls cause `Session.Service` to emit `SessionV1.Event.MessageUpdated` and
  *     `SessionV1.Event.PartUpdated` SSE events, which the TUI renders. Without them the user
  *     sees nothing after `/reload skills`.
+ *
+ * @behavior SSE persistence regression — confirmed bugs on HEAD 9ab3853af:
+ *   BUG-1: `SessionPrompt.command` lines 1369-1378 NEVER calls `sessions.updateMessage` or
+ *          `sessions.updatePart` — the BuiltinCommand branch returns the WithParts as the HTTP
+ *          response only, which the TUI discards (void). Zero SSE events emitted → user sees nothing.
+ *   BUG-2: `Skill.Service.refresh()` (skill/index.ts:361-363) calls `doRefresh` directly,
+ *          bypassing `makeRefreshWithGuards`. The cooldown+semaphore guard is dead code.
  *
  * @edge-cases
  *   - Bare `/reload` (arguments = "") → subcommand undefined; Phase 1 handler reloads skills only
@@ -49,6 +56,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
+import type { SessionID } from "./schema"
 
 // These imports target functions that E3 will export from prompt.ts.
 // They do NOT exist yet — every test block that uses them will fail at module
@@ -57,6 +66,7 @@ import { describe, expect, test } from "bun:test"
 import {
   parseSubcommand,
   buildBuiltinResult,
+  dispatchBuiltinCommand,
   type CommandResult as PromptCommandResult,
 } from "./prompt"
 
@@ -378,6 +388,105 @@ describe("BuiltinCommand SSE persistence (regression)", () => {
     expect(part["sessionID"]).toBe(inputSessionID) // RED: currently a fresh random ses_…
     const textPart = part as { text?: string }
     expect(textPart.text).toContain("o")
+  })
+})
+
+describe("REGRESSION: BuiltinCommand branch must persist result via updateMessage + updatePart", () => {
+  // ── Rewritten to invoke PRODUCTION CODE, not inline simulation ───────────────
+  //
+  // The original REGRESSION-1a/1b tests replicated the dispatch branch manually
+  // inside the test body and called spies that were never connected to any
+  // production code path. Those tests could never turn green regardless of what
+  // Kou fixed, because the spy was defined and invoked entirely within the test.
+  //
+  // These rewritten tests call `dispatchBuiltinCommand` — the exported production
+  // helper that encapsulates the exact lines 1378-1381 of prompt.ts:
+  //
+  //   yield* sessions.updateMessage(wp.info)
+  //   yield* sessions.updatePart(wp.parts[0])
+  //   return wp
+  //
+  // A minimal Effect-based Session double (not a plain object spy) is injected
+  // so that its Effect methods are actually `yield*`-ed by the production code.
+  //
+  // GREEN ↔ fix present: Kou's fix added those two lines in prompt.ts. When
+  // `dispatchBuiltinCommand` (extracted from those exact lines) is called, both
+  // counts increment.
+  //
+  // Revert-sensitivity: if you remove `yield* sessions.updateMessage(wp.info)` or
+  // `yield* sessions.updatePart(wp.parts[0])` from `dispatchBuiltinCommand` in
+  // prompt.ts, these tests go red immediately — they directly execute that code.
+
+  test("REGRESSION-1a: dispatchBuiltinCommand calls updateMessage exactly once with the wp result", async () => {
+    const updateMessageCalls: unknown[] = []
+    const updatePartCalls: unknown[] = []
+
+    // Effect-based session double — methods return Effect.Effect, matching the
+    // Session.Service interface that dispatchBuiltinCommand receives in production.
+    const sessionDouble = {
+      updateMessage: <T>(msg: T) =>
+        Effect.sync(() => {
+          updateMessageCalls.push(msg)
+          return msg
+        }),
+      updatePart: <T>(part: T) =>
+        Effect.sync(() => {
+          updatePartCalls.push(part)
+          return part
+        }),
+    }
+
+    const inputSessionID = "ses_regression_test_1a" as SessionID
+    const handlerResult: PromptCommandResult = { title: "Skills reloaded", output: "2 skills loaded." }
+
+    // Build wp via the real production function.
+    const wp = buildBuiltinResult(handlerResult, inputSessionID)
+
+    // Invoke the real production code — the exact branch extracted from prompt.ts.
+    await Effect.runPromise(dispatchBuiltinCommand(wp, sessionDouble))
+
+    // Both Effect methods must have been yield*-ed exactly once.
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(updatePartCalls).toHaveLength(1)
+  })
+
+  test("REGRESSION-1b: updateMessage receives role=assistant and correct sessionID; updatePart receives text with output", async () => {
+    const updateMessageCalls: unknown[] = []
+    const updatePartCalls: unknown[] = []
+
+    const sessionDouble = {
+      updateMessage: <T>(msg: T) =>
+        Effect.sync(() => {
+          updateMessageCalls.push(msg)
+          return msg
+        }),
+      updatePart: <T>(part: T) =>
+        Effect.sync(() => {
+          updatePartCalls.push(part)
+          return part
+        }),
+    }
+
+    const inputSessionID = "ses_regression_test_1b" as SessionID
+    const handlerResult: PromptCommandResult = { title: "reloaded", output: "3 skills." }
+    const wp = buildBuiltinResult(handlerResult, inputSessionID)
+
+    await Effect.runPromise(dispatchBuiltinCommand(wp, sessionDouble))
+
+    expect(updateMessageCalls).toHaveLength(1)
+    const msg = updateMessageCalls[0] as Record<string, unknown>
+    expect(msg["role"]).toBe("assistant")
+    expect(msg["sessionID"]).toBe(inputSessionID)
+
+    expect(updatePartCalls).toHaveLength(1)
+    const part = updatePartCalls[0] as Record<string, unknown>
+    expect(part["type"]).toBe("text")
+    expect(part["sessionID"]).toBe(inputSessionID)
+    expect(part["text"] as string).toContain("3 skills.")
+
+    // Sanity: the returned wp is the same object passed in.
+    expect(wp.info.sessionID).toBe(inputSessionID)
+    expect(wp.parts[0].sessionID).toBe(inputSessionID)
   })
 })
 

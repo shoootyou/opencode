@@ -1375,7 +1375,8 @@ const layer = Layer.effect(
           subcommand,
           args: parsedArgs,
         })
-        return buildBuiltinResult(result, input.sessionID)
+        const wp = buildBuiltinResult(result, input.sessionID)
+        return yield* dispatchBuiltinCommand(wp, sessions)
       }
       const agentName = cmd.agent ?? input.agent
 
@@ -1682,5 +1683,30 @@ export function buildBuiltinResult(result: CommandResult, sessionID?: SessionID)
     parts: [{ id: partID, sessionID: sesID, messageID: msgID, type: "text", text: `${result.title}\n${result.output}` }],
   }
 }
+
+/**
+ * Persist a built-in command result via Session.Service and return the WithParts.
+ *
+ * Extracted from the `"handler" in cmd` branch of `SessionPrompt.command`
+ * (lines 1378-1381) so the persistence step can be tested in isolation with
+ * a minimal Session double — without instantiating the full SessionPrompt layer.
+ *
+ * The `sessions` parameter must satisfy the two methods actually called in the
+ * production branch; everything else in Session.Service is irrelevant here.
+ *
+ * Exported for unit-testing (session/prompt.test.ts).
+ */
+export const dispatchBuiltinCommand = (
+  wp: SessionV1.WithParts,
+  sessions: {
+    readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
+    readonly updatePart: <T extends SessionV1.Part>(part: T) => Effect.Effect<T>
+  },
+): Effect.Effect<SessionV1.WithParts> =>
+  Effect.gen(function* () {
+    yield* sessions.updateMessage(wp.info)
+    yield* sessions.updatePart(wp.parts[0])
+    return wp
+  })
 
 export * as SessionPrompt from "./prompt"

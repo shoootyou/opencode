@@ -322,7 +322,8 @@ const layer = Layer.effect(
           return Object.values(freshState.skills)
         })
 
-        return { stateRef, doRefresh }
+        const guardedRefresh = makeRefreshWithGuards(doRefresh)
+        return { stateRef, doRefresh, guardedRefresh }
       }),
     )
 
@@ -359,7 +360,7 @@ const layer = Layer.effect(
     })
 
     const refresh = Effect.fn("Skill.refresh")(function* () {
-      return yield* (yield* InstanceState.get(state)).doRefresh
+      return yield* (yield* InstanceState.get(state)).guardedRefresh
     })
 
     return Service.of({ get, require, all, dirs, available, refresh })
