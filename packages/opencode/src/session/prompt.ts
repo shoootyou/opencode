@@ -1375,7 +1375,7 @@ const layer = Layer.effect(
           subcommand,
           args: parsedArgs,
         })
-        return buildBuiltinResult(result)
+        return buildBuiltinResult(result, input.sessionID)
       }
       const agentName = cmd.agent ?? input.agent
 
@@ -1659,9 +1659,9 @@ export function parseSubcommand(args: string): { subcommand: string | undefined;
  * assistant message that terminated cleanly.  Zero token-usage path — no
  * model stream involved.
  */
-export function buildBuiltinResult(result: CommandResult): SessionV1.WithParts {
+export function buildBuiltinResult(result: CommandResult, sessionID?: SessionID): SessionV1.WithParts {
   const msgID = MessageID.ascending()
-  const sesID = SessionID.descending()
+  const sesID = sessionID ?? SessionID.descending()
   const partID = PartID.ascending()
   return {
     info: {

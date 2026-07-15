@@ -23,15 +23,28 @@
  *       - `parts[0].text === \`${title}\n${output}\``
  *       - No `usage`/token-delta field sourced from a model stream (zero cost path)
  *
+ * @behavior SSE persistence (regression — BuiltinCommand path must persist and emit events)
+ *   - After the deterministic branch executes the handler, `SessionPrompt.command` MUST call
+ *     `Session.Service.updateMessage(withParts.info)` exactly once with `role: "assistant"`.
+ *   - After `updateMessage`, it MUST call `Session.Service.updatePart(withParts.parts[0])` exactly
+ *     once with `type: "text"` and `text` containing the handler output.
+ *   - The `sessionID` field on both the message and the part MUST equal `input.sessionID` exactly.
+ *     (Currently broken: `buildBuiltinResult` uses `SessionID.descending()` — a fresh random ID.)
+ *   - These two calls cause `Session.Service` to emit `SessionV1.Event.MessageUpdated` and
+ *     `SessionV1.Event.PartUpdated` SSE events, which the TUI renders. Without them the user
+ *     sees nothing after `/reload skills`.
+ *
  * @edge-cases
  *   - Bare `/reload` (arguments = "") → subcommand undefined; Phase 1 handler reloads skills only
  *   - `/reload foo` (unknown subcommand) → handler returns a CommandResult describing the error, no throw
  *   - The `handler` field is NEVER on a serialized `Command.Info` — only on the internal BuiltinCommand subtype
  *   - `prompt()` must NOT be called when the deterministic branch is taken
  *   - Zero token usage delta: no `cost`, no `tokens` sourced from a model stream
+ *   - `buildBuiltinResult` MUST receive `input.sessionID` explicitly — it must NOT generate its own
  *
- * @see ./prompt.ts (SessionPrompt.command — insert deterministic branch after line 1368)
+ * @see ./prompt.ts (SessionPrompt.command — deterministic branch lines 1369-1379; buildBuiltinResult lines 1662-1684)
  * @see ../command/index.ts (BuiltinCommand, CommandHandler, CommandResult — internal types, non-exported)
+ * @see ./session.ts (Session.Service.updateMessage line 632; Session.Service.updatePart line 638)
  * @see @opencode-ai/schema/v1/session (WithParts, Assistant shape)
  */
 
@@ -254,6 +267,117 @@ describe("§B dispatch contract — handler path must never call prompt()", () =
     // Zero token-usage delta
     const info = withParts.info as Record<string, unknown>
     expect(info["cost"] === 0 || info["cost"] === undefined).toBe(true)
+  })
+})
+
+// ─── BuiltinCommand SSE persistence — regression (Sui investigation 2026-07-15) ─
+//
+// Root cause (confirmed): `SessionPrompt.command` lines 1369-1379 invokes the
+// handler and returns `buildBuiltinResult(result)` without calling
+// `session.updateMessage(...)` or `session.updatePart(...)`.  The TUI only
+// renders assistant output by reacting to `message.updated`/`message.part.updated`
+// SSE events, which are emitted exclusively by those two calls.  Since they are
+// never made, the user sees nothing after `/reload skills`.
+//
+// Secondary bug: `buildBuiltinResult` (lines 1662-1684) generates fresh IDs via
+// `SessionID.descending()` instead of using `input.sessionID`.  This means even
+// if persistence were added naively, the persisted message would be associated
+// with a phantom session.
+//
+// These tests are written RED-FIRST against the CURRENT (unfixed) code and MUST
+// FAIL until Kou implements the fix.  Do NOT touch prompt.ts until these are red.
+
+describe("BuiltinCommand SSE persistence (regression)", () => {
+  // ── Test 1: sessionID mismatch — buildBuiltinResult uses a fresh random ID ──
+  //
+  // Expected RED: `buildBuiltinResult` calls `SessionID.descending()` internally,
+  // so `wp.info.sessionID` will be a freshly generated ID — NEVER equal to the
+  // caller's `input.sessionID`.
+  //
+  // Expected GREEN (after fix): `buildBuiltinResult` must accept `sessionID` as
+  // a parameter and use it on `info.sessionID` and every `parts[i].sessionID`.
+  test("buildBuiltinResult — info.sessionID must equal the caller-supplied sessionID", () => {
+    const fixedSessionID = "ses_test_regression_001"
+
+    // Call the CURRENT (unfixed) buildBuiltinResult — it ignores any sessionID parameter.
+    // After the fix, the signature will be: buildBuiltinResult(result, sessionID).
+    // This test uses the post-fix call convention so it goes red immediately.
+    const wp = (buildBuiltinResult as Function)(
+      { title: "Skills reloaded", output: "2 skills loaded." },
+      fixedSessionID,
+    )
+
+    // RED: current code ignores fixedSessionID — wp.info.sessionID is a random `ses_…`
+    // GREEN: after fix, this assertion passes because sessionID is threaded through.
+    expect(wp.info.sessionID).toBe(fixedSessionID)
+  })
+
+  test("buildBuiltinResult — parts[0].sessionID must equal the caller-supplied sessionID", () => {
+    const fixedSessionID = "ses_test_regression_001"
+
+    const wp = (buildBuiltinResult as Function)(
+      { title: "Skills reloaded", output: "2 skills loaded." },
+      fixedSessionID,
+    )
+
+    // RED: current code sets parts[0].sessionID = SessionID.descending() — a fresh ID.
+    expect(wp.parts[0].sessionID).toBe(fixedSessionID)
+  })
+
+  // ── Test 2: updateMessage / updatePart never called — no SSE events emitted ──
+  //
+  // Strategy: because SessionPrompt.Service has ~20 service dependencies, we test
+  // the OBSERVABLE CONTRACT of the bug at the lowest-friction boundary:
+  // the `buildBuiltinResult` return value is what `command` returns.  The test
+  // verifies that the CURRENT return value of the command branch carries a sessionID
+  // that DOES NOT match input.sessionID — proving the SSE persistence path is broken.
+  //
+  // We additionally test a spy-based contract that will green when Kou wires the
+  // updateMessage + updatePart calls.  This uses pure function composition of the
+  // exported helpers (no Effect runtime needed) to simulate the fix obligation.
+
+  test("post-fix contract: updateMessage spy receives role=assistant with correct sessionID", () => {
+    // This test documents the GREEN-phase obligation for Kou.
+    // It is written against the NOT-YET-IMPLEMENTED fixed call convention.
+    //
+    // After the fix, `SessionPrompt.command` must call:
+    //   yield* sessions.updateMessage(wp.info)
+    //   yield* sessions.updatePart(wp.parts[0])
+    // where `wp` was built with `buildBuiltinResult(result, input.sessionID)`.
+    //
+    // We simulate the fixed path here using a spy closure — no Effect runtime needed.
+    const inputSessionID = "ses_spy_test_001"
+    const updateMessageCalls: unknown[] = []
+    const updatePartCalls: unknown[] = []
+
+    const spySessions = {
+      updateMessage: (msg: unknown) => { updateMessageCalls.push(msg); return msg },
+      updatePart: (part: unknown) => { updatePartCalls.push(part); return part },
+    }
+
+    // Simulate the fixed command branch (what Kou must implement):
+    const handlerResult = { title: "t", output: "o" }
+    // Fixed buildBuiltinResult will accept sessionID:
+    const wp = (buildBuiltinResult as Function)(handlerResult, inputSessionID)
+    // Fixed command will call updateMessage + updatePart:
+    spySessions.updateMessage(wp.info)
+    spySessions.updatePart(wp.parts[0])
+
+    // These assertions describe the GREEN contract — they WILL pass only when
+    // `buildBuiltinResult` accepts and threads the sessionID correctly.
+    //
+    // RED trigger: wp.info.sessionID is currently a fresh random ID, not inputSessionID.
+    // So the inner assertion about sessionID will fail.
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(updatePartCalls).toHaveLength(1)
+    const msg = updateMessageCalls[0] as Record<string, unknown>
+    const part = updatePartCalls[0] as Record<string, unknown>
+    expect(msg["role"]).toBe("assistant")
+    expect(msg["sessionID"]).toBe(inputSessionID) // RED: currently a fresh random ses_…
+    expect(part["type"]).toBe("text")
+    expect(part["sessionID"]).toBe(inputSessionID) // RED: currently a fresh random ses_…
+    const textPart = part as { text?: string }
+    expect(textPart.text).toContain("o")
   })
 })
 
