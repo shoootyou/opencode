@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionV2Info } from "@opencode-ai/sdk/v2/client"
+import type { Session, SessionV2Info } from "@opencode-ai/sdk/v2/client"
 import {
   applyHomeSessionEvent,
   appendHomeSessionEvent,
@@ -127,6 +127,64 @@ describe("Home V2 session index", () => {
         properties: { sessionID: initial[0]!.id, info: initial[0]! },
       }),
     ).toEqual([created])
+  })
+
+  /**
+   * @spec-handoff
+   * @interface applyHomeSessionEvent(sessions: Session[], event: HomeSessionEvent): Session[]
+   * @behavior
+   *   - A `session.updated` event whose `info.time.archived` is a number removes the
+   *     matching root from the index (archive hides it from Home).
+   *   - A subsequent `session.updated` event whose `info.time.archived` is null re-adds
+   *     the same root exactly once (unarchive restores it), matched by stable `session.id`.
+   * @edge-cases
+   *   - archive -> unarchive round-trip nets to a single entry (no double-count, no leak).
+   *   - Replaying the round-trip twice is idempotent (still exactly one entry).
+   * @see ./home-session-index.ts
+   */
+  test("removes an archived root and re-adds it exactly once on unarchive", () => {
+    const initial = parseHomeSessionIndex([session({ id: "root", updated: 1 })])
+    expect(initial).toHaveLength(1)
+
+    const archived = { ...initial[0]!, time: { created: 1, updated: 2, archived: 2 } }
+    const afterArchive = applyHomeSessionEvent(initial, {
+      type: "session.updated",
+      properties: { sessionID: archived.id, info: archived },
+    })
+    expect(afterArchive).toEqual([])
+
+    const unarchived = {
+      ...initial[0]!,
+      time: { created: 1, updated: 3, archived: null },
+    } as unknown as Session
+    const afterUnarchive = applyHomeSessionEvent(afterArchive, {
+      type: "session.updated",
+      properties: { sessionID: unarchived.id, info: unarchived },
+    })
+    expect(afterUnarchive).toEqual([unarchived])
+  })
+
+  test("replays the archive/unarchive round-trip idempotently", () => {
+    const initial = parseHomeSessionIndex([session({ id: "root", updated: 1 })])
+    const archived = { ...initial[0]!, time: { created: 1, updated: 2, archived: 2 } }
+    const unarchived = {
+      ...initial[0]!,
+      time: { created: 1, updated: 3, archived: null },
+    } as unknown as Session
+
+    const roundTrip = (sessions: typeof initial) =>
+      applyHomeSessionEvent(
+        applyHomeSessionEvent(sessions, {
+          type: "session.updated",
+          properties: { sessionID: archived.id, info: archived },
+        }),
+        {
+          type: "session.updated",
+          properties: { sessionID: unarchived.id, info: unarchived },
+        },
+      )
+
+    expect(roundTrip(roundTrip(initial))).toEqual([unarchived])
   })
 
   test("applies only events newer than the index baseline", () => {
