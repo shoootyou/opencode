@@ -8,9 +8,9 @@ import type {
   QuestionRequest,
   Session,
   SessionStatus,
-  SnapshotFileDiff,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
@@ -146,46 +146,21 @@ export function applyDirectoryEvent(input: {
       const info = (event.properties as { info: Session }).info
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (info.time.archived) {
-        // Guard the dedup read with result.found (BUG 2): archiving an out-of-window root makes
-        // Binary.search return index === store.session.length, where store.session[index] is
-        // undefined and reading .time.archived would throw a TypeError.
-        if (result.found && input.store.session[result.index]!.time.archived === info.time.archived) break
-        if (result.found) {
-          input.setStore(
-            "session",
-            produce((draft) => {
-              draft.splice(result.index, 1)
-            }),
-          )
-        }
-        cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
-        if (info.parentID) break
-        // Gate the decrement+track on an untracked id (F1): only the FIRST genuine active→archived
-        // transition for a stable id decrements sessionTotal and records it in archivedRoots. The
-        // dedup guard above only fires for in-window (result.found) ids, so a duplicate archive of
-        // an already-tracked OUT-OF-window id (reconnect replay, a follow-up session.updated still
-        // carrying time.archived, or re-archiving an already-archived session) must be a no-op for
-        // the count. This exactly mirrors the unarchive +1 gating below. Keyed off the stable id.
-        if (input.store.archivedRoots?.[info.id]) break
+        if (!result.found) break
+        if (input.store.session[result.index]!.time.archived === info.time.archived) break
         input.setStore(
+          "session",
           produce((draft) => {
-            ;(draft.archivedRoots ??= {})[info.id] = true
+            draft.splice(result.index, 1)
           }),
         )
+        cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+        if (info.parentID) break
         input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
         break
       }
       if (result.found) {
         input.setStore("session", result.index, reconcile(info))
-        // An active, in-window root is no longer pending an unarchive restore; clear any stale
-        // tracked-archived entry so it cannot trigger a spurious later increment.
-        if (input.store.archivedRoots?.[info.id]) {
-          input.setStore(
-            produce((draft) => {
-              delete draft.archivedRoots![info.id]
-            }),
-          )
-        }
         break
       }
       const next = input.store.session.slice()
@@ -193,24 +168,14 @@ export function applyDirectoryEvent(input: {
       const trimmed = trimSessions(next, { limit, permission: input.permission ?? input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
-      // Restore the root-session count ONLY on a genuine archived→active transition: the id must
-      // have been tracked as archived. A normal out-of-window touch (title / model / cost / last
-      // message) hits this same not-found insert path and is trimmed back out, but MUST NOT drift
-      // sessionTotal upward (BUG 1). Keyed off the stable session id so each archive→unarchive
-      // round-trip nets to zero.
-      if (!info.parentID && input.store.archivedRoots?.[info.id]) {
-        input.setStore("sessionTotal", (value) => value + 1)
-        input.setStore(
-          produce((draft) => {
-            delete draft.archivedRoots![info.id]
-          }),
-        )
-      }
       break
     }
     case "session.deleted": {
-      const info = (event.properties as { info: Session }).info
-      const result = Binary.search(input.store.session, info.id, (s) => s.id)
+      const properties = event.properties as { sessionID?: string; info?: Session }
+      const sessionID = properties.info?.id ?? properties.sessionID
+      if (!sessionID) break
+      const result = Binary.search(input.store.session, sessionID, (s) => s.id)
+      const info = properties.info ?? (result.found ? input.store.session[result.index] : undefined)
       if (result.found) {
         input.setStore(
           "session",
@@ -219,23 +184,77 @@ export function applyDirectoryEvent(input: {
           }),
         )
       }
-      cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
-      // Drop any archivedRoots tracking for a deleted root so the map can't grow unbounded and a
-      // later stray unarchive for a reused id can't spuriously restore the count.
-      if (input.store.archivedRoots?.[info.id]) {
-        input.setStore(
-          produce((draft) => {
-            delete draft.archivedRoots![info.id]
-          }),
-        )
-      }
-      if (info.parentID) break
+      cleanupSessionCaches(input.setStore, sessionID, input.setSessionTodo)
+      if (info?.parentID) break
       input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
       break
     }
+    case "session.renamed": {
+      const properties = event.properties as { sessionID: string; title: string }
+      const result = Binary.search(input.store.session, properties.sessionID, (session) => session.id)
+      if (!result.found) break
+      input.setStore("session", result.index, (session) => ({
+        ...session,
+        title: properties.title,
+        time: { ...session.time, updated: Date.now() },
+      }))
+      break
+    }
+    case "session.usage.updated": {
+      const properties = event.properties as Pick<Session, "cost" | "tokens"> & { sessionID: string }
+      const result = Binary.search(input.store.session, properties.sessionID, (session) => session.id)
+      if (!result.found) break
+      input.setStore("session", result.index, (session) => ({
+        ...session,
+        cost: properties.cost,
+        tokens: properties.tokens,
+      }))
+      break
+    }
+    case "session.archived": {
+      const properties = event.properties as { sessionID: string }
+      const result = Binary.search(input.store.session, properties.sessionID, (session) => session.id)
+      if (!result.found) break
+      const info = input.store.session[result.index]
+      input.setStore(
+        "session",
+        produce((draft) => void draft.splice(result.index, 1)),
+      )
+      cleanupSessionCaches(input.setStore, properties.sessionID)
+      if (!info?.parentID) input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
+      break
+    }
+    case "session.moved": {
+      const properties = event.properties as {
+        sessionID: string
+        location: { directory: string; workspaceID?: string }
+        projectID?: string
+        subpath?: string
+      }
+      const result = Binary.search(input.store.session, properties.sessionID, (session) => session.id)
+      if (!result.found) break
+      if (properties.location.directory === input.directory) {
+        input.setStore("session", result.index, (session) => ({
+          ...session,
+          projectID: properties.projectID ?? session.projectID,
+          workspaceID: properties.location.workspaceID,
+          directory: properties.location.directory,
+          path: properties.subpath,
+          time: { ...session.time, updated: Date.now() },
+        }))
+        break
+      }
+      const info = input.store.session[result.index]
+      input.setStore(
+        "session",
+        produce((draft) => void draft.splice(result.index, 1)),
+      )
+      if (!info?.parentID) input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
+      break
+    }
     case "session.diff": {
-      const props = event.properties as { sessionID: string; diff: SnapshotFileDiff[] }
-      input.setStore("session_diff", props.sessionID, reconcile(list(props.diff), { key: "file" }))
+      const props = event.properties as { sessionID: string; diff: FileDiffInfo[] }
+      input.setStore("session_diff", props.sessionID, reconcile(list(props.diff) as FileDiffInfo[], { key: "file" }))
       break
     }
     case "todo.updated": {
