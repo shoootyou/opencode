@@ -60,8 +60,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { coalesceServerEvents, enqueueServerEvent, isUnauthorizedSseError, resumeStreamAfterPageShow } from "./server-sdk"
+import {
+  adaptServerEvent,
+  coalesceServerEvents,
+  enqueueServerEvent,
+  isUnauthorizedSseError,
+  resumeStreamAfterPageShow,
+} from "./server-sdk"
 import { createSdkForServer } from "@/utils/server"
+import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 
 // E2 red phase: isCloudflareAccessSessionExpiredSseError does not exist yet in
@@ -205,6 +212,23 @@ describe("SSE classifier orthogonality (401 vs Cloudflare)", () => {
   })
 })
 
+describe("adaptServerEvent", () => {
+  test("preserves V2 events while adapting permission requests for existing consumers", () => {
+    const current = {
+      id: "evt_1",
+      created: 1,
+      type: "permission.v2.asked",
+      data: { id: "perm_1", sessionID: "ses_1", action: "read", resources: ["src/**"] },
+    } as OpenCodeEvent
+
+    expect(adaptServerEvent(current)).toMatchObject({
+      type: "permission.asked",
+      properties: { id: "perm_1", sessionID: "ses_1", permission: "read", patterns: ["src/**"] },
+      current,
+    })
+  })
+})
+
 describe("coalesceServerEvents", () => {
   const delta = (value: string, field = "text", partID = "part") => ({
     directory: "/repo",
@@ -223,6 +247,24 @@ describe("coalesceServerEvents", () => {
 
     expect(result).toHaveLength(1)
     expect(result[0]?.payload).toMatchObject({ id: "second", properties: { delta: "hello world" } })
+  })
+
+  test("merges adjacent current text deltas", () => {
+    const current = (id: string, value: string) =>
+      adaptServerEvent({
+        id,
+        created: 1,
+        type: "session.text.delta",
+        location: { directory: "/repo" },
+        data: { sessionID: "ses", assistantMessageID: "msg", ordinal: 0, delta: value },
+      } as OpenCodeEvent)
+    const result = coalesceServerEvents([
+      { directory: "/repo", payload: current("evt_1", "hello ") },
+      { directory: "/repo", payload: current("evt_2", "world") },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.payload.current).toMatchObject({ id: "evt_2", data: { delta: "hello world" } })
   })
 
   test("preserves event boundaries and distinct fields", () => {

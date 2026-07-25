@@ -1,13 +1,16 @@
+import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { type Accessor, batch, createMemo, onCleanup, onMount } from "solid-js"
+import { type Accessor, batch, createMemo, createResource, onCleanup, onMount } from "solid-js"
 import {
+  createApiForServer,
   createSdkForServer,
   recoverFromCloudflareAccessSessionExpiry,
   redirectToLogin,
   shouldRedirectToLogin,
+  type ServerApi,
 } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
@@ -15,12 +18,50 @@ import { ServerConnection, useServer } from "./server"
 import { createRefCountMap } from "@/utils/refcount"
 import { useGlobal } from "./global"
 import { ServerScope } from "@/utils/server-scope"
+import { detectServerProtocol, type ServerProtocol } from "@/utils/server-protocol"
+import { createCompatibleApi, type CompatibleApi } from "@/utils/server-compat"
 
 const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
 
 const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(error) || signal?.aborted === true
-type QueuedServerEvent = { directory: string; payload: Event }
+export type ServerEvent = Event & { current?: OpenCodeEvent }
+type QueuedServerEvent = { directory: string; payload: ServerEvent }
+type CurrentDelta = Extract<
+  OpenCodeEvent,
+  { type: "session.text.delta" | "session.reasoning.delta" | "session.tool.input.delta" | "session.compaction.delta" }
+>
+
+export function adaptServerEvent(event: OpenCodeEvent): ServerEvent {
+  if (event.type === "permission.v2.asked") {
+    return {
+      id: event.id,
+      type: "permission.asked",
+      properties: {
+        id: event.data.id,
+        sessionID: event.data.sessionID,
+        permission: event.data.action,
+        patterns: event.data.resources,
+        always: event.data.save ?? [],
+        metadata: event.data.metadata ?? {},
+        tool:
+          event.data.source?.type === "tool"
+            ? { messageID: event.data.source.messageID, callID: event.data.source.callID }
+            : undefined,
+      },
+      current: event,
+    } as ServerEvent
+  }
+  if (event.type === "permission.v2.replied")
+    return { id: event.id, type: "permission.replied", properties: event.data, current: event } as ServerEvent
+  if (event.type === "question.v2.asked")
+    return { id: event.id, type: "question.asked", properties: event.data, current: event } as ServerEvent
+  if (event.type === "question.v2.replied")
+    return { id: event.id, type: "question.replied", properties: event.data, current: event } as ServerEvent
+  if (event.type === "question.v2.rejected")
+    return { id: event.id, type: "question.rejected", properties: event.data, current: event } as ServerEvent
+  return { id: event.id, type: event.type, properties: event.data, current: event } as ServerEvent
+}
 
 const coalescedKey = (event: QueuedServerEvent) => {
   if (event.payload.type === "lsp.updated") return `lsp.updated:${event.directory}`
@@ -45,6 +86,34 @@ export function enqueueServerEvent(queue: QueuedServerEvent[], event: QueuedServ
 export function coalesceServerEvents(events: QueuedServerEvent[]) {
   const output: QueuedServerEvent[] = []
   events.forEach((event) => {
+    const current = currentDelta(event.payload.current)
+    if (current) {
+      const previous = output[output.length - 1]
+      const prior = currentDelta(previous?.payload.current)
+      if (
+        previous &&
+        prior &&
+        previous.directory === event.directory &&
+        currentDeltaKey(prior) === currentDeltaKey(current)
+      ) {
+        const fragment = currentDeltaFragment(prior) + currentDeltaFragment(current)
+        const data =
+          current.type === "session.compaction.delta"
+            ? { ...current.data, text: fragment }
+            : { ...current.data, delta: fragment }
+        output[output.length - 1] = {
+          directory: event.directory,
+          payload: {
+            ...event.payload,
+            properties: data,
+            current: { ...current, data } as CurrentDelta,
+          } as ServerEvent,
+        }
+        return
+      }
+      output.push(event)
+      return
+    }
     if (event.payload.type !== "message.part.delta") {
       output.push(event)
       return
@@ -76,6 +145,27 @@ export function coalesceServerEvents(events: QueuedServerEvent[]) {
   return output
 }
 
+function currentDelta(event: OpenCodeEvent | undefined): CurrentDelta | undefined {
+  if (
+    event?.type === "session.text.delta" ||
+    event?.type === "session.reasoning.delta" ||
+    event?.type === "session.tool.input.delta" ||
+    event?.type === "session.compaction.delta"
+  )
+    return event
+}
+
+function currentDeltaKey(event: CurrentDelta) {
+  if (event.type === "session.tool.input.delta")
+    return `${event.type}:${event.data.sessionID}:${event.data.assistantMessageID}:${event.data.callID}`
+  if (event.type === "session.compaction.delta") return `${event.type}:${event.data.sessionID}`
+  return `${event.type}:${event.data.sessionID}:${event.data.assistantMessageID}:${event.data.ordinal}`
+}
+
+function currentDeltaFragment(event: CurrentDelta) {
+  return event.type === "session.compaction.delta" ? event.data.text : event.data.delta
+}
+
 export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () => unknown) {
   if (!event.persisted) return
   start()
@@ -100,7 +190,27 @@ export function isCloudflareAccessSessionExpiredSseError(error: unknown): boolea
   return /cloudflareaccess\.com|cloudflare access|cf-mitigated|__cf_chl|cdn-cgi\/access/i.test(error.message)
 }
 
-function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope) {
+type ServerEventEmitter = ReturnType<typeof createGlobalEmitter<{ [key: string]: ServerEvent }>>
+type ServerSDKBase = {
+  server: ServerConnection.Any
+  scope: ServerScope
+  protocol: Promise<ServerProtocol>
+  protocolKind: Accessor<ServerProtocol | undefined>
+  url: string
+  client: ReturnType<typeof createSdkForServer>
+  api: CompatibleApi
+  currentApi: ServerApi
+  event: {
+    on: ServerEventEmitter["on"]
+    listen: ServerEventEmitter["listen"]
+    start: () => Promise<void> | undefined
+  }
+  createClient: (
+    opts: Omit<Parameters<typeof createSdkForServer>[0], "server" | "fetch">,
+  ) => ReturnType<typeof createSdkForServer>
+}
+
+function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope): ServerSDKBase {
   const platform = usePlatform()
   const abort = new AbortController()
 
@@ -115,13 +225,19 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     }
   })()
 
+  const eventApi = createApiForServer({ server: server.http, fetch: eventFetch })
   const eventSdk = createSdkForServer({
     signal: abort.signal,
     fetch: eventFetch,
     server: server.http,
   })
+  const protocol = detectServerProtocol(server.http, platform.fetch ?? globalThis.fetch)
+  const [protocolKind] = createResource(
+    () => protocol,
+    (value) => value,
+  )
   const emitter = createGlobalEmitter<{
-    [key: string]: Event
+    [key: string]: ServerEvent
   }>()
 
   type Queued = QueuedServerEvent
@@ -166,21 +282,6 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   let run: Promise<void> | undefined
   let started = false
   let generation = 0
-  const HEARTBEAT_TIMEOUT_MS = 15_000
-  let lastEventAt = Date.now()
-  let heartbeat: ReturnType<typeof setTimeout> | undefined
-  const resetHeartbeat = () => {
-    lastEventAt = Date.now()
-    if (heartbeat) clearTimeout(heartbeat)
-    heartbeat = setTimeout(() => {
-      attempt?.abort()
-    }, HEARTBEAT_TIMEOUT_MS)
-  }
-  const clearHeartbeat = () => {
-    if (!heartbeat) return
-    clearTimeout(heartbeat)
-    heartbeat = undefined
-  }
 
   const start = () => {
     if (started) return run
@@ -192,42 +293,45 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
       // oxlint-disable-next-line no-unmodified-loop-condition -- `started` is set to false by stop() which also aborts; both flags are checked to allow graceful exit
       while (!abort.signal.aborted && started && generation === active) {
         attempt = new AbortController()
-        lastEventAt = Date.now()
         const onAbort = () => {
           attempt?.abort()
         }
         abort.signal.addEventListener("abort", onAbort)
         try {
-          const events = await eventSdk.global.event({
-            signal: attempt.signal,
-            onSseError: (error) => {
-              if (isStreamClosed(error, attempt?.signal)) return
-              // 401 owns an overlapping error: the CF branch is only reached when
-              // the error is NOT a 401, so the two recoveries can never double-fire.
-              if (isUnauthorizedSseError(error)) {
-                if (shouldRedirectToLogin(server.http.url, location.origin, location.pathname)) redirectToLogin()
-              } else if (isCloudflareAccessSessionExpiredSseError(error)) {
-                void recoverFromCloudflareAccessSessionExpiry()
-              }
-              if (streamErrorLogged) return
-              streamErrorLogged = true
-              console.error("[global-sdk] event stream error", {
-                url: server.http.url,
-                fetch: eventFetch ? "platform" : "webview",
-                error,
-              })
-            },
-          })
-          let yielded = Date.now()
-          resetHeartbeat()
-          for await (const event of events.stream) {
-            resetHeartbeat()
-            streamErrorLogged = false
-            if (event.payload.type !== "sync") {
-              const directory = event.directory ?? "global"
-              const payload = event.payload as Event
-              if (enqueueServerEvent(queue, { directory, payload })) schedule()
+          const kind = await protocol
+          // Re-inject the fork's 401/Cloudflare-Access SSE recovery into the v1
+          // branch's onSseError. The v2 subscribe() path has no onSseError hook, but
+          // the outer catch mirrors the same recovery ownership so v2 errors are still
+          // handled there.
+          const onSseError = (error: unknown) => {
+            if (isStreamClosed(error, attempt?.signal)) return
+            // 401 owns an overlapping error: the CF branch is only reached when
+            // the error is NOT a 401, so the two recoveries can never double-fire.
+            if (isUnauthorizedSseError(error)) {
+              if (shouldRedirectToLogin(server.http.url, location.origin, location.pathname)) redirectToLogin()
+            } else if (isCloudflareAccessSessionExpiredSseError(error)) {
+              void recoverFromCloudflareAccessSessionExpiry()
             }
+            if (streamErrorLogged) return
+            streamErrorLogged = true
+            console.error("[global-sdk] event stream error", {
+              url: server.http.url,
+              fetch: eventFetch ? "platform" : "webview",
+              error,
+            })
+          }
+          const events =
+            kind === "v1"
+              ? (await eventSdk.global.event({ signal: attempt.signal, onSseError })).stream
+              : eventApi.event.subscribe({ signal: attempt.signal })
+          let yielded = Date.now()
+          for await (const event of events) {
+            streamErrorLogged = false
+            const legacy = "payload" in event
+            if (legacy && event.payload.type === "sync") continue
+            const directory = legacy ? (event.directory ?? "global") : (event.location?.directory ?? "global")
+            const payload = legacy ? (event.payload as Event) : adaptServerEvent(event)
+            if (enqueueServerEvent(queue, { directory, payload })) schedule()
 
             if (Date.now() - yielded < STREAM_YIELD_MS) continue
             yielded = Date.now()
@@ -253,7 +357,6 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         } finally {
           abort.signal.removeEventListener("abort", onAbort)
           attempt = undefined
-          clearHeartbeat()
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
@@ -272,18 +375,11 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     started = false
     generation++
     attempt?.abort()
-    clearHeartbeat()
   }
 
   onMount(() => {
     makeEventListener(window, "pagehide", stop)
     makeEventListener(window, "pageshow", (event) => resumeStreamAfterPageShow(event, start))
-    makeEventListener(document, "visibilitychange", () => {
-      if (document.visibilityState !== "visible") return
-      if (!started) return
-      if (Date.now() - lastEventAt < HEARTBEAT_TIMEOUT_MS) return
-      attempt?.abort()
-    })
   })
 
   onCleanup(() => {
@@ -297,12 +393,25 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     fetch: platform.fetch,
     throwOnError: true,
   })
+  const currentApi: ServerApi = createApiForServer({ server: server.http, fetch: platform.fetch })
+  const legacy = (directory?: string) =>
+    createSdkForServer({
+      server: server.http,
+      fetch: platform.fetch,
+      throwOnError: true,
+      directory,
+    })
+  const api = createCompatibleApi({ protocol, current: currentApi, legacy })
 
   return {
     server,
     scope,
+    protocol,
+    protocolKind,
     url: server.http.url,
     client: sdk,
+    api,
+    currentApi,
     event: {
       on: emitter.on.bind(emitter),
       listen: emitter.listen.bind(emitter),
@@ -318,7 +427,6 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 }
 
-type ServerSDKBase = ReturnType<typeof createServerSdkContextBase>
 export type ServerSDK = ServerSDKBase & {
   ensureDirSdkContext: (directory: string) => ReturnType<typeof createDirSdkContext>
 }
@@ -347,8 +455,13 @@ export const { use: useServerSDK, provider: ServerSDKProvider } = createSimpleCo
   },
 })
 
+export function useServerProtocol() {
+  const serverSDK = useServerSDK()
+  return createMemo(() => serverSDK().protocolKind())
+}
+
 type SDKEventMap = {
-  [key in Event["type"]]: Extract<Event, { type: key }>
+  [key in Event["type"]]: Extract<ServerEvent, { type: key }>
 }
 
 function createDirSdkContext(directory: string, serverSDK: ServerSDKBase) {
@@ -366,8 +479,15 @@ function createDirSdkContext(directory: string, serverSDK: ServerSDKBase) {
 
   return {
     scope: serverSDK.scope,
+    protocol: serverSDK.protocol,
     directory,
     client,
+    api: createCompatibleApi({
+      protocol: serverSDK.protocol,
+      current: serverSDK.currentApi,
+      legacy: (next) => serverSDK.createClient({ directory: next ?? directory, throwOnError: true }),
+      directory,
+    }),
     event: emitter,
     get url() {
       return serverSDK.url
