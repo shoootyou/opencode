@@ -41,7 +41,6 @@ import { clearWorkspaceTerminals } from "@/context/terminal"
 import { pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
-import { Binary } from "@opencode-ai/core/util/binary"
 import { retry } from "@opencode-ai/core/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
@@ -59,6 +58,7 @@ import { DebugBar } from "@/components/debug-bar"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
+import { useSessionArchiveCommands } from "@/components/session-archive-commands"
 import { ServerConnection, useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
@@ -68,7 +68,6 @@ import {
   errorMessage,
   latestRootSession,
   sortedRootSessions,
-  unarchivePatch,
 } from "./layout/helpers"
 import {
   collectNewSessionDeepLinks,
@@ -125,6 +124,7 @@ export default function LegacyLayout(props: ParentProps) {
   const command = useCommand()
   const theme = useTheme()
   const language = useLanguage()
+  const { archiveSession } = useSessionArchiveCommands()
   createEffect(() => setV2Toast(false))
   const initialDirectory = decode64(params.dir)
   const route = createMemo(() => {
@@ -872,59 +872,6 @@ export default function LegacyLayout(props: ParentProps) {
     }
   }
 
-  async function archiveSession(session: Session) {
-    const [store, setStore] = serverSync().child(session.directory)
-    const sessions = store.session ?? []
-    const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
-
-    await serverSDK().api.session.archive({ sessionID: session.id, directory: session.directory })
-    setStore(
-      produce((draft) => {
-        const match = Binary.search(draft.session, session.id, (s) => s.id)
-        if (match.found) draft.session.splice(match.index, 1)
-      }),
-    )
-    if (session.id === params.id) {
-      if (nextSession) {
-        navigate(`/${params.dir}/session/${nextSession.id}`)
-      } else {
-        navigate(`/${params.dir}/session`)
-      }
-    }
-  }
-
-  async function unarchiveSession(session: Session) {
-    const [, setStore] = serverSync().child(session.directory)
-
-    await serverSDK().client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: unarchivePatch(),
-    })
-
-    const restored = { ...session, time: { ...session.time, archived: undefined } }
-    setStore(
-      produce((draft) => {
-        const match = Binary.search(draft.session, session.id, (s) => s.id)
-        if (match.found) {
-          draft.session[match.index] = restored
-          return
-        }
-        draft.session.splice(match.index, 0, restored)
-      }),
-    )
-    navigate(`/${base64Encode(session.directory)}/session/${session.id}`)
-  }
-
-  function browseArchivedSessions() {
-    const run = ++dialogRun
-    void import("@/components/dialog-archived-sessions").then((x) => {
-      if (dialogDead || dialogRun !== run) return
-      dialog.show(() => <x.DialogArchivedSessions onUnarchive={unarchiveSession} />)
-    })
-  }
-
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
@@ -1001,43 +948,6 @@ export default function LegacyLayout(props: ParentProps) {
         category: language.t("command.category.session"),
         keybind: "shift+alt+arrowdown",
         onSelect: () => navigateSessionByUnseen(1),
-      },
-      {
-        id: "session.archive",
-        title: language.t("command.session.archive"),
-        category: language.t("command.category.session"),
-        keybind: "mod+shift+backspace",
-        disabled: !params.dir || !params.id,
-        onSelect: () => {
-          const session = currentSessions().find((s) => s.id === params.id)
-          if (session) void archiveSession(session)
-        },
-      },
-      {
-        id: "session.unarchive",
-        title: language.t("command.session.unarchive"),
-        category: language.t("command.category.session"),
-        // Mirrors `session.archive`: gated only on having a current session, NOT on archived
-        // state. Archiving splices the session out of the window list (`store.session`) and
-        // navigates away, so the in-window store can't reliably report whether `params.id` is
-        // archived — gating visibility on it would leave this command permanently disabled and
-        // unreachable. Kept symmetric with `session.archive` instead.
-        disabled: !params.dir || !params.id,
-        onSelect: () => {
-          const directory = decode64(params.dir)
-          if (!directory) return
-          const [store] = serverSync().child(directory, { bootstrap: false })
-          const session = (store.session ?? []).find((s) => s.id === params.id)
-          if (session) void unarchiveSession(session)
-        },
-      },
-      {
-        id: "session.archived.browse",
-        title: language.t("command.session.archivedBrowse"),
-        category: language.t("command.category.session"),
-        // Discovery entry point: intentionally NOT disabled by `!params.id` — it must work from
-        // anywhere to surface archived sessions across every project.
-        onSelect: () => browseArchivedSessions(),
       },
       {
         id: "workspace.new",
