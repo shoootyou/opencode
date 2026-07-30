@@ -58,6 +58,8 @@
  *   branch referencing that unreachable condition is actually gone, not just inert.
  * @see ./command-palette.ts (createServerSessionEntries — unchanged; the function under test)
  * @see ./dialog-select-file.tsx (the file E3 edits — dead dimmed-row branch removed)
+ * @see ./dialog-command-palette-v2.test.tsx (equivalent dead-dimmed-row pin for the OTHER
+ *   `PaletteRow` render path — the one actually used when `newLayoutDesigns()` is true)
  * @see ../../../.yui-soul/plans/wip/187-opencode-restore-archive-ui/e1-spec-contract.md
  */
 
