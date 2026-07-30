@@ -4,6 +4,7 @@ import { useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
+import { useSessionArchiveCommands } from "@/components/session-archive-commands"
 import { usePlatform } from "@/context/platform"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, ToastRegion } from "@/utils/toast"
@@ -12,6 +13,7 @@ export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const navigate = useNavigate()
   setNavigate(navigate)
+  useSessionArchiveCommands()
   const [state, setState] = createStore({ debugTools: true })
 
   createEffect(() => setV2Toast(true))

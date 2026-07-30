@@ -158,19 +158,9 @@ function DialogSelectFileLegacy(props: { filesOnly: () => boolean; onOpenFile?: 
                 <div class="flex items-center gap-x-3 grow min-w-0">
                   <Icon name="bubble-5" size="small" class="shrink-0 text-icon-weak" />
                   <div class="flex items-center gap-2 min-w-0">
-                    <span
-                      class="text-14-regular text-text-strong truncate"
-                      classList={{ "opacity-70": !!item.archived }}
-                    >
-                      {item.title}
-                    </span>
+                    <span class="text-14-regular text-text-strong truncate">{item.title}</span>
                     <Show when={item.description}>
-                      <span
-                        class="text-14-regular text-text-weak truncate"
-                        classList={{ "opacity-70": !!item.archived }}
-                      >
-                        {item.description}
-                      </span>
+                      <span class="text-14-regular text-text-weak truncate">{item.description}</span>
                     </Show>
                   </div>
                 </div>

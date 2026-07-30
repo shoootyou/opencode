@@ -320,13 +320,9 @@ function PaletteRow(props: {
               </Show>
             </div>
             <div class="command-palette-v2-row-text">
-              <span class="command-palette-v2-title" classList={{ "opacity-70": !!props.item.archived }}>
-                {props.item.title}
-              </span>
+              <span class="command-palette-v2-title">{props.item.title}</span>
               <Show when={props.item.description}>
-                <span class="command-palette-v2-description" classList={{ "opacity-70": !!props.item.archived }}>
-                  {props.item.description}
-                </span>
+                <span class="command-palette-v2-description">{props.item.description}</span>
               </Show>
             </div>
           </div>
