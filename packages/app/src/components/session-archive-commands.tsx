@@ -7,7 +7,7 @@ import { Binary } from "@opencode-ai/core/util/binary"
 import { Session } from "@opencode-ai/sdk/v2/client"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
-import { useCommand } from "@/context/command"
+import { useCommand, type CommandOption } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
 import { unarchivePatch } from "@/pages/layout/helpers"
@@ -94,42 +94,66 @@ export function useSessionArchiveCommands() {
     return (store.session ?? []).find((s) => s.id === params.id)
   }
 
-  command.register("session-archive", () => [
-    {
-      id: "session.archive",
-      title: language.t("command.session.archive"),
-      category: language.t("command.category.session"),
-      keybind: "mod+shift+backspace",
-      disabled: !params.dir || !params.id,
-      onSelect: () => {
+  command.register("session-archive", () =>
+    buildSessionArchiveOptions({
+      dir: params.dir,
+      id: params.id,
+      language,
+      onArchive: () => {
         const session = findCurrentSession()
         if (session) void archiveSession(session)
       },
+      onUnarchive: () => {
+        const session = findCurrentSession()
+        if (session) void unarchiveSession(session)
+      },
+      onBrowse: () => browseArchivedSessions(),
+    }),
+  )
+
+  return { archiveSession, unarchiveSession, browseArchivedSessions }
+}
+
+// Extracted so the exact 3-entry option list this hook registers is independently importable —
+// tests assert against this function directly instead of hand-maintaining a parallel duplicate
+// array that could silently drift from what's actually registered.
+export function buildSessionArchiveOptions(input: {
+  dir?: string
+  id?: string
+  language: ReturnType<typeof useLanguage>
+  onArchive: () => void
+  onUnarchive: () => void
+  onBrowse: () => void
+}): CommandOption[] {
+  const disabled = !input.dir || !input.id
+  return [
+    {
+      id: "session.archive",
+      title: input.language.t("command.session.archive"),
+      category: input.language.t("command.category.session"),
+      keybind: "mod+shift+backspace",
+      disabled,
+      onSelect: () => input.onArchive(),
     },
     {
       id: "session.unarchive",
-      title: language.t("command.session.unarchive"),
-      category: language.t("command.category.session"),
+      title: input.language.t("command.session.unarchive"),
+      category: input.language.t("command.category.session"),
       // Mirrors `session.archive`: gated only on having a current session, NOT on archived
       // state. Archiving splices the session out of the window list (`store.session`) and
       // navigates away, so the in-window store can't reliably report whether `params.id` is
       // archived — gating visibility on it would leave this command permanently disabled and
       // unreachable. Kept symmetric with `session.archive` instead.
-      disabled: !params.dir || !params.id,
-      onSelect: () => {
-        const session = findCurrentSession()
-        if (session) void unarchiveSession(session)
-      },
+      disabled,
+      onSelect: () => input.onUnarchive(),
     },
     {
       id: "session.archived.browse",
-      title: language.t("command.session.archivedBrowse"),
-      category: language.t("command.category.session"),
+      title: input.language.t("command.session.archivedBrowse"),
+      category: input.language.t("command.category.session"),
       // Discovery entry point: intentionally NOT disabled by `!params.id` — it must work from
       // anywhere to surface archived sessions across every project.
-      onSelect: () => browseArchivedSessions(),
+      onSelect: () => input.onBrowse(),
     },
-  ])
-
-  return { archiveSession, unarchiveSession, browseArchivedSessions }
+  ]
 }
