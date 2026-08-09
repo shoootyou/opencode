@@ -4,11 +4,12 @@ import * as Sentry from "@sentry/solid"
 import { render } from "solid-js/web"
 import { AppBaseProviders, AppInterface } from "@/app"
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt"
+import { loadInitialLocale } from "@/context/language"
 import { type Platform, PlatformProvider } from "@/context/platform"
 import LoginPage from "@/pages/login"
+import { createBrowserDraftStore } from "@/utils/draft-store"
 import { dict as en } from "@/i18n/en"
 import { dict as zh } from "@/i18n/zh"
-import { handleNotificationClick } from "@/utils/notification-click"
 import { authFromToken, getCurrentServerUrl } from "@/utils/server"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
@@ -56,7 +57,7 @@ const setStorage = (key: string, value: string | null) => {
 const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
 const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
 
-const notify: Platform["notify"] = async (title, description, href) => {
+const notify: Platform["notify"] = async (title, description, onClick) => {
   if (!("Notification" in window)) return
 
   const permission =
@@ -75,21 +76,17 @@ const notify: Platform["notify"] = async (title, description, href) => {
   })
 
   notification.onclick = () => {
-    handleNotificationClick(href)
+    window.focus()
+    onClick?.()
     notification.close()
   }
 }
 
-const openLink: Platform["openLink"] = (url) => {
-  window.open(url, "_blank")
-}
-
-const back: Platform["back"] = () => {
-  window.history.back()
-}
-
-const forward: Platform["forward"] = () => {
-  window.history.forward()
+const openExternal: Platform["openExternal"] = (value) => {
+  if (!URL.canParse(value)) return
+  const url = new URL(value)
+  if (url.protocol !== "http:" && url.protocol !== "https:" && url.protocol !== "mailto:") return
+  window.open(url.href, "_blank", "noopener,noreferrer")
 }
 
 const restart: Platform["restart"] = async () => {
@@ -116,10 +113,9 @@ const clearAuthToken = () => {
 
 const platform: Platform = {
   platform: "web",
+  draftStore: createBrowserDraftStore(),
   version: pkg.version,
-  openLink,
-  back,
-  forward,
+  openExternal,
   restart,
   notify,
   getDefaultServer: async () => {
@@ -158,22 +154,24 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 if (root instanceof HTMLElement) {
-  // Render the login page without the full app shell when the path is /login.
-  if (location.pathname === "/login") {
-    render(
-      () => (
-        <>
-          <PlatformProvider value={platform}>
-            <AppBaseProviders>
-              <LoginPage />
-            </AppBaseProviders>
-          </PlatformProvider>
-          <PwaUpdatePrompt />
-        </>
-      ),
-      root,
-    )
-  } else {
+  void loadInitialLocale().then((locale) => {
+    // Render the login page without the full app shell when the path is /login.
+    if (location.pathname === "/login") {
+      render(
+        () => (
+          <>
+            <PlatformProvider value={platform}>
+              <AppBaseProviders locale={locale}>
+                <LoginPage />
+              </AppBaseProviders>
+            </PlatformProvider>
+            <PwaUpdatePrompt />
+          </>
+        ),
+        root,
+      )
+      return
+    }
     const auth = authFromToken(rawAuthToken)
     const server: ServerConnection.Http = {
       type: "http",
@@ -187,7 +185,7 @@ if (root instanceof HTMLElement) {
       () => (
         <>
           <PlatformProvider value={platform}>
-            <AppBaseProviders>
+            <AppBaseProviders locale={locale}>
               <AppInterface
                 defaultServer={ServerConnection.Key.make(getDefaultUrl())}
                 canonicalLocalServer={ServerConnection.key(server)}
@@ -203,5 +201,5 @@ if (root instanceof HTMLElement) {
       ),
       root,
     )
-  }
+  })
 }

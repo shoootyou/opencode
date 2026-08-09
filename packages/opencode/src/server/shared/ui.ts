@@ -22,7 +22,7 @@ export const UI_UPSTREAM = new URL("https://app.opencode.ai")
 export const LOCAL_WEB_UI_DIR = path.resolve(import.meta.dirname, "../../../../app/dist")
 
 export const csp = (hashes: string[] = []) =>
-  `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hashes.map((hash) => ` 'sha256-${hash}'`).join("")}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src * data:`
+  `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hashes.map((hash) => ` 'sha256-${hash}'`).join("")}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; media-src 'self' data:; connect-src * data: blob:`
 export const DEFAULT_CSP = csp()
 
 // Matches every inline (no `src` attribute) `<script id="oc-*-preload-script">`
