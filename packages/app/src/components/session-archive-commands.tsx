@@ -33,12 +33,17 @@ export function useSessionArchiveCommands() {
   })
 
   async function archiveSession(session: Session) {
+    if ((await serverSDK().protocol) !== "v1") return
     const [store, setStore] = serverSync().child(session.directory)
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = sessions[index + 1] ?? sessions[index - 1]
 
-    await serverSDK().api.session.archive({ sessionID: session.id, directory: session.directory })
+    await serverSDK().client.session.update({
+      sessionID: session.id,
+      directory: session.directory,
+      time: { archived: Date.now() },
+    })
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
@@ -54,6 +59,7 @@ export function useSessionArchiveCommands() {
   }
 
   async function unarchiveSession(session: Session) {
+    if ((await serverSDK().protocol) !== "v1") return
     const [, setStore] = serverSync().child(session.directory)
 
     await serverSDK().client.session.update({

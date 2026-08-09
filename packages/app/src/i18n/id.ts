@@ -135,6 +135,8 @@ export const dict = {
   "command.session.previous.unseen": "Sesi sebelumnya yang belum dibaca",
   "command.session.next.unseen": "Sesi berikutnya yang belum dibaca",
   "command.session.archive": "Arsipkan sesi",
+  "command.session.unarchive": "Batalkan arsip sesi",
+  "command.session.archivedBrowse": "Telusuri sesi yang diarsipkan",
 
   "command.palette": "Palet perintah",
 
@@ -440,6 +442,8 @@ export const dict = {
   "dialog.directory.root": "Akar",
   "dialog.directory.parent": "Induk",
   "dialog.directory.readError": "Tidak dapat membaca folder ini",
+  "dialog.archivedSessions.title": "Sesi yang diarsipkan",
+  "dialog.archivedSessions.empty": "Tidak ada sesi yang diarsipkan",
 
   "app.server.unreachable": "Tidak dapat menjangkau {{server}}",
   "app.server.retrying": "Mencoba ulang secara otomatis...",
@@ -906,12 +910,14 @@ export const dict = {
   "common.dismiss": "Tutup",
   "common.moreCountSuffix": " (+{{count}} lainnya)",
   "common.requestFailed": "Permintaan gagal",
+  "common.retry": "Coba lagi",
   "common.moreOptions": "Opsi lainnya",
   "common.learnMore": "Pelajari lebih lanjut",
   "common.rename": "Ganti nama",
   "common.export": "Ekspor",
   "common.reset": "Atur ulang",
   "common.archive": "Arsipkan",
+  "common.unarchive": "Batalkan arsip",
   "common.delete": "Hapus",
   "common.close": "Tutup",
   "common.edit": "Sunting",

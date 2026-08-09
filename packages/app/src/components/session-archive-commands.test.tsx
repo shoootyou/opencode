@@ -51,7 +51,7 @@
  *   can route around by better test design. Given that, this file uses the two techniques this
  *   repo already established for exactly this situation instead:
  *   1. Real, un-mocked, static imports of the actual exported pure functions
- *      (`commandPaletteOptions`, `upsertCommandRegistration` from `@/context/command`, and —
+ *      (`commandPaletteOptions`, `addCommandRegistration` from `@/context/command`, and —
  *      since Kou's refactor extracted it — the real `buildSessionArchiveOptions` from
  *      `./session-archive-commands.tsx` itself) — the same safe, no-render style
  *      `../context/command.test.ts` already uses. The only stub is a minimal `{ t }` object
@@ -81,7 +81,7 @@ import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { commandPaletteOptions, upsertCommandRegistration } from "@/context/command"
+import { addCommandRegistration, commandPaletteOptions } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { dict as en } from "@/i18n/en"
 import { buildSessionArchiveOptions } from "./session-archive-commands"
@@ -108,7 +108,7 @@ function buildOptions(params: { dir?: string; id?: string }) {
 
 describe("session-archive command contract (pin — uses real command.tsx filter functions)", () => {
   test("registers under the dedicated 'session-archive' key, not 'layout'", () => {
-    const registrations = upsertCommandRegistration([], {
+    const registrations = addCommandRegistration([], {
       key: "session-archive",
       options: () => buildOptions({ dir: "d", id: "i" }),
     })
