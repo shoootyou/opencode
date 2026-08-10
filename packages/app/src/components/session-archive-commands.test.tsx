@@ -51,7 +51,7 @@
  *   can route around by better test design. Given that, this file uses the two techniques this
  *   repo already established for exactly this situation instead:
  *   1. Real, un-mocked, static imports of the actual exported pure functions
- *      (`commandPaletteOptions`, `upsertCommandRegistration` from `@/context/command`, and —
+ *      (`commandPaletteOptions`, `addCommandRegistration` from `@/context/command`, and —
  *      since Kou's refactor extracted it — the real `buildSessionArchiveOptions` from
  *      `./session-archive-commands.tsx` itself) — the same safe, no-render style
  *      `../context/command.test.ts` already uses. The only stub is a minimal `{ t }` object
@@ -77,11 +77,13 @@
  * @see ../../../.yui-soul/plans/wip/187-opencode-restore-archive-ui/e1-spec-contract.md
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { commandPaletteOptions, upsertCommandRegistration } from "@/context/command"
+import { createRoot } from "solid-js"
+import type { Session } from "@opencode-ai/sdk/v2/client"
+import { addCommandRegistration, commandPaletteOptions } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { dict as en } from "@/i18n/en"
 import { buildSessionArchiveOptions } from "./session-archive-commands"
@@ -108,7 +110,7 @@ function buildOptions(params: { dir?: string; id?: string }) {
 
 describe("session-archive command contract (pin — uses real command.tsx filter functions)", () => {
   test("registers under the dedicated 'session-archive' key, not 'layout'", () => {
-    const registrations = upsertCommandRegistration([], {
+    const registrations = addCommandRegistration([], {
       key: "session-archive",
       options: () => buildOptions({ dir: "d", id: "i" }),
     })
@@ -183,5 +185,140 @@ describe("NewLayout wiring (red until E3 — source-text regression pin)", () =>
     const opens = (before.match(/\{/g) ?? []).length
     const closes = (before.match(/\}/g) ?? []).length
     expect(opens - closes).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Behavioral coverage for the `protocol !== "v1"` guard + `client.session.update(...)` call
+// shape added to `archiveSession`/`unarchiveSession` by remediation commit `1b29e28659`
+// (fork sync v1.18.15). Mounting the whole `useSessionArchiveCommands()` hook requires real
+// context ancestors (`useServerSync`, `useServerSDK`, `useCommand`, `useDialog`, `@solidjs/router`),
+// none of which this file's other describe blocks provide (they only exercise the pure,
+// context-free `buildSessionArchiveOptions`). `mock.module` (established precedent:
+// `../components/prompt-input/submit.test.ts` mocks `@/context/server-sync` the same way) supplies
+// minimal stand-ins for exactly those five dependencies so the hook can run inside a bare
+// `createRoot`, without the JSX-mounting infra this file's `@testability` note already ruled out.
+// `mock.module` calls are hoisted by Bun ahead of any import in the file, so the dynamically
+// re-imported `useSessionArchiveCommands` below sees these mocks even though the module under
+// test is also statically imported above.
+mock.module("@solidjs/router", () => ({
+  useNavigate: () => () => undefined,
+  useParams: () => ({ dir: "d", id: "s1" }),
+}))
+
+mock.module("@opencode-ai/ui/context/dialog", () => ({
+  useDialog: () => ({ show: () => undefined }),
+}))
+
+let guardSessions: Session[] = []
+mock.module("@/context/server-sync", () => ({
+  useServerSync: () => () => ({
+    child: () => [{ session: guardSessions }, () => undefined],
+  }),
+}))
+
+let guardProtocol: Promise<"v1" | "v2"> = Promise.resolve("v1")
+const guardUpdateCalls: unknown[] = []
+mock.module("@/context/server-sdk", () => ({
+  useServerSDK: () => () => ({
+    protocol: guardProtocol,
+    client: {
+      session: {
+        update: async (input: unknown) => {
+          guardUpdateCalls.push(input)
+        },
+      },
+    },
+  }),
+}))
+
+mock.module("@/context/command", () => ({
+  useCommand: () => ({ register: () => undefined }),
+}))
+
+mock.module("@/context/language", () => ({
+  useLanguage: () => ({ t: (key: string) => en[key as keyof typeof en] }),
+}))
+
+function guardSession(overrides: Partial<Session> & { id: string; directory: string }): Session {
+  return {
+    slug: overrides.id,
+    projectID: "project-1",
+    title: "Default title",
+    version: "1.0.0",
+    time: { created: 0, updated: 0 },
+    ...overrides,
+  } as Session
+}
+
+describe("useSessionArchiveCommands protocol guard (remediation commit 1b29e28659)", () => {
+  test("archiveSession never calls client.session.update when protocol !== 'v1'", async () => {
+    guardProtocol = Promise.resolve("v2")
+    guardUpdateCalls.length = 0
+    guardSessions = [guardSession({ id: "s1", directory: "d1" })]
+
+    const { useSessionArchiveCommands } = await import("./session-archive-commands")
+    await createRoot(async (dispose) => {
+      const hook = useSessionArchiveCommands()
+      await hook.archiveSession(guardSessions[0]!)
+      dispose()
+    })
+
+    expect(guardUpdateCalls).toEqual([])
+  })
+
+  test("unarchiveSession never calls client.session.update when protocol !== 'v1'", async () => {
+    guardProtocol = Promise.resolve("v2")
+    guardUpdateCalls.length = 0
+    guardSessions = [guardSession({ id: "s1", directory: "d1", time: { created: 0, updated: 0, archived: 100 } })]
+
+    const { useSessionArchiveCommands } = await import("./session-archive-commands")
+    await createRoot(async (dispose) => {
+      const hook = useSessionArchiveCommands()
+      await hook.unarchiveSession(guardSessions[0]!)
+      dispose()
+    })
+
+    expect(guardUpdateCalls).toEqual([])
+  })
+
+  test("archiveSession calls client.session.update with the archived-time shape when protocol is 'v1'", async () => {
+    guardProtocol = Promise.resolve("v1")
+    guardUpdateCalls.length = 0
+    guardSessions = [guardSession({ id: "s1", directory: "d1" })]
+    const before = Date.now()
+
+    const { useSessionArchiveCommands } = await import("./session-archive-commands")
+    await createRoot(async (dispose) => {
+      const hook = useSessionArchiveCommands()
+      await hook.archiveSession(guardSessions[0]!)
+      dispose()
+    })
+
+    expect(guardUpdateCalls).toHaveLength(1)
+    const call = guardUpdateCalls[0] as { sessionID: string; directory: string; time: { archived: number } }
+    expect(call.sessionID).toBe("s1")
+    expect(call.directory).toBe("d1")
+    expect(call.time.archived).toBeGreaterThanOrEqual(before)
+  })
+
+  test("unarchiveSession calls client.session.update with the unarchive-patch shape when protocol is 'v1'", async () => {
+    guardProtocol = Promise.resolve("v1")
+    guardUpdateCalls.length = 0
+    guardSessions = [guardSession({ id: "s1", directory: "d1", time: { created: 0, updated: 0, archived: 100 } })]
+
+    const { useSessionArchiveCommands } = await import("./session-archive-commands")
+    await createRoot(async (dispose) => {
+      const hook = useSessionArchiveCommands()
+      await hook.unarchiveSession(guardSessions[0]!)
+      dispose()
+    })
+
+    expect(guardUpdateCalls).toHaveLength(1)
+    expect(guardUpdateCalls[0]).toEqual({
+      directory: "d1",
+      sessionID: "s1",
+      time: { archived: null },
+    })
   })
 })
