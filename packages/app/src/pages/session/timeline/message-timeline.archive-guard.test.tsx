@@ -36,12 +36,18 @@
  *   by asserting its resolved label matches `common.archive`/`common.unarchive` before invoking
  *   it, so a reordering of the menu would fail loudly here instead of silently invoking the
  *   wrong handler.
- *   The mount container is deliberately kept detached from `document.body` and
- *   `requestAnimationFrame`/`cancelAnimationFrame` are stubbed for the synchronous duration of
- *   the `render()` call — both only to avoid mutating shared `happy-dom` global state
- *   (`document.body`, the RAF queue) that sibling test files in the same `bun test` process read
- *   from (`./observe-element-offset.test.ts` in particular), not because this test's own
- *   assertions need either.
+ *   The mount container is deliberately kept detached from `document.body` — nothing this
+ *   test's own assertions need it attached, and staying detached avoids mutating shared
+ *   `happy-dom` global state that sibling test files in the same `bun test` process read from
+ *   (`./observe-element-offset.test.ts` in particular). A prior version of this helper also
+ *   stubbed `requestAnimationFrame`/`cancelAnimationFrame` to synchronous no-ops for the same
+ *   stated reason, but that stub was itself the actual source of cross-file pollution: it let
+ *   `message-timeline.tsx`'s own `onMount` capture the stub's constant `0` as a real frame id,
+ *   which a later real `cancelAnimationFrame(0)` on `cleanup()` used to cancel an unrelated
+ *   pending frame from `./observe-element-offset.test.ts` in the same happy-dom timer queue.
+ *   Removed — the real RAF/CAF functions are what keep frame-id pairing correct. `mountMessageTimeline`
+ *   instead tracks and disconnects any `MutationObserver` constructed during mount as its
+ *   defensive isolation mechanism (see the constructor spy in `mountMessageTimeline` below).
  * @see ./message-timeline.tsx (archiveSession/unarchiveSession, lines ~837-875)
  * @see ./message-timeline.archive-toggle.test.ts (structural source-text pin for the same guard)
  * @see ../../../components/session-archive-commands.test.tsx (equivalent behavioral guard test
@@ -243,10 +249,30 @@ async function mountMessageTimeline() {
   // mock handler, not via a real DOM click), and staying detached avoids mutating the shared
   // `document.body` that `observe-element-offset.test.ts`'s own body-level `MutationObserver`
   // watches in the same `bun test` process.
-  const realRaf = globalThis.requestAnimationFrame
-  const realCaf = globalThis.cancelAnimationFrame
-  globalThis.requestAnimationFrame = (() => 0) as typeof requestAnimationFrame
-  globalThis.cancelAnimationFrame = (() => undefined) as typeof cancelAnimationFrame
+  //
+  // A prior version of this helper temporarily stubbed `requestAnimationFrame`/
+  // `cancelAnimationFrame` to synchronous no-ops for the duration of `render()`, on the
+  // (incorrect) theory that only that would avoid mutating shared happy-dom global state. In
+  // practice the opposite happened: `message-timeline.tsx`'s own `onMount` schedules a real
+  // frame (`overscanFrame = requestAnimationFrame(...)`) while the stub was active, capturing
+  // the stub's constant `0` as its "frame id". Restoring the real `cancelAnimationFrame` and
+  // then calling it with that stale `0` id on `cleanup()` cancelled an unrelated real
+  // `requestAnimationFrame` callback elsewhere in the same happy-dom timer queue (ids are
+  // reused/sequential per `happy-dom` document, not per caller) — which is what actually
+  // starved `observe-element-offset.test.ts`'s own reconnect-check frames when both files ran
+  // in the same `bun test` process. Track every `MutationObserver` constructed during mount
+  // (defensive net for the original code-review concern; none exist today with the current
+  // `mock.module` set — `createVirtualizer` is mocked and never runs `_didMount`) and disconnect
+  // them in `cleanup()`, but do NOT stub RAF/CAF: the real timer functions are what keep the
+  // real `overscanFrame`/`cancelAnimationFrame` id pairing correct and avoid this class of bug.
+  const realMutationObserver = globalThis.MutationObserver
+  const trackedObservers: MutationObserver[] = []
+  globalThis.MutationObserver = class extends realMutationObserver {
+    constructor(callback: MutationCallback) {
+      super(callback)
+      trackedObservers.push(this)
+    }
+  } as typeof MutationObserver
   const dispose = render(
     () =>
       mod.MessageTimeline({
@@ -268,12 +294,12 @@ async function mountMessageTimeline() {
       }),
     container,
   )
-  globalThis.requestAnimationFrame = realRaf
-  globalThis.cancelAnimationFrame = realCaf
+  globalThis.MutationObserver = realMutationObserver
   return {
     container,
     cleanup: () => {
       dispose()
+      trackedObservers.forEach((observer) => observer.disconnect())
       container.remove()
     },
   }
