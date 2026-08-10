@@ -8,6 +8,8 @@
  *   - safeRedirect: returns "/" for paths that do not start with "/" or start with "//"
  *   - safeRedirect: returns trimmed path unchanged for valid relative paths
  *   - safeRedirect: decodes URL encoding before checking (%2F%2F bypass blocked)
+ *   - safeRedirect: rejects decoded values containing any C0 control character (0x00-0x1F,
+ *     e.g. tab \t, LF \n, CR \r, NUL, ESC), whether passed raw or percent-encoded
  *   - probeCredentials: returns "unauthorized" when fetch responds with 401
  *   - probeCredentials: returns "ok" when fetch responds with any 2xx status
  *   - probeCredentials: returns "unreachable" when fetch throws a network error
@@ -21,6 +23,16 @@
  *   - "%2F%2Fevil.com" is rejected by safeRedirect (URL-encoded double-slash bypass)
  *   - External URLs ("http://…") are rejected by safeRedirect
  *   - Query strings on valid paths are preserved by safeRedirect
+ *   - "/\t/evil.com", "/\n/evil.com", "/\r/evil.com" (raw control chars) are rejected by
+ *     safeRedirect, returning "/" instead of a value the WHATWG URL parser would later strip
+ *     and resolve to an external origin
+ *   - "%2F%09%2Fevil.com", "%2F%0a%2Fevil.com", "%2F%0d%2Fevil.com" (percent-encoded tab/LF/CR
+ *     — the actual attack vector, since decodeURIComponent runs before the guard) are rejected
+ *     by safeRedirect
+ *   - Other C0 control codepoints (0x00-0x1F, e.g. %00 NUL, %1b ESC) are rejected by
+ *     safeRedirect, not just \t/\n/\r
+ *   - buildFastPathRedirect falls back to "/" (plus the appended auth_token) when its
+ *     redirect param decodes to a control-character bypass value
  */
 
 import { afterEach, describe, expect, mock, test } from "bun:test"
@@ -75,6 +87,38 @@ describe("safeRedirect", () => {
     expect(safeRedirect("%2F%2Fevil.com")).toBe("/")
   })
 
+  test('returns "/" for "/\\t/evil.com" (raw tab bypass)', () => {
+    expect(safeRedirect("/\t/evil.com")).toBe("/")
+  })
+
+  test('returns "/" for "/\\n/evil.com" (raw newline bypass)', () => {
+    expect(safeRedirect("/\n/evil.com")).toBe("/")
+  })
+
+  test('returns "/" for "/\\r/evil.com" (raw carriage-return bypass)', () => {
+    expect(safeRedirect("/\r/evil.com")).toBe("/")
+  })
+
+  test('returns "/" for "%2F%09%2Fevil.com" (URL-encoded tab bypass)', () => {
+    expect(safeRedirect("%2F%09%2Fevil.com")).toBe("/")
+  })
+
+  test('returns "/" for "%2F%0a%2Fevil.com" (URL-encoded newline bypass)', () => {
+    expect(safeRedirect("%2F%0a%2Fevil.com")).toBe("/")
+  })
+
+  test('returns "/" for "%2F%0d%2Fevil.com" (URL-encoded carriage-return bypass)', () => {
+    expect(safeRedirect("%2F%0d%2Fevil.com")).toBe("/")
+  })
+
+  test('returns "/" for "%2F%00%2Fevil.com" (URL-encoded NUL bypass, confirms range-based C0 guard)', () => {
+    expect(safeRedirect("%2F%00%2Fevil.com")).toBe("/")
+  })
+
+  test('returns "/" for "%2F%1b%2Fevil.com" (URL-encoded ESC bypass, confirms range-based C0 guard)', () => {
+    expect(safeRedirect("%2F%1b%2Fevil.com")).toBe("/")
+  })
+
   test("returns decoded path for a valid URL-encoded path", () => {
     expect(safeRedirect("%2Fvalid%2Fpath")).toBe("/valid/path")
   })
@@ -105,6 +149,11 @@ describe("buildFastPathRedirect", () => {
 
   test("blocks open-redirect in redirect param (%2F%2Fevil.com)", () => {
     const params = new URLSearchParams("auth_token=tok123&redirect=%2F%2Fevil.com")
+    expect(buildFastPathRedirect(params)).toBe("/?auth_token=tok123")
+  })
+
+  test("blocks control-character bypass in redirect param (%2F%09%2Fevil.com)", () => {
+    const params = new URLSearchParams("auth_token=tok123&redirect=%2F%09%2Fevil.com")
     expect(buildFastPathRedirect(params)).toBe("/?auth_token=tok123")
   })
 

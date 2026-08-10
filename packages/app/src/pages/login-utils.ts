@@ -4,6 +4,9 @@
 
 // Only accept relative paths to prevent open redirect.
 // Decodes URL encoding before checking to prevent %2F%2F bypass.
+// Rejects C0 control characters (0x00-0x1f), since browsers strip them
+// before resolving authority, letting values like "/\t/evil.com" bypass
+// the checks above and resolve to "http://evil.com/".
 export function safeRedirect(value: string | undefined | null): string {
   if (!value) return "/"
   const trimmed = value.trim()
@@ -13,7 +16,13 @@ export function safeRedirect(value: string | undefined | null): string {
   } catch {
     return "/"
   }
-  if (!decoded.startsWith("/") || decoded.startsWith("//") || decoded.includes("\\")) return "/"
+  if (
+    !decoded.startsWith("/") ||
+    decoded.startsWith("//") ||
+    decoded.includes("\\") ||
+    /[\x00-\x1f]/.test(decoded)
+  )
+    return "/"
   return decoded
 }
 
