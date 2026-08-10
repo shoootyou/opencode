@@ -181,6 +181,28 @@ describe("layout workspace helpers", () => {
     expect(sessions.sort(compareSessionTime).map((item) => item.id)).toEqual(["ses_a", "ses_z"])
   })
 
+  // `sortedRootSessions` combines two independently-added behaviors: upstream's
+  // `compareSessionTime` (sort-by-time) and the fork's pre-existing archive filtering
+  // (`isRootVisibleSession`, which drops any session with a `time.archived` timestamp). This
+  // test exercises both together in a single result, not two disjoint tests, so a regression
+  // that breaks either half (e.g. an archived session leaking back into the list, or an
+  // unarchived session landing in the wrong time-sorted position) fails this one assertion.
+  test("excludes archived sessions while keeping the remaining ones time-sorted", () => {
+    const result = sortedRootSessions(
+      {
+        path: { directory: "/workspace" },
+        session: [
+          session({ id: "ses_oldest", directory: "/workspace", time: { created: 1, updated: 1, archived: undefined } }),
+          session({ id: "ses_archived", directory: "/workspace", time: { created: 2, updated: 5, archived: 5 } }),
+          session({ id: "ses_newest", directory: "/workspace", time: { created: 3, updated: 3, archived: undefined } }),
+        ],
+      },
+      5,
+    )
+
+    expect(result.map((item) => item.id)).toEqual(["ses_newest", "ses_oldest"])
+  })
+
   test("detects project permissions with a filter", () => {
     const result = hasProjectPermissions(
       {
