@@ -65,7 +65,11 @@ globalThis.React = {
       if (key === "className") el.className = val as string
       else if (key === "role") el.setAttribute("role", val as string)
       else if (key === "aria-label") el.setAttribute("aria-label", val as string)
-      else if (key.startsWith("on") && typeof val === "function")
+      else if (key === "style" && typeof val === "object" && val !== null) {
+        for (const [prop, value] of Object.entries(val as Record<string, string>)) {
+          el.style.setProperty(prop, value)
+        }
+      } else if (key.startsWith("on") && typeof val === "function")
         el.addEventListener(key.slice(2).toLowerCase(), val as EventListener)
       else el.setAttribute(key, val as string)
     }
