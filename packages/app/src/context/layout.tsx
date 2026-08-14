@@ -456,6 +456,17 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       if (childStore.icon) {
         return { ...base, icon: { ...base.icon, override: childStore.icon } }
       }
+      // Global/id-less projects (no real childStore.project ID) don't have their own row in
+      // serverSync's project list — they share the server's single "global" project row. Merge
+      // childStore.projectMeta (name/icon/commands) so per-directory local edits made through
+      // the global/id-less save branch surface here instead of leaking the shared row's data.
+      if (!projectID && childStore.projectMeta) {
+        return {
+          ...base,
+          ...childStore.projectMeta,
+          icon: { ...base.icon, ...childStore.projectMeta.icon },
+        }
+      }
       return base
     }
 
