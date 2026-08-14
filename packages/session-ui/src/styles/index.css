@@ -6,6 +6,7 @@
 @import "../components/message-part.css" layer(components);
 @import "../components/message-nav.css" layer(components);
 @import "../components/session-review.css" layer(components);
+@import "../v2/components/session-progress-indicator-v2.css" layer(components);
 @import "../components/session-turn.css" layer(components);
 @import "../components/shell-submessage.css" layer(components);
 @import "../components/tool-count-label.css" layer(components);
