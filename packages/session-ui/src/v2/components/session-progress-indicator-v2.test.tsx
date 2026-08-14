@@ -112,7 +112,9 @@ const { createComponent } = await import(`${solidPkg}/dist/solid.js`)
 const { render } = await import(`${solidPkg}/web/dist/web.js`)
 const { SessionProgressIndicatorV2 } = await import("./session-progress-indicator-v2")
 
-function mountIntoContainer(props: { color?: string } = {}) {
+function mountIntoContainer(
+  props: { color?: string; style?: Record<string, string> | string } = {},
+) {
   const container = document.createElement("div")
   document.body.appendChild(container)
   const dispose = render(() => <SessionProgressIndicatorV2 {...props} />, container)
@@ -143,6 +145,29 @@ describe("SessionProgressIndicatorV2 color prop (Sub-fix A)", () => {
     const { svg, dispose } = mountIntoContainer()
     expect(svg).not.toBeNull()
     expect(svg!.style.getPropertyValue("--session-progress-indicator-color")).toBe("")
+    dispose()
+  })
+
+  test("merges an object-shaped style prop with color instead of overwriting it (mergeColorIntoStyle)", () => {
+    const { svg, dispose } = mountIntoContainer({
+      style: { "font-size": "12px" },
+      color: "var(--v2-avatar-bg-cyan)",
+    })
+    expect(svg).not.toBeNull()
+    expect(svg!.style.getPropertyValue("font-size")).toBe("12px")
+    expect(svg!.style.getPropertyValue("--session-progress-indicator-color")).toBe("var(--v2-avatar-bg-cyan)")
+    dispose()
+  })
+
+  test("merges a string-shaped style prop with color instead of overwriting it (mergeColorIntoStyle)", () => {
+    const { svg, dispose } = mountIntoContainer({
+      style: "font-size:12px",
+      color: "#ff00aa",
+    })
+    expect(svg).not.toBeNull()
+    const styleAttr = svg!.getAttribute("style") ?? ""
+    expect(styleAttr).toContain("font-size:12px")
+    expect(styleAttr).toContain("--session-progress-indicator-color:#ff00aa")
     dispose()
   })
 })
