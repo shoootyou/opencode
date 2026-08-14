@@ -41,6 +41,14 @@
 
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { createRoot } from "solid-js"
+import * as realUiContext from "@opencode-ai/ui/context"
+import * as realSolidRouter from "@solidjs/router"
+import * as realServerSync from "./server-sync"
+import * as realServerSdk from "./server-sdk"
+import * as realServer from "./server"
+import * as realPlatform from "./platform"
+import * as realTabs from "./tabs"
+import * as realPersist from "@/utils/persist"
 
 // `layout.tsx`'s `LayoutProvider` is built via `createSimpleContext({ init, ... })`. Mounting the
 // real provider+consumer JSX tree is infeasible under this repo's `bun test` React-shim (see the
@@ -64,8 +72,22 @@ type CapturedInit = (props: Record<string, unknown>) => {
   }
 }
 
+// Every `mock.module()` call in this file spreads the REAL module's exports first (mirroring
+// `edit-project.test.ts`'s `...realSolidQuery` pattern). `mock.module()` replaces the module
+// process-wide for the whole `bun test` run, not just this file — a partial override (only the
+// keys this file happens to need) leaves sibling test files that statically import the same
+// specifier (e.g. `server-sync.test.ts` importing `./server-sync`, `terminal.test.ts` importing
+// `@solidjs/router`) crashing with `SyntaxError: Export named 'X' not found`, since a static
+// import binds to the exact export shape of whichever mock ran last. Confirmed empirically:
+// without the spread, running this file before those others in the same `bun test` process
+// breaks them. NOTE: `mock.restore()`/`afterEach`/`afterAll` do NOT undo `mock.module()`
+// overrides (confirmed against Bun's own docs, https://bun.sh/docs/test/mocks — "It does not
+// reset modules overridden with mock.module()" — and empirically here) — the spread itself,
+// which makes every unmocked export identical to the real module, is the only fix; there is no
+// call that reverts a `mock.module()` override within a single `bun test` process.
 let capturedInit: CapturedInit | undefined
 mock.module("@opencode-ai/ui/context", () => ({
+  ...realUiContext,
   createSimpleContext: (input: { init: CapturedInit }) => {
     capturedInit = input.init
     return {
@@ -78,6 +100,7 @@ mock.module("@opencode-ai/ui/context", () => ({
 }))
 
 mock.module("@solidjs/router", () => ({
+  ...realSolidRouter,
   useLocation: () => ({ pathname: "/", search: "" }),
 }))
 
@@ -93,6 +116,7 @@ let projectData: Array<{
 }> = []
 
 mock.module("./server-sync", () => ({
+  ...realServerSync,
   useServerSync: () => () => ({
     ready: true,
     data: { project: projectData },
@@ -108,13 +132,19 @@ mock.module("./server-sync", () => ({
 }))
 
 mock.module("./server-sdk", () => ({
+  ...realServerSdk,
   useServerSDK: () => () => ({ scope: "local" }),
 }))
 
 let projectsList: Array<{ worktree: string; expanded: boolean }> = []
 mock.module("./server", () => ({
+  ...realServer,
   RECENTLY_CLOSED_DISPLAY_LIMIT: 5,
-  ServerConnection: { Key: { make: (v: string) => v } },
+  // `ServerConnection` is itself an object export (a TS namespace's runtime members), not a
+  // function — a shallow top-level `...realServer` spread doesn't reach inside it, so it must be
+  // nested-spread too or sibling files that call e.g. `ServerConnection.key`/`.local`/`.builtin`
+  // (not just `.Key.make`, which is all this file needs) would still see only this stub shape.
+  ServerConnection: { ...realServer.ServerConnection, Key: { make: (v: string) => v } },
   useServer: () => ({
     key: "local",
     projects: {
@@ -131,26 +161,30 @@ mock.module("./server", () => ({
 }))
 
 mock.module("./platform", () => ({
+  ...realPlatform,
   usePlatform: () => ({ platform: "web" }),
 }))
 
 mock.module("./tabs", () => ({
+  ...realTabs,
   useTabs: () => ({ store: [] }),
 }))
 
 mock.module("@/utils/persist", () => ({
-  Persist: {
-    serverGlobal: () => ({ key: "layout" }),
-    serverWorkspace: () => ({ key: "workspace" }),
-    serverSession: () => ({ key: "session" }),
-  },
+  ...realPersist,
+  // Only `persisted` needs overriding — the mocked version below ignores its `target` argument
+  // entirely, so `Persist.*`'s actual return shape (and `removePersisted`'s actual behavior,
+  // which this file never exercises or asserts on) are irrelevant here even though `layout.tsx`
+  // calls `Persist.serverGlobal()`/`.serverWorkspace()`/`.serverSession()` to build that argument.
+  // Leaving `Persist` and `removePersisted` untouched (via the `...realPersist` spread above)
+  // avoids the nested-object-mock problem entirely: no stub shape to keep in sync with the real
+  // one, and no risk of a sibling file like `persist.test.ts` observing a stub instead.
   persisted: (_target: unknown, store: [unknown, unknown]) => [
     store[0],
     store[1],
     null,
     Object.assign(() => true, { promise: undefined }),
   ],
-  removePersisted: async () => undefined,
 }))
 
 let layoutModule: typeof import("./layout")
