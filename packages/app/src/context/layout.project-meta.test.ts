@@ -187,13 +187,33 @@ mock.module("@/utils/persist", () => ({
   ],
 }))
 
-let layoutModule: typeof import("./layout")
+let layoutModuleLoaded = false
 
 beforeEach(async () => {
   projectData = []
   projectsList = []
   childStores = {}
-  if (!layoutModule) layoutModule = await import("./layout")
+  if (layoutModuleLoaded) return
+  layoutModuleLoaded = true
+  // Force a FRESH module instance of `./layout` via a cache-busting query string, instead of a
+  // bare `await import("./layout")`. Bun's ESM loader caches modules by exact resolved
+  // specifier: if an earlier-run test file in the same `bun test` process (e.g.
+  // `dialog-select-file.test.tsx`, which statically imports `./command-palette` ->
+  // `@/context/layout`) already triggered a real, uncaptured load of `"./layout"` before this
+  // file's `mock.module("@opencode-ai/ui/context", ...)` call above took effect, that CACHED
+  // module instance's top-level `createSimpleContext({...})` call already ran against the real
+  // implementation and will NEVER re-run. A bare `import("./layout")` here would just return
+  // that same stale cached instance, silently leaving `capturedInit` unset (this file's original
+  // bug — 45+ reproductions, "capturedInit not set" with zero exceptions). A distinct query
+  // string forces the loader to treat this as a new module graph node, re-executing
+  // `layout.tsx`'s top-level code fresh, at a point strictly after this file's `mock.module()`
+  // registrations (which run at this file's module-eval time, before any `beforeEach`) — so the
+  // capture succeeds regardless of what any other test file already did to the real
+  // `"./layout"` specifier or what order `bun test` schedules files in. Confirmed empirically:
+  // this fixes the previously-flaky failure when run alongside `dialog-select-file.test.tsx` in
+  // the same `bun test` invocation (`bun test --conditions=solid --preload ./happydom.ts
+  // src/components/dialog-select-file.test.tsx src/context/layout.project-meta.test.ts`).
+  await import(`./layout?project-meta-test-fresh=${Date.now()}-${Math.random()}`)
 })
 
 function readList() {
