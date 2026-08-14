@@ -5,12 +5,23 @@ import { normalizeProjectInfo } from "@/context/global-sync/utils"
 import { createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useGlobal } from "@/context/global"
+import { useLanguage } from "@/context/language"
 import { type LocalProject } from "@/context/layout"
 import { ServerConnection } from "@/context/server"
+import { showToast } from "@/utils/toast"
+
+function showRequestError(language: ReturnType<typeof useLanguage>, err: unknown) {
+  showToast({
+    variant: "error",
+    title: language.t("common.requestFailed"),
+    description: err instanceof Error ? err.message : String(err),
+  })
+}
 
 export function createEditProjectModel(props: { project: LocalProject; server: ServerConnection.Any }) {
   const dialog = useDialog()
   const global = useGlobal()
+  const language = useLanguage()
   const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
   const folderName = createMemo(() => getFilename(props.project.worktree))
   const defaultName = createMemo(() => props.project.name || folderName())
@@ -71,7 +82,6 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
       const start = store.startup.trim()
 
       if (props.project.id && props.project.id !== "global") {
-        if ((await serverCtx().sdk.protocol) !== "v1") return
         const project = await serverCtx()
           .sdk.client.project.update({
             projectID: props.project.id,
@@ -81,13 +91,10 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
             commands: { start },
           })
           .then((result) => result.data)
-        if (!project) return
-        // const project = await serverCtx().sdk.api.project.update({
-        //   projectID: props.project.id,
-        //   name,
-        //   icon: { color: store.color || "", override: store.iconOverride || "" },
-        //   commands: { start },
-        // })
+        if (!project) {
+          showRequestError(language, new Error("Project update failed"))
+          return
+        }
         serverCtx().sync.set("project", (items) =>
           items.map((item) => (item.id === project.id ? normalizeProjectInfo(project) : item)),
         )
