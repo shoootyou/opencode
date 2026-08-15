@@ -28,6 +28,9 @@ target
 
 # Local dev files
 opencode-dev
+
+# Sui debugger session state (ephemeral, agent-local)
+.debug/
 UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
