@@ -10,33 +10,58 @@
  *   `childStore.project` is falsy (global/id-less), spread AFTER `metadata`/`project` so cached
  *   local writes win, with `icon` merged as its own sub-object (`{ ...metadata?.icon,
  *   ...childStore.projectMeta.icon }`) — not a shallow top-level spread.
+ *
+ *   AMENDED per plan `218-opencode-live-browser-verification`, step E3's spec
+ *   (`e3-fix-whatever-e2-finds.md`, "Root cause B"): the `!projectID` guard e5 shipped is a bare
+ *   truthiness check, not an identity check. The server's shared global/id-less project row has
+ *   a literal `id` of `"global"` (`ProjectV2.ID.make("global")`, a non-empty, truthy string).
+ *   Once client bootstrap resolves `childStore.project` to that sentinel (~1-1.25s after page
+ *   load, per Sui's live timing samples), `!projectID` goes permanently `false` — the merge this
+ *   file already tests below (with `childStore.project === ""`) silently stops applying forever
+ *   after that resolution. The new describe block below pins the exact `"global"`-string case —
+ *   RED under today's code (pre-E3-fix), proving the race is real and reproducible in a test,
+ *   not just live-observed.
  * @behavior
- *   - Global/id-less project (`childStore.project` falsy): `list()`'s output for that project
- *     reflects `childStore.projectMeta.icon.color`, `.name`, and `.commands.start` — RED today,
- *     `enrich()` never reads `childStore.projectMeta` at all.
- *   - Real-ID project (`childStore.project` truthy): `list()`'s output is unaffected by Option A
- *     — `metadata.icon.color` (from `serverSync().data.project`) remains the sole color source,
- *     the pre-existing `childStore.icon` override merge is unchanged — PASSES today (regression
- *     guard proving this file's test harness is sound, not just asserting on the new behavior).
+ *   - Global/id-less project (`childStore.project` falsy, i.e. `""`): `list()`'s output for that
+ *     project reflects `childStore.projectMeta.icon.color`, `.name`, and `.commands.start` —
+ *     PASSES today (e5 already fixed this exact falsy-string case).
+ *   - Global SENTINEL project (`childStore.project === "global"`, the literal string, NOT
+ *     falsy): `list()`'s output must ALSO reflect `childStore.projectMeta` — RED today, since
+ *     e5's `!projectID` guard treats the truthy `"global"` string as a real ID and skips the
+ *     merge entirely. This is the exact race-condition scenario Sui found live.
+ *   - Real-ID project (`childStore.project` truthy, a real non-"global" ID): `list()`'s output
+ *     is unaffected by either Option A or E3's fix — `metadata.icon.color` (from
+ *     `serverSync().data.project`) remains the sole color source, the pre-existing
+ *     `childStore.icon` override merge is unchanged — PASSES today (regression guard proving
+ *     this file's test harness is sound, not just asserting on the new behavior).
  *   - Defensive tie-break: for a global/id-less project where BOTH the shared `metadata.icon`
  *     (the server's single `"global"` project row, per D6's rationale) and
  *     `childStore.projectMeta.icon` carry a `color`, `childStore.projectMeta.icon` must win
- *     (spread later in the merge literal) — RED today, since the merge doesn't exist yet, so
- *     this precedence can't be observed either way (metadata's stale color leaks through
- *     unchallenged instead).
+ *     (spread later in the merge literal) — PASSES today for the `""` case (e5 already covers
+ *     this); this file does not re-pin the tie-break for the `"global"`-string case specifically,
+ *     since the new describe block below already establishes the merge applies at all for that
+ *     case, and `enrich-project.test.ts`'s own tie-break test covers the extracted helper's
+ *     precedence rule directly.
  * @edge-cases
  *   - `childStore.projectMeta.name`/`.commands` must also flow through generically (spread of
  *     the whole `projectMeta` object, not narrowly `icon.color` only) — this is the same read-
  *     path gap that silently breaks `renameProject`'s global/id-less branch
  *     (`pages/layout.tsx:1279`) today.
  *   - Real-ID projects structurally never receive a `projectMeta` merge, because the gate is
- *     `!projectID` (a whole-branch gate), not a field-level presence check — asserted via the
- *     regression-guard test using a real-ID project whose `childStore.projectMeta` is left
- *     `undefined` (matching current reality: `edit-project.ts`'s real-ID branch never writes it).
- * @see ./layout.tsx (enrich(), lines ~445-460 — target of the fix, unmodified here)
+ *     `isGlobalProject` (a whole-branch gate keyed off identity, not a field-level presence
+ *     check) — asserted via the regression-guard test using a real-ID project whose
+ *     `childStore.projectMeta` is left `undefined` (matching current reality: `edit-project.ts`'s
+ *     real-ID branch never writes it).
+ *   - `childStore.project === "global"` must NOT be looked up in `serverSync().data.project` by
+ *     `id` (every directory sharing the sentinel would incorrectly resolve to the same server
+ *     row) — the new test below fixes `projectData` metadata's `worktree` field so a same-id
+ *     row can be independently confirmed by that field once E3's fix lands.
+ * @see ./layout.tsx (enrich(), lines ~445-471 — target of E3's fix, unmodified here)
  * @see ./global-sync/child-store.ts (ProjectMeta write path — `projectMeta()`, unaffected by this fix)
  * @see ./global-sync/types.ts (`ProjectMeta`, `State.projectMeta` — shape read by `enrich()`)
+ * @see ./global-sync/enrich-project.ts (E3's extracted shared helper — new module, not yet created)
  * @see ../../../../.yui-soul/plans/wip/209-opencode-subagent-animation-project-color/e5-taku-spec-task2.md
+ * @see ../../../../.yui-soul/plans/wip/218-opencode-live-browser-verification/e3-fix-whatever-e2-finds.md
  */
 
 import { beforeEach, describe, expect, mock, test } from "bun:test"
@@ -233,6 +258,34 @@ describe("useLayout().projects.list() — Root cause B: childStore.projectMeta r
     childStores["/repo/global-project"] = [
       {
         project: "", // falsy childStore.project => global/id-less branch in enrich()
+        icon: undefined,
+        projectMeta: {
+          name: "My Cool Project",
+          icon: { color: "mint" },
+          commands: { start: "npm run dev" },
+        },
+      },
+      () => {},
+    ]
+
+    const [project] = readList()
+
+    expect(project?.icon?.color).toBe("mint")
+    expect(project?.name).toBe("My Cool Project")
+    expect(project?.commands?.start).toBe("npm run dev")
+  })
+
+  test("global SENTINEL project (childStore.project === 'global', the literal string, not falsy) surfaces childStore.projectMeta too (RED until E3's fix lands — pins the exact race Sui found live)", () => {
+    // The server's shared global/id-less project row has a literal id of "global"
+    // (ProjectV2.ID.make("global")) — a truthy sentinel, not the empty string the test above
+    // uses. Once client bootstrap resolves childStore.project to this exact string (~1-1.25s
+    // after page load per Sui's live timing samples), e5's `!projectID` guard goes permanently
+    // false and this merge silently stops applying forever after — this is Root cause B.
+    projectData = [{ id: "global", worktree: "/repo/sentinel-project", name: "Shared", icon: {} }]
+    projectsList = [{ worktree: "/repo/sentinel-project", expanded: false }]
+    childStores["/repo/sentinel-project"] = [
+      {
+        project: "global", // truthy literal sentinel string, NOT "" — the exact Root-Cause-B case
         icon: undefined,
         projectMeta: {
           name: "My Cool Project",

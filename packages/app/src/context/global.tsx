@@ -93,7 +93,12 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
   },
 })
 
-function createServerCtx(
+// Exported for `global.enrich-project-meta.test.ts` (plan `218-opencode-live-browser-verification`,
+// step E3, Root Cause A pin) — visibility-only change, no behavior change. See Taku's spec
+// (`e3-fix-whatever-e2-finds.md`, Task 2 Done criteria) for rationale: this is the least-invasive
+// harness path versus mirroring `layout.project-meta.test.ts`'s heavier `mock.module()`-based
+// `createSimpleContext` capture technique.
+export function createServerCtx(
   conn: ServerConnection.Any,
   scope: ServerScope,
   projects: ReturnType<typeof createServerProjects>,
