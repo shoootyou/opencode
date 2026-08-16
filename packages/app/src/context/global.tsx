@@ -6,6 +6,7 @@ import { pathKey } from "@/utils/path-key"
 import { useServerHealth } from "@/utils/server-health"
 import { createServerSdkContext } from "./server-sdk"
 import { createServerSyncContext } from "./server-sync"
+import { enrichProject } from "./global-sync/enrich-project"
 import { getOwner } from "solid-js/web"
 import { QueryClient } from "@tanstack/solid-query"
 import type { ServerScope } from "@/utils/server-scope"
@@ -93,7 +94,12 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
   },
 })
 
-function createServerCtx(
+// Exported for `global.enrich-project-meta.test.ts` (plan `218-opencode-live-browser-verification`,
+// step E3, Root Cause A pin) — visibility-only change, no behavior change. See Taku's spec
+// (`e3-fix-whatever-e2-finds.md`, Task 2 Done criteria) for rationale: this is the least-invasive
+// harness path versus mirroring `layout.project-meta.test.ts`'s heavier `mock.module()`-based
+// `createSimpleContext` capture technique.
+export function createServerCtx(
   conn: ServerConnection.Any,
   scope: ServerScope,
   projects: ReturnType<typeof createServerProjects>,
@@ -112,19 +118,7 @@ function createServerCtx(
 
   function enrich(project: { worktree: string; expanded: boolean }) {
     const [childStore] = sync.child(project.worktree, { bootstrap: false })
-    const projectID = childStore.project
-    const metadata = projectID
-      ? sync.data.project.find((x) => x.id === projectID)
-      : sync.data.project.find((x) => x.worktree === project.worktree)
-
-    // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
-    // Without this, different subdirectories of the same git repo would share the same
-    // icon from the database instead of using their individual overrides.
-    const base = { ...metadata, ...project }
-    if (childStore.icon) {
-      return { ...base, icon: { ...base.icon, override: childStore.icon } }
-    }
-    return base
+    return enrichProject(project, childStore, sync.data.project)
   }
 
   const projectsList = createMemo(() => projects.list().map(enrich))

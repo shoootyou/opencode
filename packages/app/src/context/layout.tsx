@@ -9,6 +9,7 @@ import { RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServer } from "./se
 import { usePlatform } from "./platform"
 import { Project } from "@opencode-ai/sdk/v2"
 import { normalizeProjectInfo } from "./global-sync/utils"
+import { enrichProject } from "./global-sync/enrich-project"
 import { Persist, persisted, removePersisted } from "@/utils/persist"
 import { pathKey } from "@/utils/path-key"
 import { decode64 } from "@/utils/base64"
@@ -444,19 +445,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     function enrich(project: { worktree: string; expanded: boolean }) {
       const [childStore] = serverSync().child(project.worktree, { bootstrap: false })
-      const projectID = childStore.project
-      const metadata = projectID
-        ? serverSync().data.project.find((x) => x.id === projectID)
-        : serverSync().data.project.find((x) => x.worktree === project.worktree)
-
-      // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
-      // Without this, different subdirectories of the same git repo would share the same
-      // icon from the database instead of using their individual overrides.
-      const base = { ...metadata, ...project }
-      if (childStore.icon) {
-        return { ...base, icon: { ...base.icon, override: childStore.icon } }
-      }
-      return base
+      return enrichProject(project, childStore, serverSync().data.project)
     }
 
     const roots = createMemo(() => {
