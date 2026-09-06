@@ -124,24 +124,60 @@ export namespace FSUtil {
         )
       })
 
+      // Rename-based atomic write (RFC 046 D-L1-10b, §4.1.1.2): writes
+      // `content` to a fresh temp file, then `rename`s it into place -
+      // `rename` is the ONLY operation that ever touches `path` itself.
+      // This structurally protects against a hardlinked or symlinked
+      // `path` (D-L1-10a's hook-level check is a defense-in-depth
+      // backstop, not a prerequisite - this mechanism holds even if
+      // `writeWithDirs` is called directly, bypassing any hook).
       const writeWithDirs = Effect.fn("FileSystem.writeWithDirs")(function* (
         path: string,
         content: string | Uint8Array,
         mode?: number,
       ) {
-        const write = typeof content === "string" ? fs.writeFileString(path, content) : fs.writeFile(path, content)
+        const dir = dirname(path)
+        yield* ensureDir(dir)
 
-        yield* write.pipe(
-          Effect.catchIf(
-            (e) => e.reason._tag === "NotFound",
-            () =>
-              Effect.gen(function* () {
-                yield* fs.makeDirectory(dirname(path), { recursive: true })
-                yield* write
-              }),
-          ),
+        // `makeTempFile({directory: dir})` mkdtemps a randomly-named
+        // subdirectory inside `dir`, then creates the temp file inside
+        // THAT - the temp path is nested two levels below `dir`, not a
+        // direct sibling of `path`. What matters for avoiding a
+        // cross-device `EXDEV` on the rename below is that the temp path
+        // stays CONTAINED within `dir` (same filesystem/device), not that
+        // its own `dirname()` is bit-for-bit `dir`.
+        const tmpPath = yield* fs.makeTempFile({ directory: dir })
+        const tmpDir = dirname(tmpPath)
+        // Removes the WHOLE wrapping temp subdirectory (not just the
+        // file inside it) - `makeTempFile`'s own mkdtemp scaffolding
+        // would otherwise leak an empty directory under `dir` on every
+        // write. Ignored (never fails the caller) so a cleanup failure
+        // never masks the real write outcome.
+        const cleanupTmpDir = fs.remove(tmpDir, { recursive: true, force: true }).pipe(Effect.ignore)
+
+        yield* Effect.gen(function* () {
+          const write =
+            typeof content === "string" ? fs.writeFileString(tmpPath, content) : fs.writeFile(tmpPath, content)
+          yield* write
+          // Applied to the TEMP path, never the final `path` - strictly
+          // before the rename below.
+          if (mode) yield* fs.chmod(tmpPath, mode)
+          // The only operation that ever touches `path`. A typed
+          // `PlatformError` here (e.g. `EXDEV`, cross-device rename)
+          // propagates unchanged through the error channel - never
+          // swallowed into an opaque defect, never silently retried as a
+          // non-atomic copy+unlink fallback.
+          yield* fs.rename(tmpPath, path)
+        }).pipe(
+          // Failure after the temp file/directory exist but before a
+          // successful rename: clean up the temp artifact, then let the
+          // original failure propagate - `path` is left untouched.
+          Effect.tapError(() => cleanupTmpDir),
+          // Success: the temp file has already been moved out via
+          // rename, leaving `tmpDir` an empty scaffold directory - remove
+          // it too.
+          Effect.andThen(cleanupTmpDir),
         )
-        if (mode) yield* fs.chmod(path, mode)
       })
 
       const glob = Effect.fn("FileSystem.glob")(function* (pattern: string, options?: Glob.Options) {
