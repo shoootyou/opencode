@@ -242,6 +242,9 @@ export function SessionHeader() {
     reviewVisible: isDesktop(),
     reviewOpened: view().reviewPanel.opened(),
     onReviewToggle: () => view().reviewPanel.toggle(),
+    settingsLabel: language.t("sidebar.settings"),
+    settingsKeybind: command.keybindParts("settings.open"),
+    onSettingsOpen: () => command.trigger("settings.open"),
   }))
 
   const selectApp = (app: OpenApp) => {
@@ -524,6 +527,9 @@ type SessionHeaderV2ActionsState = {
   reviewVisible: boolean
   reviewOpened: boolean
   onReviewToggle: () => void
+  settingsLabel: string
+  settingsKeybind: string[]
+  onSettingsOpen: () => void
 }
 
 function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
@@ -563,6 +569,28 @@ function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
           />
         </TooltipV2>
       </Show>
+      <TooltipV2
+        class="shrink-0"
+        placement="bottom"
+        value={
+          <>
+            {props.state.settingsLabel}
+            <Show when={props.state.settingsKeybind.length > 0}>
+              <KeybindV2 keys={props.state.settingsKeybind} variant="neutral" />
+            </Show>
+          </>
+        }
+      >
+        <IconButtonV2
+          type="button"
+          variant="ghost-muted"
+          size="large"
+          class="!w-9 shrink-0"
+          onClick={props.state.onSettingsOpen}
+          aria-label={props.state.settingsLabel}
+          icon={<IconV2 name="settings-gear" />}
+        />
+      </TooltipV2>
     </div>
   )
 }
