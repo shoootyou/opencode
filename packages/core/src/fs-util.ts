@@ -136,6 +136,17 @@ export namespace FSUtil {
         content: string | Uint8Array,
         mode?: number,
       ) {
+        // D-L1-12 (RFC 046 §4.1.1.2(c)): runs BEFORE ensureDir/makeTempFile below - restores the
+        // pre-D-L1-10b EACCES-on-permission-denied behavior the rename-based rewrite silently
+        // dropped (POSIX rename(2) only requires write permission on the CONTAINING DIRECTORY,
+        // never the destination file, unlike the old open(path, 'w') this replaced). `fs.access`
+        // follows symlinks the same way the replaced `open()` always did, so this needs no
+        // separate realpath resolution of its own. CRITICAL INVARIANT: this check only answers
+        // yes/no - its result is never captured into a variable that reaches the rename call
+        // below, which keeps using the same literal `path` argument this function was called
+        // with, unchanged from D-L1-10b (see rename() at the bottom of this function).
+        if (yield* fs.exists(path)) yield* fs.access(path, { writable: true })
+
         const dir = dirname(path)
         yield* ensureDir(dir)
 

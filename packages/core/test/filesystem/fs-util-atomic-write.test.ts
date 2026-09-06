@@ -28,6 +28,21 @@
  *   - A typed `PlatformError` from `rename` (e.g. `EXDEV`) must propagate through the error channel
  *     unchanged - never get swallowed into an opaque defect via a bare `Layer.orDie`/`Effect.orDie`,
  *     and never get silently retried as a non-atomic copy+unlink fallback.
+ *   - (RFC 046 D-L1-12, §4.1.1.2(c)) BEFORE `ensureDir`/`makeTempFile` ever run: IF `path` already
+ *     exists, check write permission against its RESOLVED target (following symlinks, the same way the
+ *     replaced `open(path,'w')` implementation always did) and fail with a `PermissionDenied`-shaped
+ *     `PlatformError` on denial - restoring the pre-D-L1-10b behavior `rename(2)` silently dropped
+ *     (`rename` only ever requires write permission on the CONTAINING DIRECTORY, never the destination
+ *     file itself). Must throw before any temp file/directory is created - a rejected write leaves zero
+ *     new filesystem entries behind. If `path` does NOT already exist, this check does not run at all -
+ *     ordinary new-file creation is unaffected.
+ *   - **CRITICAL INVARIANT (Ei's, restated at both the decision level and inline at the exact protected
+ *     code line in the RFC)**: the permission check's stat/realpath resolution is used ONLY to answer
+ *     the yes/no proceed-or-abort question. It is NEVER reused to decide the final `fs.rename(tmpPath,
+ *     path)` call's target, which continues to take the same literal, unresolved `path` argument this
+ *     function was always called with. Reusing the resolved value here would reintroduce, one layer
+ *     lower in this same function, precisely the check-result/mutation-target coupling that caused
+ *     rounds 1-4's hardlink/symlink bugs (D-L1-9/D-L1-10) in the plugin hook's own pre-flight checks.
  * @edge-cases
  *   - `path`'s target already exists and is a HARDLINK to a file OUTSIDE the write's own directory:
  *     writing new content via `writeWithDirs` DIRECTLY (bypassing any hook) must never touch/corrupt the
@@ -49,6 +64,25 @@
  *   - The write to the temp path itself fails (simulated disk-full): the failure propagates, `path` is
  *     untouched (it was never a candidate for the write - only `rename` ever touches it), and no
  *     orphaned temp file/directory remains.
+ *   - (D-L1-12) `path` already exists and is `chmod 0o444` (read-only): the write fails with a
+ *     `PermissionDenied`-shaped `PlatformError`, matching the pre-D-L1-10b `open(path,'w')` EACCES
+ *     failure shape callers (`packages/opencode/test/tool/write.test.ts`'s `"throws error when OS
+ *     denies write access"`) already handle, with no temp file/directory ever created.
+ *   - (D-L1-12) `path` already exists and is a SYMLINK whose real target is `chmod 0o444`: also
+ *     rejected with `PermissionDenied` - the check resolves through the symlink, matching the replaced
+ *     `open()` implementation's own follow-symlinks behavior exactly.
+ *   - (D-L1-12) `path` does not exist yet: the permission check is skipped entirely - this is the
+ *     ordinary "write brand-new file" path exercised throughout `write.test.ts`, and must remain
+ *     unaffected by this check's addition.
+ *   - (D-L1-12's own required done-criterion) **Decoupling regression guard**: a dedicated test proves
+ *     the permission check's resolved/realpath value is never wired into the rename's actual target -
+ *     constructed via a symlink whose literal `path` argument differs, as a string, from its
+ *     realpath-resolved target, then asserting (mechanically, via a `rename` call spy) that the rename
+ *     destination is the literal argument, never the resolved one. Verified additionally via this
+ *     workspace's own `mutation-test-assertion` discipline (temporarily coupling the two inside a
+ *     scratch implementation, confirming this exact test regresses to red, then reverting) - see Shin's
+ *     handoff report for the verification transcript; this test ships to CI as a permanent regression
+ *     check, same discipline as the hardlink/symlink PRIMARY tests below.
  * @edge-cases-out-of-scope
  *   - The hook-level `isHardlinkedExistingPath` check (D-L1-10a) - lives in the separate
  *     `opencode-plan-query` package, own test file (`plugin.e3-hardlink-containment.test.ts`).
@@ -68,11 +102,15 @@
  *     §8 risk #11) - not verifiable from this Linux sandbox at all; documented here, not silently assumed.
  * @see RFC 046 §4.1.1.2, D-L1-10(b) (round-4, Ei hardlink+TOCTOU findings) -
  *   `.yui-soul/rfcs/approved/046-yui-soul-write-safety-and-commit-governance/README.md`
+ * @see RFC 046 §4.1.1.2(c), §6 D-L1-12 (Kou's Stage 1 finding, rodo-approved 2026-09-05) - the
+ *   pre-rename permission check and its critical decoupling invariant, same document as above
+ * @see `packages/opencode/test/tool/write.test.ts`'s `"throws error when OS denies write access"` -
+ *   the regressed test D-L1-12 restores to green; not modified by this file's changes
  * @see `opencode-plan-query/test/plugin.e3-hardlink-containment.test.ts` (sibling hook-level check,
  *   D-L1-10a, same plan/task, other repo)
  */
 import { describe, test, expect } from "bun:test"
-import { Effect, Exit, FileSystem, Layer, Option } from "effect"
+import { Cause, Effect, Exit, FileSystem, Layer, Option } from "effect"
 import type * as Scope from "effect/Scope"
 import * as PlatformError from "effect/PlatformError"
 import { NodeFileSystem } from "@effect/platform-node"
@@ -499,6 +537,199 @@ describe("FSUtil.writeWithDirs - rename-based atomic write (plan 262 E3 Task 3, 
         }),
       )
       expect(after.sort()).toEqual(before.sort())
+    })
+  })
+
+  describe("pre-rename permission check (RFC 046 D-L1-12, §4.1.1.2(c)/§6)", () => {
+    test("throws a PermissionDenied-shaped PlatformError against an existing chmod 0o444 destination, before any temp file/directory is ever created - matching the old open(path,'w') EACCES failure shape", async () => {
+      const tmp = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.makeTempDirectory()
+        }),
+      )
+      const target = path.join(tmp, "readonly.txt")
+      await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          yield* filesys.writeFileString(target, "ORIGINAL_READONLY_CONTENT\n")
+          yield* filesys.chmod(target, 0o444)
+        }),
+      )
+
+      // Captured BEFORE the write attempt - the directory-listing-diff
+      // discipline this whole file already uses for failure-path cleanup
+      // (see "failure-path cleanup" describe block above), applied here to
+      // prove the permission check runs strictly before ensureDir/
+      // makeTempFile: a rejected write must leave zero new filesystem
+      // entries behind, not even a transient temp subdirectory.
+      const before = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.readDirectory(tmp, { recursive: true })
+        }),
+      )
+
+      const exit = await withFileSystemExit(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          yield* fs.writeWithDirs(target, "NEW_CONTENT_SHOULD_NEVER_LAND\n")
+        }),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.squash(exit.cause)
+        expect(failure).toBeInstanceOf(PlatformError.PlatformError)
+        expect((failure as PlatformError.PlatformError).reason._tag).toBe("PermissionDenied")
+      }
+
+      const finalContent = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.readFileString(target)
+        }),
+      )
+      expect(finalContent).toBe("ORIGINAL_READONLY_CONTENT\n")
+
+      const after = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.readDirectory(tmp, { recursive: true })
+        }),
+      )
+      expect(after.sort()).toEqual(before.sort())
+    })
+
+    test("resolves through symlinks the same way the replaced open() implementation did: a destination that is a symlink to a chmod 0o444 real file is also rejected with PermissionDenied", async () => {
+      const tmp = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.makeTempDirectory()
+        }),
+      )
+      const realFile = path.join(tmp, "real-readonly.txt")
+      const symlinkDestination = path.join(tmp, "via-symlink.txt")
+      await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          yield* filesys.writeFileString(realFile, "ORIGINAL_REAL_FILE_CONTENT\n")
+          yield* filesys.chmod(realFile, 0o444)
+          yield* filesys.symlink(realFile, symlinkDestination)
+        }),
+      )
+
+      const exit = await withFileSystemExit(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          yield* fs.writeWithDirs(symlinkDestination, "NEW_CONTENT_SHOULD_NEVER_LAND\n")
+        }),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.squash(exit.cause)
+        expect(failure).toBeInstanceOf(PlatformError.PlatformError)
+        expect((failure as PlatformError.PlatformError).reason._tag).toBe("PermissionDenied")
+      }
+
+      const finalContent = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.readFileString(realFile)
+        }),
+      )
+      expect(finalContent).toBe("ORIGINAL_REAL_FILE_CONTENT\n")
+    })
+
+    test("does not run the permission check at all when the destination does not yet exist - ordinary new-file creation is unaffected", async () => {
+      const tmp = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.makeTempDirectory()
+        }),
+      )
+      const target = path.join(tmp, "brand-new-permission-check-target.txt")
+
+      await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          yield* fs.writeWithDirs(target, "first write ever\n")
+        }),
+      )
+
+      const content = await withFileSystem(
+        NodeFileSystem.layer,
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          return yield* filesys.readFileString(target)
+        }),
+      )
+      expect(content).toBe("first write ever\n")
+    })
+
+    test("CRITICAL decoupling invariant: the permission check's resolved/realpath target is NEVER reused as the rename's destination - fs.rename's newPath is always the literal, unresolved `path` argument writeWithDirs was called with", async () => {
+      const calls: SpyCall[] = []
+      await withFileSystem(
+        spyFileSystemLayer(calls),
+        Effect.gen(function* () {
+          const filesys = yield* FileSystem.FileSystem
+          const fs = yield* FSUtil.Service
+          const tmp = yield* filesys.makeTempDirectoryScoped()
+
+          // A writable file living OUTSIDE the symlink's own directory - if
+          // a future implementation resolved `path` (following symlinks,
+          // per D-L1-12's own "resolved target" language) to answer the
+          // permission question, its resolved value would be THIS path -
+          // deliberately a different string from the literal `path`
+          // argument below, exactly the scenario the critical invariant
+          // exists to guard against.
+          const realTarget = path.join(tmp, "outside", "real-target.txt")
+          yield* fs.ensureDir(path.dirname(realTarget))
+          yield* filesys.writeFileString(realTarget, "ORIGINAL_REAL_TARGET_CONTENT\n")
+
+          // The literal argument `writeWithDirs` is called with: a symlink
+          // whose realpath resolves to `realTarget` - never equal to it as
+          // a string.
+          const literalPath = path.join(tmp, "link.txt")
+          yield* filesys.symlink(realTarget, literalPath)
+          const resolvedLiteralPath = yield* filesys.realPath(literalPath)
+          expect(resolvedLiteralPath).not.toBe(literalPath)
+
+          yield* fs.writeWithDirs(literalPath, "NEW_CONTENT_VIA_LITERAL_PATH\n")
+
+          // Mechanical assertion (primary): inspect the ACTUAL argument the
+          // implementation's own `rename()` call received - not an
+          // inference from side effects alone. This is what a future
+          // refactor that accidentally passed the permission check's
+          // resolved/realpath'd value into `rename()` instead of the
+          // original `path` argument would flip.
+          const renameCall = calls.find((c): c is Extract<SpyCall, { method: "rename" }> => c.method === "rename")
+          expect(renameCall).toBeDefined()
+          expect(renameCall!.newPath).toBe(literalPath)
+          expect(renameCall!.newPath).not.toBe(realTarget)
+
+          // Functional consequence (secondary, independent confirmation):
+          // had the guarded-against bug been present, `realTarget` itself
+          // would have been clobbered with the new content instead of
+          // `literalPath`'s own directory entry being replaced. Neither
+          // happens here.
+          expect(yield* filesys.readFileString(realTarget)).toBe("ORIGINAL_REAL_TARGET_CONTENT\n")
+          expect(yield* filesys.readFileString(literalPath)).toBe("NEW_CONTENT_VIA_LITERAL_PATH\n")
+        }),
+      )
     })
   })
 
