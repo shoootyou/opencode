@@ -26,6 +26,13 @@
  *     suite's concern — that adversarial class is closed at the `soul-tools` plugin hook level
  *     (D-L1-9), not the permission-pattern DSL, and is covered in `opencode-plan-query`'s own test
  *     suite (`plugin.e3-canonical-root-containment.test.ts`).
+ *   - Round-1 audit remediation (Ei r1-ei-permissions-signing.md Finding 1, plan 262): the
+ *     star-slash-prefixed patterns alone never match a resource path with ZERO segments before
+ *     `.yui-soul` — the canonical single-repo scaffold topology (`.yui-soul/` directly at
+ *     `location.directory`'s root), NOT merely a corner case. The zero-prefix companion patterns
+ *     (`SHO_SCOPED_EDIT`/`EI_SCOPED_EDIT` below now carry both) close this without reopening the
+ *     lookalike bypass above: the zero-prefix reviews pattern is anchored at position 0, so it
+ *     does not match `src/x.yui-soul/reviews/y.md`.
  * @see ../../src/permission/index.ts (fromConfig/merge/evaluate, disabled)
  * @see ../../src/agent/agent.ts:119-136 (the real agent-level `"*": "allow"` default this suite's
  *   fail-open demonstration reproduces the masking effect of)
@@ -35,6 +42,8 @@
  * @see ../../../../yui-soul/bin/lib/defaults.js — DEFAULTS.crew sho/ei entries (this literal MUST
  *   stay in lockstep with that file's `permission.edit` value; see that repo's own
  *   `test/defaults.test.js` for the generator-side assertion of the identical shape/order)
+ * @see ../../../../.yui-soul/reviews/262-yui-soul-write-safety-commit-governance/r1-ei-permissions-signing.md
+ *   Finding 1 (zero-prefix pattern-anchoring gap, round-1 audit remediation)
  */
 import { test, expect } from "bun:test"
 import { Permission } from "../../src/permission"
@@ -48,16 +57,22 @@ import { Permission } from "../../src/permission"
 const AGENT_LEVEL_DEFAULTS = Permission.fromConfig({ "*": "allow" })
 
 // The EXACT `permission.edit` value RFC 046 D-L1-6 specifies for `sho` (anchored patterns,
-// deny-all FIRST — see this file's own @spec-handoff and the RFC's residual risk #7).
+// deny-all FIRST — see this file's own @spec-handoff and the RFC's residual risk #7). Round-1
+// audit remediation (Ei r1-ei-permissions-signing.md Finding 1, plan 262) added the zero-prefix
+// companion patterns (`.yui-soul/reviews/*`, `.yui-soul/rfcs/*/*/review-<name>.md`).
 const SHO_SCOPED_EDIT = {
   "*": "deny",
+  ".yui-soul/reviews/*": "allow",
   "*/.yui-soul/reviews/*": "allow",
+  ".yui-soul/rfcs/*/*/review-sho.md": "allow",
   "*/.yui-soul/rfcs/*/*/review-sho.md": "allow",
 } as const
 
 const EI_SCOPED_EDIT = {
   "*": "deny",
+  ".yui-soul/reviews/*": "allow",
   "*/.yui-soul/reviews/*": "allow",
+  ".yui-soul/rfcs/*/*/review-ei.md": "allow",
   "*/.yui-soul/rfcs/*/*/review-ei.md": "allow",
 } as const
 
@@ -71,6 +86,15 @@ const OWN_RFC_REVIEW_PATH = "code-projects/personal/.yui-soul/rfcs/046-x/round1/
 const OWN_RFC_REVIEW_PATH_EI = "code-projects/personal/.yui-soul/rfcs/046-x/round1/review-ei.md"
 const OTHER_KNOWLEDGE_PATH = "code-projects/personal/.yui-soul/knowledge/gotchas/foo.md"
 const APP_SOURCE_PATH = "code-projects/personal/opencode-plan-query/src/plugin.ts"
+
+// Round-1 audit remediation (Ei r1-ei-permissions-signing.md Finding 1, plan 262): the canonical
+// single-repo scaffold topology — `.yui-soul/` sits directly at `location.directory`'s own root,
+// so the resolved-relative resource path has ZERO segments before `.yui-soul` (no leading `/`, no
+// leading `code-projects/personal/`-style prefix). A resource literal of EXACTLY this shape, per
+// Ei's own finding text.
+const OWN_REVIEWS_PATH_ZERO_PREFIX = ".yui-soul/reviews/x.md"
+const OWN_RFC_REVIEW_PATH_ZERO_PREFIX = ".yui-soul/rfcs/046-x/round1/review-sho.md"
+const OWN_RFC_REVIEW_PATH_EI_ZERO_PREFIX = ".yui-soul/rfcs/046-x/round1/review-ei.md"
 
 // D-L1-6 sub-case (a): positive — Sho/Ei can Edit/Write their own known review-artifact paths
 // directly, through the REAL evaluate() pipeline (defaults merged with the scoped config), not a
@@ -114,6 +138,26 @@ test("D-L1-6 sub-case (b): sho's own reviews/ grant does NOT leak into ei's rfcs
   // sho's config has no entry for review-ei.md's exact pattern; the reviews/* wildcard doesn't
   // cover the rfcs/ subtree at all, so this must fall through to the deny-all, never allow.
   expect(Permission.evaluate("edit", OWN_RFC_REVIEW_PATH_EI, merged).action).toBe("deny")
+})
+
+// Round-1 audit remediation (Ei r1-ei-permissions-signing.md Finding 1, plan 262): zero-prefix
+// topology regression — a resource path with NO path segment before `.yui-soul` (the canonical
+// single-repo scaffold, `.yui-soul/` directly at the workspace root) must ALSO be permitted, not
+// just the `personal` container's own accidentally-prefixed shape covered above.
+
+test("D-L1-6 sub-case (a), zero-prefix topology: sho's scoped edit:allow permits its own .yui-soul/reviews/ artifact even with NO leading path segment", () => {
+  const merged = Permission.merge(AGENT_LEVEL_DEFAULTS, Permission.fromConfig({ edit: SHO_SCOPED_EDIT }))
+  expect(Permission.evaluate("edit", OWN_REVIEWS_PATH_ZERO_PREFIX, merged).action).toBe("allow")
+})
+
+test("D-L1-6 sub-case (a), zero-prefix topology: sho's scoped edit:allow permits its own review-sho.md under .yui-soul/rfcs/*/*/ even with NO leading path segment", () => {
+  const merged = Permission.merge(AGENT_LEVEL_DEFAULTS, Permission.fromConfig({ edit: SHO_SCOPED_EDIT }))
+  expect(Permission.evaluate("edit", OWN_RFC_REVIEW_PATH_ZERO_PREFIX, merged).action).toBe("allow")
+})
+
+test("D-L1-6 sub-case (a), zero-prefix topology: ei's scoped edit:allow permits its own review-ei.md under .yui-soul/rfcs/*/*/ even with NO leading path segment", () => {
+  const merged = Permission.merge(AGENT_LEVEL_DEFAULTS, Permission.fromConfig({ edit: EI_SCOPED_EDIT }))
+  expect(Permission.evaluate("edit", OWN_RFC_REVIEW_PATH_EI_ZERO_PREFIX, merged).action).toBe("allow")
 })
 
 // Residual risk #7 (RFC 046 §8) — ordering/omission mutation demonstrations, against the REAL
