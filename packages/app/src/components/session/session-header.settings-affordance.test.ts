@@ -38,10 +38,21 @@
  *   - Must NOT be satisfied by (regression fixtures below, each independently proven RED): (a)
  *     dead/unconditional/ungated code containing both strings, with no real fix present anywhere;
  *     (b) a real button with `onClick` stripped; (c) the trigger call demoted to a `//` comment;
- *     (d) the whole button JSX deleted while its state fields dangle unused. Also must NOT be
- *     satisfied by a structurally-similar-but-wrong control (e.g. the review-panel toggle, which
- *     has its own `onClick`/`aria-label` pair on the same tag shape but resolves to different
- *     content) — this is what catches a same-object-different-field mismatch.
+ *     (d) the whole button JSX deleted while its state fields dangle unused; (e) a genuinely no-op
+ *     `onClick` paired with an unrelated trailing `//` comment elsewhere in the same tag that
+ *     happens to contain the trigger string (round-2 audit finding 1 — the "direct" match path
+ *     must resolve strictly INSIDE the `onClick`/`aria-label` attribute's own `{...}`-bounded
+ *     value, comment/string-literal-safe, never merely co-occur anywhere in the ~8-line tag span);
+ *     (f) a decoy `onClick={...}`-shaped marker written inside a `//` comment preceding the real,
+ *     no-op `onClick`; (g) the same decoy shape hidden inside an unrelated sibling attribute's own
+ *     string-literal value; (h) the same decoy shape hidden inside a NESTED JSX element passed as
+ *     another attribute's own value (e.g. `icon={<IconV2 onClick={...} />}`) — real, non-string,
+ *     non-comment code, so it requires the attribute marker to also sit at the tag's own top-level
+ *     attribute depth, not merely outside a string/comment. Also must NOT be satisfied by a
+ *     structurally-similar-but-wrong control
+ *     (e.g. the review-panel toggle, which has its own `onClick`/`aria-label` pair on the same tag
+ *     shape but resolves to different content) — this is what catches a same-object-different-field
+ *     mismatch.
  * @testability
  *   DOM-mounting `SessionHeader` with its real context providers (`useCommand`, `useLanguage`,
  *   `useSettings`, `useLayout`, `useServer`, `usePlatform`, `useSync`, `useTerminal`,
@@ -65,6 +76,11 @@
  * @see ../../../../.yui-soul/plans/wip/263-opencode-settings-nav-affordance/e1-regression-test.md
  * @see ../../../../.yui-soul/reviews/263-opencode-settings-nav-affordance/r1-shin.md (round-1
  *   critical finding this rewrite addresses: vacuous-pass via co-occurrence-only matching)
+ * @see ../../../../.yui-soul/reviews/263-opencode-settings-nav-affordance/r2-shin.md (round-2
+ *   critical finding this rewrite addresses: the "direct" match path was decoupled across the
+ *   whole tag span rather than bounded to the attribute's own value — fixed by requiring the
+ *   trigger/label text to resolve strictly inside a comment/string-literal-safe extraction of the
+ *   `onClick`/`aria-label` attribute's own `{...}`-bounded value)
  */
 
 import { describe, expect, test } from "bun:test"
@@ -242,15 +258,125 @@ function findJsxComponentReference(children: string): { name: string; propIdenti
 }
 
 /**
- * Scans `body` for a JSX tag whose `onClick` AND `aria-label` BOTH resolve — inline, matching the
- * target regex directly on the tag text, or via a `props.state.<field>` reference traced back to
- * `stateDefinitions` and checked, bounded to that field's own value, against the target regex —
- * to the real thing. This requires a genuine, live, same-tag pairing: a structurally similar but
- * differently-wired sibling control (e.g. the review-panel toggle, which has its own onClick/
- * aria-label pair on an identically-shaped tag) does NOT satisfy this, because its fields resolve
- * to different content.
+ * Character ranges of `text` that fall inside a JS string literal (`"..."`, `'...'`, `` `...` ``,
+ * backslash-escapes respected) or a `//` / `/* *\/` comment. Used so structural attribute-name
+ * matching (below) never mistakes trigger-shaped text sitting inside a decoy comment, or inside an
+ * unrelated sibling attribute's own string value (e.g. `title="...onClick={...}..."`), for a real,
+ * live attribute — round-2 audit finding 1 and this remediation's own follow-up self-check.
+ */
+function findOpaqueSpans(text: string): Array<{ start: number; end: number; kind: "string" | "comment" }> {
+  const spans: Array<{ start: number; end: number; kind: "string" | "comment" }> = []
+  let i = 0
+  while (i < text.length) {
+    if (text[i] === "/" && text[i + 1] === "/") {
+      const lineEnd = text.indexOf("\n", i)
+      const end = lineEnd === -1 ? text.length : lineEnd
+      spans.push({ start: i, end, kind: "comment" })
+      i = end
+      continue
+    }
+    if (text[i] === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2)
+      const end = close === -1 ? text.length : close + 2
+      spans.push({ start: i, end, kind: "comment" })
+      i = end
+      continue
+    }
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      const quote = text[i]
+      let j = i + 1
+      while (j < text.length && text[j] !== quote) {
+        if (text[j] === "\\") j++
+        j++
+      }
+      const end = Math.min(j + 1, text.length)
+      spans.push({ start: i, end, kind: "string" })
+      i = end
+      continue
+    }
+    i++
+  }
+  return spans
+}
+
+function isInsideSpan(spans: Array<{ start: number; end: number }>, index: number): boolean {
+  return spans.some((span) => index >= span.start && index < span.end)
+}
+
+/**
+ * Net `([{`/`)]}` bracket depth accumulated from the start of `text` up to (not including) `index`
+ * — skipping any characters inside `opaqueSpans` (string/comment content never affects real nesting
+ * depth). Depth 0 means `index` sits at the tag's OWN top-level attribute list, between fully-closed
+ * attributes; depth > 0 means `index` sits inside some earlier attribute's still-open `{...}` value
+ * (e.g. inside a nested JSX element passed as a prop, such as `icon={<IconV2 .../>}`). Used so a
+ * decoy `onClick={...}`/`aria-label={...}`-shaped marker nested inside ANOTHER attribute's own
+ * value — real code, not a string or comment, so opaque-span checks alone don't catch it — is never
+ * mistaken for a top-level attribute of the tag being inspected.
+ */
+function bracketDepthAt(text: string, index: number, opaqueSpans: Array<{ start: number; end: number }>): number {
+  let depth = 0
+  for (let i = 0; i < index; i++) {
+    if (isInsideSpan(opaqueSpans, i)) continue
+    const ch = text[i]
+    if ("([{".includes(ch)) depth++
+    else if (")]}".includes(ch)) depth--
+  }
+  return depth
+}
+
+/** Removes only comment-kind spans from `text`, leaving string-literal contents untouched. */
+function stripComments(text: string): string {
+  const commentSpans = findOpaqueSpans(text).filter((span) => span.kind === "comment")
+  if (commentSpans.length === 0) return text
+  let result = ""
+  let cursor = 0
+  for (const span of commentSpans) {
+    result += text.slice(cursor, span.start)
+    cursor = span.end
+  }
+  return result + text.slice(cursor)
+}
+
+/**
+ * Extracts a JSX attribute's `{...}`-bounded value by name (e.g. the `value` of `onClick={value}`)
+ * — requiring the `attrName={` marker itself to (a) sit OUTSIDE any string literal or comment, so a
+ * decoy marker written inside a `//`/`/* *\/` comment, or inside an unrelated sibling attribute's
+ * string value, is never mistaken for the real attribute, AND (b) sit at the tag's OWN top-level
+ * attribute depth (never nested inside another already-open attribute's value, e.g. a decoy
+ * `onClick={...}` hidden inside `icon={<IconV2 onClick={...} />}`) — and stripping any comment text
+ * found WITHIN the matched value's own bounds before returning it, so a comment injected mid-value
+ * (e.g. spanning a multi-line attribute) cannot inject trigger-shaped text into the extracted value.
+ * Returns null if no live, top-level, non-opaque occurrence of the attribute is found in `tagText`.
+ */
+function extractJsxAttributeValue(tagText: string, attrName: string): string | null {
+  const opaqueSpans = findOpaqueSpans(tagText)
+  const markerPattern = new RegExp(`(?:^|\\s)${attrName}=\\{`, "g")
+  let marker: RegExpExecArray | null
+  while ((marker = markerPattern.exec(tagText))) {
+    const braceStart = marker.index + marker[0].length - 1
+    if (isInsideSpan(opaqueSpans, braceStart)) continue
+    if (bracketDepthAt(tagText, braceStart, opaqueSpans) !== 0) continue
+    const braceEnd = findMatchingCloser(tagText, braceStart)
+    if (braceEnd === -1) return null
+    return stripComments(tagText.slice(braceStart + 1, braceEnd))
+  }
+  return null
+}
+
+/**
+ * Scans `body` for a JSX tag whose `onClick` AND `aria-label` BOTH resolve — inline, via a
+ * comment/string-literal-safe, brace-bounded extraction of that attribute's OWN value (never a
+ * whole-tag-text co-occurrence check — round-2 audit finding 1), or via a `props.state.<field>`
+ * reference traced back to `stateDefinitions` and checked, bounded to that field's own value,
+ * against the target regex — to the real thing. This requires a genuine, live, same-tag pairing: a
+ * structurally similar but differently-wired sibling control (e.g. the review-panel toggle, which
+ * has its own onClick/aria-label pair on an identically-shaped tag) does NOT satisfy this, because
+ * its fields resolve to different content.
  */
 function hasWiredSettingsTag(body: string, stateDefinitions: string[]): boolean {
+  // Safe now that `directOk` is itself provably scoped to the attribute's own bounded, opaque-span
+  // -safe value (via `extractJsxAttributeValue`) — it can no longer become true merely because the
+  // trigger/label text co-occurs somewhere else in the tag's text (round-2 audit finding 1).
   const resolvesLive = (field: string | null, directOk: boolean, pattern: RegExp): boolean => {
     if (directOk) return true
     if (field === null) return false
@@ -268,9 +394,11 @@ function hasWiredSettingsTag(body: string, stateDefinitions: string[]): boolean 
     const tagText = body.slice(span.start, span.end + 1)
 
     const onClickIndirect = /onClick=\{\s*props\.state\.(\w+)\s*\}/.exec(tagText)
-    const onClickDirect = SETTINGS_TRIGGER.test(tagText) && /onClick=\{/.test(tagText)
+    const onClickValue = extractJsxAttributeValue(tagText, "onClick")
+    const onClickDirect = onClickValue !== null && SETTINGS_TRIGGER.test(onClickValue)
     const ariaLabelIndirect = /aria-label=\{\s*props\.state\.(\w+)\s*\}/.exec(tagText)
-    const ariaLabelDirect = SETTINGS_LABEL.test(tagText) && /aria-label=\{/.test(tagText)
+    const ariaLabelValue = extractJsxAttributeValue(tagText, "aria-label")
+    const ariaLabelDirect = ariaLabelValue !== null && SETTINGS_LABEL.test(ariaLabelValue)
 
     if (!onClickIndirect && !onClickDirect) continue
     if (!ariaLabelIndirect && !ariaLabelDirect) continue
@@ -395,7 +523,7 @@ describe("SessionHeader isV2 (New Layout) branch — Settings trigger regression
     expect(nearby).not.toMatch(SETTINGS_TRIGGER)
   })
 
-  describe("vacuous-pass regression fixtures (round-1 audit finding 1, a-d) — each must stay RED", () => {
+  describe("vacuous-pass regression fixtures (round-1 finding 1 a-d; round-2 finding 1 e; self-check f-h) — each must stay RED", () => {
     test("(a) dead, unconditional, ungated code with both strings, and the real fix fully removed, does NOT satisfy the check", async () => {
       const source = await readFile(sessionHeaderPath, "utf8")
 
@@ -445,6 +573,87 @@ describe("SessionHeader isV2 (New Layout) branch — Settings trigger regression
 
       // The dangling settingsLabel/onSettingsOpen fields remain in v2ActionsState, but nothing in
       // SessionHeaderV2Actions's body references them anymore — must NOT satisfy the check.
+      expect(inspectSettingsWiring(mutated).wired).toBe(false)
+    })
+
+    test("(e) a genuinely no-op onClick paired with an adjacent trailing comment containing the trigger string does NOT satisfy the check", async () => {
+      const source = await readFile(sessionHeaderPath, "utf8")
+      const withNoOpHandler = source.replace(
+        'onSettingsOpen: () => command.trigger("settings.open"),',
+        "onSettingsOpen: () => {},",
+      )
+      expect(withNoOpHandler).not.toBe(source) // sanity: the handler mutation actually matched
+
+      const mutated = withNoOpHandler.replace(
+        "onClick={props.state.onSettingsOpen}",
+        'onClick={props.state.onSettingsOpen} // command.trigger("settings.open")',
+      )
+      expect(mutated).not.toBe(withNoOpHandler) // sanity: the comment mutation actually matched
+
+      // The button's real click handler is now a genuine no-op; a same-line trailing comment that
+      // merely co-occurs with SOME onClick={...} attribute in the same ~8-line tag span must not
+      // be enough to satisfy the check (round-2 audit critical finding 1).
+      expect(inspectSettingsWiring(mutated).wired).toBe(false)
+    })
+
+    test('(f) a decoy onClick={...} marker written inside a "//" comment, preceding a genuinely no-op real onClick attribute, does NOT satisfy the check', async () => {
+      const source = await readFile(sessionHeaderPath, "utf8")
+      const withNoOpHandler = source.replace(
+        'onSettingsOpen: () => command.trigger("settings.open"),',
+        "onSettingsOpen: () => {},",
+      )
+      expect(withNoOpHandler).not.toBe(source) // sanity: the handler mutation actually matched
+
+      const mutated = withNoOpHandler.replace(
+        "onClick={props.state.onSettingsOpen}",
+        '// onClick={() => command.trigger("settings.open")}\n          onClick={props.state.onSettingsOpen}',
+      )
+      expect(mutated).not.toBe(withNoOpHandler) // sanity: the decoy-comment mutation actually matched
+
+      // A comment-only decoy attribute, shaped exactly like a live onClick={...} wiring and
+      // sitting BEFORE the real one in the tag's source order, must not be mistaken for the real
+      // attribute when the genuine onClick is a no-op (this remediation's own follow-up self-check).
+      expect(inspectSettingsWiring(mutated).wired).toBe(false)
+    })
+
+    test("(g) a decoy onClick={...}-shaped substring hidden inside a sibling attribute's own string value, preceding a genuinely no-op real onClick attribute, does NOT satisfy the check", async () => {
+      const source = await readFile(sessionHeaderPath, "utf8")
+      const withNoOpHandler = source.replace(
+        'onSettingsOpen: () => command.trigger("settings.open"),',
+        "onSettingsOpen: () => {},",
+      )
+      expect(withNoOpHandler).not.toBe(source) // sanity: the handler mutation actually matched
+
+      const mutated = withNoOpHandler.replace(
+        "onClick={props.state.onSettingsOpen}",
+        'title="see onClick={() => command.trigger(\'settings.open\')}"\n          onClick={props.state.onSettingsOpen}',
+      )
+      expect(mutated).not.toBe(withNoOpHandler) // sanity: the decoy-string mutation actually matched
+
+      // The decoy marker sits inside an unrelated sibling attribute's own string-literal value,
+      // not inside a real onClick attribute — must not be mistaken for a live wiring (this
+      // remediation's own follow-up self-check).
+      expect(inspectSettingsWiring(mutated).wired).toBe(false)
+    })
+
+    test("(h) a decoy onClick={...} marker nested inside another attribute's own JSX value (e.g. the icon prop), preceding a genuinely no-op real onClick attribute, does NOT satisfy the check", async () => {
+      const source = await readFile(sessionHeaderPath, "utf8")
+      const withNoOpHandler = source.replace(
+        'onSettingsOpen: () => command.trigger("settings.open"),',
+        "onSettingsOpen: () => {},",
+      )
+      expect(withNoOpHandler).not.toBe(source) // sanity: the handler mutation actually matched
+
+      const mutated = withNoOpHandler.replace(
+        'onClick={props.state.onSettingsOpen}\n          aria-label={props.state.settingsLabel}\n          icon={<IconV2 name="settings-gear" />}',
+        'icon={<IconV2 onClick={() => command.trigger("settings.open")} name="settings-gear" />}\n          onClick={props.state.onSettingsOpen}\n          aria-label={props.state.settingsLabel}',
+      )
+      expect(mutated).not.toBe(withNoOpHandler) // sanity: the reorder+decoy mutation actually matched
+
+      // The decoy marker is real, live JS/JSX code — not a string, not a comment — but it is
+      // NESTED inside the icon prop's own JSX value, not a top-level attribute of this tag. It
+      // must not be mistaken for the tag's own onClick attribute (this remediation's own
+      // follow-up self-check, found while stress-testing the fix for round-2 audit finding 1).
       expect(inspectSettingsWiring(mutated).wired).toBe(false)
     })
   })
