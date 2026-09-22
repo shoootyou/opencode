@@ -16,6 +16,7 @@ import { FileApi } from "./groups/file"
 import { InstanceApi } from "./groups/instance"
 import { McpApi } from "./groups/mcp"
 import { PermissionApi } from "./groups/permission"
+import { PluginUiApi } from "./groups/plugin-ui"
 import { ProjectApi } from "./groups/project"
 import { ProjectCopyApi } from "./groups/project-copy"
 import { ProviderApi } from "./groups/provider"
@@ -73,6 +74,7 @@ export const InstanceHttpApi = HttpApi.make("opencode-instance")
   .addHttpApi(SessionApi)
   .addHttpApi(SyncApi)
   .addHttpApi(TuiApi)
+  .addHttpApi(PluginUiApi)
   .addHttpApi(WorkspaceApi)
   .middleware(SchemaErrorMiddleware)
 
