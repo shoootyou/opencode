@@ -4,6 +4,7 @@ import type {
   PluginInput,
   Plugin as PluginInstance,
   PluginModule,
+  PluginUiPublish,
   WorkspaceAdapter as PluginWorkspaceAdapter,
 } from "@opencode-ai/plugin"
 import { Config } from "@/config/config"
@@ -21,7 +22,7 @@ import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { SnowflakeCortexAuthPlugin } from "./snowflake-cortex"
-import { Effect, Layer, Context } from "effect"
+import { Deferred, Effect, Layer, Context } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
@@ -33,8 +34,39 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 
+// Not imported from groups/plugin-ui.ts's `PluginUiPaths` — that module pulls
+// in the full HttpApi builder chain, which (transitively, via Provider)
+// re-imports this very file and deadlocks module initialization order
+// ("Cannot access 'node' before initialization").
+const PLUGIN_UI_PUBLISH_PATH = "/plugin-ui/publish"
+
+// Module-level (process-wide) re-entrancy guard, keyed by directory: tracks a
+// directory whose input.ui.publish flush is currently being awaited by
+// init() below. Server.Default() unconditionally re-bootstraps every
+// configured plugin for a directory on first touch (InstanceContextMiddleware
+// -> InstanceStore.load -> bootstrap.run -> plugin.init()) — including THIS
+// plugin, for the SAME directory, if it is one of the directory's own
+// configured plugins. Without this guard, that nested plugin.init() call
+// would itself try to await its own flush, recursing into the very
+// InstanceStore.load() Deferred the outer flush's HTTP call is blocked on
+// resolving — a genuine circular deadlock, not just added latency. A
+// directory string can never collide across concurrent, unrelated flushes
+// because each directory's own outer init() call owns the entry for the
+// full duration of its own await.
+const directoriesFlushing = new Set<string>()
+
 type State = {
   hooks: Hooks[]
+  // Drains everything queued in `input.ui.publish` while plugins were still
+  // loading. Deliberately NOT invoked from inside the `Plugin.state` closure
+  // itself: flushing round-trips an HTTP call back through Server.Default()
+  // -> InstanceContextMiddleware -> InstanceStore.load -> bootstrap.run ->
+  // plugin.init() -> InstanceState.get(state) for this SAME directory — a
+  // reentrant ScopedCache.get() on an entry that is still being computed.
+  // `init()` below calls this AFTER InstanceState.get(state) has already
+  // returned (entry cached), so the reentrant call safely short-circuits to
+  // the cached value instead of re-running this closure.
+  flushPendingPublishes: () => Promise<unknown>
 }
 
 // Hook names that follow the (input, output) => Promise<void> trigger pattern
@@ -109,16 +141,26 @@ function getLegacyPlugins(mod: Record<string, unknown>) {
   return result
 }
 
-async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks: Hooks[]) {
+async function applyPlugin(
+  load: PluginLoader.Loaded,
+  input: PluginInput,
+  hooks: Hooks[],
+  makeUi: (pluginID: string) => { publish: PluginUiPublish },
+) {
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
-    await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    hooks.push(await (plugin as PluginModule).server(input, load.options))
+    const id = await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
+    hooks.push(await (plugin as PluginModule).server({ ...input, ui: makeUi(id) }, load.options))
     return
   }
 
-  for (const server of getLegacyPlugins(load.mod)) {
-    hooks.push(await server(input, load.options))
+  // OQ2/D7: legacy plugins (no exported id, never pass through resolvePluginId)
+  // still get a populated `input.ui`, bound to a fallback id derived from
+  // `load.spec` — rodo's explicit Option B choice, not the RFC's own leaning.
+  const legacyPlugins = getLegacyPlugins(load.mod)
+  for (const [index, server] of legacyPlugins.entries()) {
+    const fallbackID = legacyPlugins.length > 1 ? `${load.spec}#${index}` : load.spec
+    hooks.push(await server({ ...input, ui: makeUi(fallbackID) }, load.options))
   }
 }
 
@@ -164,6 +206,100 @@ const layer = Layer.effect(
           // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
         }
+
+        // D15/OQ3c: the `pluginsLoaded` gate and its pending-publish queue live
+        // INSIDE this per-directory closure (never module-level). The external
+        // plugin-load loop below runs once per directory via ScopedCache
+        // (InstanceState.make), so a process-global gate would resolve on
+        // whichever directory loads first and stay inert — silently
+        // reinstating the deadlock — for every directory after it.
+        const pluginsLoaded = yield* Deferred.make<void>()
+        const pendingByPlugin = new Map<string, Array<{ event: string; body: string }>>()
+        const draining = new Set<string>()
+        const PENDING_QUEUE_CAP = 16
+
+        function warnPublishFailure(pluginID: string, event: string, reason: string) {
+          console.warn("plugin-ui publish failed", { pluginID, event, reason })
+        }
+
+        function enqueuePending(pluginID: string, event: string, body: string) {
+          const queue = pendingByPlugin.get(pluginID) ?? []
+          if (!pendingByPlugin.has(pluginID)) pendingByPlugin.set(pluginID, queue)
+          queue.push({ event, body })
+          if (queue.length <= PENDING_QUEUE_CAP) return
+          const dropped = queue.shift()
+          if (dropped) warnPublishFailure(pluginID, dropped.event, "pending_queue_full")
+        }
+
+        // Reuses the exact same routing decision already made for `client`'s
+        // own `fetch` override above — no new transport code, just calling it
+        // directly instead of through the (untyped-for-plugin-ui) SDK wrapper.
+        async function pluginUiFetch(url: URL, init: RequestInit): Promise<Response> {
+          if (!serverUrl) return Server.Default().app.request(url, init)
+          return fetch(url, init)
+        }
+
+        async function sendPublish(pluginID: string, event: string, body: string) {
+          try {
+            const url = new URL(PLUGIN_UI_PUBLISH_PATH, serverUrl?.toString() ?? "http://localhost:4096")
+            const res = await pluginUiFetch(url, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-opencode-directory": ctx.directory,
+                ...ServerAuth.headers(),
+              },
+              body,
+            })
+            if (res.ok) return
+            const text = await res.text().catch(() => "")
+            warnPublishFailure(pluginID, event, `http_${res.status}${text ? `: ${text}` : ""}`)
+          } catch (err) {
+            warnPublishFailure(pluginID, event, errorMessage(err))
+          }
+        }
+
+        async function flushPending(pluginID: string) {
+          if (draining.has(pluginID)) return
+          draining.add(pluginID)
+          try {
+            const queue = pendingByPlugin.get(pluginID)
+            while (queue && queue.length > 0) {
+              const item = queue.shift()
+              if (item) await sendPublish(pluginID, item.event, item.body)
+            }
+          } finally {
+            draining.delete(pluginID)
+          }
+        }
+
+        function makeUi(pluginID: string): { publish: PluginUiPublish } {
+          return {
+            // Resolves on ENQUEUE, not delivery — safe to call synchronously
+            // inside a plugin's own server() body without deadlocking the
+            // still-constructing InstanceState. Never rejects: every failure
+            // path (unserializable data, oversized/non-2xx server response,
+            // transport failure) is caught and logged at warn instead.
+            publish: async (event, data) => {
+              let body: string
+              try {
+                body = JSON.stringify({ pluginID, event, data })
+              } catch (err) {
+                warnPublishFailure(pluginID, event, "unserializable")
+                return
+              }
+              enqueuePending(pluginID, event, body)
+              if (Deferred.isDoneUnsafe(pluginsLoaded)) void flushPending(pluginID)
+            },
+          }
+        }
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            pendingByPlugin.clear()
+            draining.clear()
+          }),
+        )
 
         for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags)) {
           const init = yield* Effect.tryPromise({
@@ -220,7 +356,7 @@ const layer = Layer.effect(
           // Keep plugin execution sequential so hook registration and execution
           // order remains deterministic across plugin runs.
           yield* Effect.tryPromise({
-            try: () => applyPlugin(load, input, hooks),
+            try: () => applyPlugin(load, input, hooks, makeUi),
             catch: (err) => {
               const message = errorMessage(err)
               return message
@@ -238,6 +374,16 @@ const layer = Layer.effect(
             }),
           )
         }
+
+        // Resolve the gate after every plugin has attempted to load —
+        // success or failure — regardless. It must resolve even when every
+        // plugin fails, or a failed load strands every queued publish forever.
+        // The actual HTTP flush is NOT triggered here — see State's own
+        // `flushPendingPublishes` doc comment for why. makeUi(...).publish
+        // above reads this same deferred (via Deferred.isDoneUnsafe) to
+        // decide whether a publish arriving after this point should
+        // self-flush immediately instead of waiting on flushPendingPublishes.
+        yield* Deferred.succeed(pluginsLoaded, void 0)
 
         // Notify plugins of current config
         for (const hook of hooks) {
@@ -275,7 +421,11 @@ const layer = Layer.effect(
           ),
         )
 
-        return { hooks }
+        return {
+          hooks,
+          flushPendingPublishes: () =>
+            Promise.all(Array.from(pendingByPlugin.keys(), (pluginID) => flushPending(pluginID))),
+        }
       }),
     )
 
@@ -300,7 +450,24 @@ const layer = Layer.effect(
     })
 
     const init = Effect.fn("Plugin.init")(function* () {
-      yield* InstanceState.get(state)
+      const s = yield* InstanceState.get(state)
+      const directory = yield* InstanceState.directory
+      // Re-entrant call: Server.Default()'s own bootstrap for this SAME
+      // directory (triggered by the outer flush's own HTTP call, still
+      // in flight below) is what reached this init() — see
+      // `directoriesFlushing`'s own module-level doc comment for why
+      // awaiting here would deadlock. Fire the flush without joining it;
+      // the OUTER call below owns delivering this directory's data.
+      if (directoriesFlushing.has(directory)) {
+        void s.flushPendingPublishes()
+        return
+      }
+      directoriesFlushing.add(directory)
+      try {
+        yield* Effect.promise(() => s.flushPendingPublishes())
+      } finally {
+        directoriesFlushing.delete(directory)
+      }
     })
 
     return Service.of({ trigger, list, init })
