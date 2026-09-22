@@ -14,6 +14,7 @@ import { ModelsDev } from "./models-dev"
 import { Permission } from "./permission"
 import { PermissionV1 } from "./permission-v1"
 import { Plugin } from "./plugin"
+import { PluginUiEvent } from "./plugin-ui-event"
 import { Project } from "./project"
 import { ProjectDirectories } from "./project-directories"
 import { Pty } from "./pty"
@@ -58,6 +59,7 @@ export const ServerDefinitions = Event.inventory(
   ...foundationDefinitions,
   ...featureDefinitions,
   ...SessionTodo.Event.Definitions,
+  ...PluginUiEvent.Definitions,
 )
 
 export const Definitions = Event.inventory(
@@ -79,6 +81,7 @@ export const Definitions = Event.inventory(
   ...WorkspaceEvent.Definitions,
   ...WorktreeEvent.Definitions,
   ...ServerEvent.Definitions,
+  ...PluginUiEvent.Definitions,
 )
 export const Latest = Event.latest(Definitions)
 export { Durable }
