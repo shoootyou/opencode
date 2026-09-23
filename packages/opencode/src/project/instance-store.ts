@@ -6,7 +6,8 @@ import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { InstanceRef } from "@/effect/instance-ref"
 import { disposeInstance as runDisposers } from "@/effect/instance-registry"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
@@ -32,7 +33,15 @@ export const use = serviceUse(Service)
 
 interface Entry {
   readonly deferred: Deferred.Deferred<InstanceContext>
+  ctx?: InstanceContext
 }
+
+// Tracks, per calling async chain, the set of directories whose own bootstrap
+// (`boot()`/`completeLoad()`) is currently in flight. A `Context.Reference` does not survive the
+// independent Effect root `HttpRouter.toWebHandler` creates per request, so this reentrancy guard
+// uses `AsyncLocalStorage` instead — it is the one mechanism that does propagate through a plugin's
+// self-referential HTTP round-trip back into the same directory's still-booting instance.
+const booting = new AsyncLocalStorage<ReadonlySet<string>>()
 
 const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Service> = Layer.effect(
   Service,
@@ -42,7 +51,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
     const scope = yield* Scope.Scope
     const cache = new Map<string, Entry>()
 
-    const boot = (input: LoadInput & { directory: string }) =>
+    const boot = (input: LoadInput & { directory: string; entry: Entry }) =>
       Effect.gen(function* () {
         const ctx: InstanceContext =
           input.project && input.worktree
@@ -58,7 +67,22 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
                   project: result.project,
                 })),
               )
-        yield* bootstrap.run.pipe(Effect.provideService(InstanceRef, ctx))
+        // Record the computed context before `bootstrap.run` completes so a self-referential
+        // call back into `load()` for this SAME directory (e.g. a plugin's own `input.ui.publish()`
+        // or `input.client.*` call made synchronously during its own `server()` hook) can return it
+        // directly instead of deadlocking on `entry.deferred`, which cannot resolve until this very
+        // call returns.
+        input.entry.ctx = ctx
+        const nested = new Set(booting.getStore() ?? [])
+        nested.add(input.directory)
+        yield* Effect.callback<void>((resume) => {
+          let inner: Fiber.Fiber<void, never> | undefined
+          booting.run(nested, () => {
+            inner = Effect.runFork(bootstrap.run.pipe(Effect.provideService(InstanceRef, ctx)))
+            inner.addObserver((exit) => resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause)))
+          })
+          return Effect.suspend(() => (inner ? Fiber.interrupt(inner) : Effect.void))
+        })
         return ctx
       }).pipe(Effect.withSpan("InstanceStore.boot"))
 
@@ -71,7 +95,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
 
     const completeLoad = (directory: string, input: LoadInput, entry: Entry) =>
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(boot({ ...input, directory }))
+        const exit = yield* Effect.exit(boot({ ...input, directory, entry }))
         if (Exit.isFailure(exit)) yield* removeEntry(directory, entry)
         yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
       })
@@ -110,7 +134,14 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const existing = cache.get(directory)
-          if (existing) return yield* restore(Deferred.await(existing.deferred))
+          if (existing) {
+            // A self-referential call back into this SAME directory's own in-progress boot (e.g.
+            // a plugin's `input.ui.publish()`/`input.client.*` call made synchronously during its
+            // own `server()` hook) — return the already-computed context instead of awaiting a
+            // Deferred that cannot resolve until this very call chain returns.
+            if (existing.ctx && booting.getStore()?.has(directory)) return existing.ctx
+            return yield* restore(Deferred.await(existing.deferred))
+          }
 
           const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
           cache.set(directory, entry)

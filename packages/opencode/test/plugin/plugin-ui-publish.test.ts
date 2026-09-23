@@ -35,14 +35,14 @@ import { Plugin } from "../../src/plugin/index"
 import { Server } from "../../src/server/server"
 
 import { TestInstance, provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
-import { pollWithTimeout, testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffectShared } from "../lib/effect"
 import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 
-const it = testEffect(
+const it = testEffectShared(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, CrossSpawnSpawner.node]), [
     [Auth.node, AuthTest.empty],
     [Account.node, AccountTest.empty],
