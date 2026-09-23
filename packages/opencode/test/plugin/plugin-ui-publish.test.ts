@@ -254,9 +254,11 @@ describe("input.ui.publish — never-rejects + pre-flight serialization (RFC 050
             const plugin = yield* Plugin.Service
             yield* plugin.init()
             expect(yield* readMarker(marker)).toBe("resolved")
-            expect(warnSpy.mock.calls.some((call) => call.some((arg) => JSON.stringify(arg).includes("unserializable")))).toBe(
-              true,
-            )
+            expect(
+              warnSpy.mock.calls.some((call: unknown[]) =>
+                call.some((arg: unknown) => JSON.stringify(arg).includes("unserializable")),
+              ),
+            ).toBe(true)
           }),
         )
       }),
@@ -285,9 +287,11 @@ describe("input.ui.publish — never-rejects + pre-flight serialization (RFC 050
             const plugin = yield* Plugin.Service
             yield* plugin.init()
             expect(yield* readMarker(marker)).toBe("resolved")
-            expect(warnSpy.mock.calls.some((call) => call.some((arg) => JSON.stringify(arg).includes("unserializable")))).toBe(
-              true,
-            )
+            expect(
+              warnSpy.mock.calls.some((call: unknown[]) =>
+                call.some((arg: unknown) => JSON.stringify(arg).includes("unserializable")),
+              ),
+            ).toBe(true)
           }),
         )
       }),
@@ -355,7 +359,9 @@ describe("input.ui.publish — never-rejects + pre-flight serialization (RFC 050
             yield* plugin.init()
             expect(yield* readMarker(marker)).toBe("resolved")
             expect(
-              warnSpy.mock.calls.some((call) => call.some((arg) => JSON.stringify(arg).includes("payload_too_large"))),
+              warnSpy.mock.calls.some((call: unknown[]) =>
+                call.some((arg: unknown) => JSON.stringify(arg).includes("payload_too_large")),
+              ),
             ).toBe(true)
             // Grace window before asserting permanent absence — the pre-flight rejection means this
             // publish was never even enqueued, so there is nothing for a later flush to deliver;
