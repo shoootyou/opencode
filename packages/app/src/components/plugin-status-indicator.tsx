@@ -69,12 +69,22 @@ function triggerContent(view: CollapseView): JSX.Element {
             data-severity={row.severity}
             data-plugin-id={row.pluginID}
             data-event-name={row.eventName}
+            data-directory={row.directory}
           />
         ))}
       </span>
     )
   }
   return null
+}
+
+// The final path segment after stripping a trailing separator (D22 row labelling). A directory
+// with no separator at all (the literal "global") is its own basename verbatim. DATA, not copy —
+// never translated, reformatted, or routed through the i18n layer.
+function directoryBasename(directory: string): string {
+  const trimmed = directory.replace(/[/\\]+$/, "")
+  const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
+  return separatorIndex === -1 ? trimmed : trimmed.slice(separatorIndex + 1)
 }
 
 // Rendered via ordinary JSX text interpolation (Solid's default `textContent`-writing behavior) —
@@ -84,7 +94,14 @@ function popoverBody(rows: Row[]): JSX.Element {
   return (
     <div>
       {rows.map((row) => (
-        <div data-testid="plugin-status-row" data-plugin-id={row.pluginID} data-event-name={row.eventName}>
+        <div
+          data-testid="plugin-status-row"
+          data-plugin-id={row.pluginID}
+          data-event-name={row.eventName}
+          data-directory={row.directory}
+          title={row.directory}
+        >
+          <span data-testid="plugin-status-directory-label">{directoryBasename(row.directory)}</span>
           {dataRows(row.entry).map(([key, value]) => (
             <div data-testid="plugin-status-data-row" data-key={key}>
               {key}: {String(value)}
@@ -113,16 +130,21 @@ export function PluginStatusIndicator(): JSX.Element {
   const refresh = () => setRows(sortRows(toRows(store, Date.now())))
 
   const refetchSnapshot = async () => {
-    const result = await serverSDK().client.pluginUi.snapshot({}).catch((error: unknown) => {
-      console.error("Failed to refresh plugin UI snapshot", error)
-      return undefined
-    })
+    const result = await serverSDK()
+      .client.pluginUi.snapshot({})
+      .catch((error: unknown) => {
+        console.error("Failed to refresh plugin UI snapshot", error)
+        return undefined
+      })
     const data = result?.data
     if (!data) return
     const now = Date.now()
+    // D20/D21: a single response's `entries` may mix rows from multiple directories — each
+    // entry's OWN `directory` field drives the write, never any ambient caller directory context.
     for (const entry of data.entries) {
       writeEntry(
         store,
+        entry.directory,
         entry.pluginID,
         entry.event,
         entry.data,
@@ -135,7 +157,16 @@ export function PluginStatusIndicator(): JSX.Element {
   const stop = serverSDK().event.listen((payload) => {
     const event = payload.details
     if (event.type === "plugin.custom") {
-      writeEntry(store, event.properties.pluginID, event.properties.event, event.properties.data, Date.now())
+      // D24: `payload.name` is the directory for a live event, taken verbatim (including the
+      // literal string "global") — there is no client-side directory filter anywhere here.
+      writeEntry(
+        store,
+        payload.name,
+        event.properties.pluginID,
+        event.properties.event,
+        event.properties.data,
+        Date.now(),
+      )
       refresh()
       return
     }

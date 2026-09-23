@@ -5072,7 +5072,7 @@ export class PluginUi extends HeyApiClient {
   /**
    * Read retained plugin UI entries
    *
-   * Last retained value per (pluginID, eventName) in the caller's directory/workspace scope.
+   * Last retained value per (directory, pluginID, eventName), aggregated across every directory the server currently holds plugin UI state for.
    */
   public snapshot<ThrowOnError extends boolean = false>(
     parameters?: {

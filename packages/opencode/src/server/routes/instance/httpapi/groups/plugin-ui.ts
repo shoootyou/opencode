@@ -17,6 +17,7 @@ const root = "/plugin-ui"
 export const PublishPayload = PluginUiEvent.Custom.data
 
 export const SnapshotEntry = Schema.Struct({
+  directory: Schema.String,
   pluginID: Plugin.ID,
   event: Schema.String,
   data: Schema.Record(Schema.String, Schema.Json),
@@ -51,13 +52,14 @@ export const PluginUiApi = HttpApi.make("plugin-ui")
         ),
         HttpApiEndpoint.get("snapshot", PluginUiPaths.snapshot, {
           query: WorkspaceRoutingQuery,
-          success: described(SnapshotResponse, "Retained plugin UI entries for this directory"),
+          success: described(SnapshotResponse, "Retained plugin UI entries across every open directory"),
           error: HttpApiError.BadRequest,
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "plugin-ui.snapshot",
             summary: "Read retained plugin UI entries",
-            description: "Last retained value per (pluginID, eventName) in the caller's directory/workspace scope.",
+            description:
+              "Last retained value per (directory, pluginID, eventName), aggregated across every directory the server currently holds plugin UI state for.",
           }),
         ),
       )

@@ -9386,7 +9386,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Retained plugin UI entries for this directory",
+            "description": "Retained plugin UI entries across every open directory",
             "content": {
               "application/json": {
                 "schema": {
@@ -9413,7 +9413,7 @@
             }
           }
         },
-        "description": "Last retained value per (pluginID, eventName) in the caller's directory/workspace scope.",
+        "description": "Last retained value per (directory, pluginID, eventName), aggregated across every directory the server currently holds plugin UI state for.",
         "summary": "Read retained plugin UI entries",
         "x-codeSamples": [
           {
@@ -23551,6 +23551,9 @@
       "PluginUiSnapshotEntry": {
         "type": "object",
         "properties": {
+          "directory": {
+            "type": "string"
+          },
           "pluginID": {
             "type": "string"
           },
@@ -23564,7 +23567,7 @@
             "type": "number"
           }
         },
-        "required": ["pluginID", "event", "data", "publishedAt"],
+        "required": ["directory", "pluginID", "event", "data", "publishedAt"],
         "additionalProperties": false
       },
       "PluginUiSnapshotResponse": {

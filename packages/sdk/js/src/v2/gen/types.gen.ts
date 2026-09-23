@@ -2665,6 +2665,7 @@ export type EventTuiSessionSelect = {
 }
 
 export type PluginUiSnapshotEntry = {
+  directory: string
   pluginID: string
   event: string
   data: {
@@ -11115,7 +11116,7 @@ export type PluginUiSnapshotError = PluginUiSnapshotErrors[keyof PluginUiSnapsho
 
 export type PluginUiSnapshotResponses = {
   /**
-   * Retained plugin UI entries for this directory
+   * Retained plugin UI entries across every open directory
    */
   200: PluginUiSnapshotResponse
 }

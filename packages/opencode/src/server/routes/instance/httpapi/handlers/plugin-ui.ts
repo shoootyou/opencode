@@ -117,12 +117,15 @@ function flatten(store: ScopeStore, bucketKey: WorkspaceKey): FlatEntry[] {
   return rows
 }
 
-// OR-match read: `UNSCOPED ∪ (workspaceID ?? nothing)`. Dedup key is
-// `(pluginID, eventName)`; most-recent-`publishedAt` wins regardless of
-// origin bucket, with a workspace-specific tie-break on exact ties (RFC 050
-// §1d "Workspace-axis write and read algorithm").
-function snapshot(store: ScopeStore, workspaceID: WorkspaceID | undefined) {
-  const candidates = [...flatten(store, UNSCOPED), ...(workspaceID === undefined ? [] : flatten(store, workspaceID))]
+// OR-match read, widened to a full union under RFC 050 revision 5 (D22):
+// `UNSCOPED ∪ every WorkspaceID bucket this directory's store holds` — not an
+// OR-match against one caller-supplied workspaceID. Dedup key is still
+// `(pluginID, eventName)`, still per directory; most-recent-`publishedAt`
+// wins regardless of origin bucket, with a workspace-specific tie-break on
+// exact ties (RFC 050 §1d "Workspace-axis write and read algorithm").
+function snapshot(store: ScopeStore): FlatEntry[] {
+  const workspaceKeys = [...store.keys()].filter((key): key is WorkspaceID => key !== UNSCOPED)
+  const candidates = [...flatten(store, UNSCOPED), ...workspaceKeys.flatMap((key) => flatten(store, key))]
   const merged = new Map<string, FlatEntry>()
   for (const entry of candidates) {
     const key = `${entry.pluginID}\u0000${entry.event}`
@@ -137,11 +140,35 @@ function snapshot(store: ScopeStore, workspaceID: WorkspaceID | undefined) {
     }
     if (entry.publishedAt === existing.publishedAt && entry.workspaceScoped) merged.set(key, entry)
   }
-  // `workspaceScoped` is a merge-local tag, dropped here — never a wire field.
-  return Array.from(merged.values(), ({ workspaceScoped: _workspaceScoped, ...row }) => ({
-    ...row,
-    publishedAt: DateTime.makeUnsafe(row.publishedAt),
-  }))
+  return [...merged.values()]
+}
+
+interface DirectoryEntry extends FlatEntry {
+  readonly directory: string
+}
+
+const RESPONSE_DIRECTORY_PLUGIN_CAP = 32
+const RESPONSE_EVENTS_PER_BUCKET_CAP = 16
+
+// D23 response-level cap, applied ACROSS directories over the composite bucket
+// `(directory, pluginID)` — the same two magnitudes and the same composite key as the client's
+// own cap (`plugin-status-indicator-logic.ts`), so the resident set after a snapshot refetch is
+// exactly the resident set the live path would have produced.
+function capAcrossDirectories(rows: DirectoryEntry[]): DirectoryEntry[] {
+  const buckets = new Map<string, DirectoryEntry[]>()
+  for (const row of rows) {
+    const key = `${row.directory}\u0000${row.pluginID}`
+    const bucket = buckets.get(key) ?? []
+    if (!buckets.has(key)) buckets.set(key, bucket)
+    bucket.push(row)
+  }
+  return [...buckets.values()]
+    .map((bucket) => ({ bucket, maxPublishedAt: Math.max(...bucket.map((row) => row.publishedAt)) }))
+    .sort((a, b) => b.maxPublishedAt - a.maxPublishedAt)
+    .slice(0, RESPONSE_DIRECTORY_PLUGIN_CAP)
+    .flatMap(({ bucket }) =>
+      [...bucket].sort((a, b) => b.publishedAt - a.publishedAt).slice(0, RESPONSE_EVENTS_PER_BUCKET_CAP),
+    )
 }
 
 function validate(payload: typeof PublishPayload.Type) {
@@ -190,13 +217,23 @@ export const pluginUiHandlers = HttpApiBuilder.group(InstanceHttpApi, "plugin-ui
       return true
     })
 
+    // D20/D21: aggregate across every directory the server currently holds plugin-UI state for
+    // — not only the caller's resolved directory. `?directory=`/`?workspace=` still select which
+    // instance answers the request (C18) but no longer narrow the result.
     const readSnapshot = Effect.fn("PluginUiHttpApi.snapshot")(function* () {
-      const store = yield* InstanceState.get(state)
-      const workspaceID = yield* WorkspaceRef
+      const stores = yield* InstanceState.entries(state)
       const serverTimeMillis = yield* Clock.currentTimeMillis
+
+      const rows: DirectoryEntry[] = stores.flatMap(([directory, store]) =>
+        snapshot(store).map((entry) => ({ ...entry, directory })),
+      )
+
       return {
         serverTime: DateTime.makeUnsafe(serverTimeMillis),
-        entries: snapshot(store, workspaceID),
+        entries: capAcrossDirectories(rows).map(({ workspaceScoped: _workspaceScoped, ...row }) => ({
+          ...row,
+          publishedAt: DateTime.makeUnsafe(row.publishedAt),
+        })),
       }
     })
 
