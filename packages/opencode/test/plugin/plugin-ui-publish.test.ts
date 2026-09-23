@@ -185,7 +185,10 @@ async function readSnapshot(directory: string) {
   if (res.status !== 200) throw new Error(`snapshot read failed with status ${res.status}: ${await res.text()}`)
   return (await res.json()) as {
     serverTime: number
-    entries: Array<{ pluginID: string; event: string; data: Record<string, unknown>; publishedAt: number }>
+    // `directory` is part of the wire shape since RFC 050 revision 5 (D20/D22) — every
+    // aggregated row is attributed with its own origin directory. Kept in this local type
+    // (rather than widened to `unknown`) so the OQ3c reconciliation below can assert on it.
+    entries: Array<{ directory: string; pluginID: string; event: string; data: Record<string, unknown>; publishedAt: number }>
   }
 }
 
@@ -546,7 +549,7 @@ describe("input.ui.publish — per-directory pluginsLoaded gate + bounded queue 
   // automatically; CrossSpawnSpawner (needed by tmpdirScoped) is already in this file's top-level
   // `it` layer (LayerNode.group([Plugin.node, CrossSpawnSpawner.node])), so no extra provide needed.
   it.live(
-    "== OQ3c discriminating case == a second directory's pluginsLoaded gate and pending queue stay independent of the first — a module-level gate would incorrectly flush directory B when directory A finishes",
+    "== OQ3c discriminating case == a second directory's pluginsLoaded gate and pending queue stay independent of the first — a module-level gate would incorrectly flush directory B when directory A finishes; RFC 050 D20 (revision 5) widens cross-directory READ visibility, but leaves this WRITE-side gate scoping untouched",
     () =>
       Effect.gen(function* () {
         const dirA = yield* tmpdirScoped({ git: true })
@@ -584,24 +587,47 @@ describe("input.ui.publish — per-directory pluginsLoaded gate + bounded queue 
         // Directory A's own entry IS visible — its own loop finished and its own gate resolved.
         const snapshotA = yield* Effect.promise(() => readSnapshot(dirA))
         expect(findEntry(snapshotA, "oq3c-plugin-a", "status")).toMatchObject({ data: { dir: "a" } })
-        // Cross-directory isolation (D13), reinforced in this gate-specific context.
+        // NOT a cross-directory READ-isolation check — RFC 050 revision 5's D20 carve-out
+        // deliberately widens `GET /plugin-ui/snapshot` to aggregate every directory's store, so
+        // read-side isolation is no longer a property this suite can assert in general (see the
+        // reconciled assertion below). Plugin B's entry is absent here purely because directory
+        // B's own WRITE-side `pluginsLoaded` gate (D15, unchanged by D20) has not yet flushed its
+        // queued publish into ANY store — B's `server()` is still blocked on `release`, so nothing
+        // has been written for it anywhere yet, regardless of which directory a reader queries.
         expect(findEntry(snapshotA, "oq3c-plugin-b", "status")).toBeUndefined()
 
         // The core OQ3c assertion: directory A finishing its loop must NOT have flushed directory
         // B's still-queued publish. A module-level `pluginsLoaded` deferred would resolve globally
         // on whichever directory finishes first (A here) and stay resolved — silently delivering
         // B's queued publish the moment A's loop completes, even though B's OWN loop is still
-        // in-flight. A correctly per-directory-scoped gate leaves B's entry absent here.
-        const snapshotBBeforeRelease = yield* Effect.promise(() => readSnapshot(dirB))
-        expect(findEntry(snapshotBBeforeRelease, "oq3c-plugin-b", "status")).toBeUndefined()
+        // in-flight. A correctly per-directory-scoped gate (D15) leaves B's entry absent here — a
+        // WRITE-side/init-ordering proof, independent of D20's read-side aggregation (queried via
+        // dirA's snapshot precisely so this assertion cannot be satisfied by directory B's own
+        // reader having simply not asked yet — the write itself has not happened anywhere).
+        const snapshotBBeforeReleaseViaA = yield* Effect.promise(() => readSnapshot(dirA))
+        expect(findEntry(snapshotBBeforeReleaseViaA, "oq3c-plugin-b", "status")).toBeUndefined()
 
         yield* Effect.promise(() => Bun.write(release, "go"))
         const exitB = yield* Fiber.await(fiberB)
         expect(Exit.isSuccess(exitB)).toBe(true)
 
+        // Post-release: B's gate has now resolved and flushed. Two independent things are true
+        // simultaneously, and this reconciled assertion proves both rather than the pre-D20
+        // "never visible cross-directory" claim that D20 (RFC 050 revision 5) deliberately makes
+        // false:
+        //   1. WRITE-side attribution is unchanged (D15/D13) — B's entry is attributed to dirB,
+        //      not merged or misattributed into dirA's bucket.
+        //   2. READ-side visibility is now correctly cross-directory (D20) — a snapshot queried
+        //      from EITHER directory returns BOTH entries, each correctly labelled with its own
+        //      origin `directory`, because `GET /plugin-ui/snapshot` aggregates every directory
+        //      `InstanceState.entries()` currently holds (D20/D21), not only the caller's own.
         const snapshotBAfter = yield* Effect.promise(() => readSnapshot(dirB))
-        expect(findEntry(snapshotBAfter, "oq3c-plugin-b", "status")).toMatchObject({ data: { dir: "b" } })
-        expect(findEntry(snapshotBAfter, "oq3c-plugin-a", "status")).toBeUndefined()
+        expect(findEntry(snapshotBAfter, "oq3c-plugin-b", "status")).toMatchObject({ data: { dir: "b" }, directory: dirB })
+        expect(findEntry(snapshotBAfter, "oq3c-plugin-a", "status")).toMatchObject({ data: { dir: "a" }, directory: dirA })
+
+        const snapshotAAfter = yield* Effect.promise(() => readSnapshot(dirA))
+        expect(findEntry(snapshotAAfter, "oq3c-plugin-b", "status")).toMatchObject({ data: { dir: "b" }, directory: dirB })
+        expect(findEntry(snapshotAAfter, "oq3c-plugin-a", "status")).toMatchObject({ data: { dir: "a" }, directory: dirA })
       }).pipe(Effect.provide(testInstanceStoreLayer)),
     15_000,
   )
