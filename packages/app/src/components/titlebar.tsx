@@ -39,6 +39,7 @@ import type { PromptSession } from "@/context/prompt"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "./command-tooltip-keybind"
 import { normalizeSessionInfo } from "@/utils/session"
+import { PluginStatusIndicator } from "./plugin-status-indicator"
 
 const legacyTitlebarHeight = 40
 const v2TitlebarHeight = 36
@@ -54,10 +55,16 @@ export type TitlebarUpdate = {
 
 export function useTitlebarRightMount() {
   const language = useLanguage()
+  const settings = useSettings()
   const [mount, setMount] = createSignal<HTMLElement | null>(null)
   const sync = () => setMount(document.getElementById("opencode-titlebar-right"))
   onMount(sync)
   createEffect(on(language.direction, sync, { defer: true }))
+  // `newLayoutDesigns` flipping at runtime destroys the legacy mount div and creates the V2 one
+  // (or vice versa) via Titlebar's own <Switch><Match>. Every page-scoped tenant of this mount
+  // gets a fresh `onMount` for free; a long-lived tenant (PluginStatusIndicator, D8) would not
+  // without this second re-resolution trigger.
+  createEffect(on(settings.general.newLayoutDesigns, sync, { defer: true }))
   return mount
 }
 
@@ -188,6 +195,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
       }}
       data-tauri-drag-region
     >
+      <PluginStatusIndicator />
       <Switch>
         <Match when={useV2Titlebar()}>
           {(_) => {
