@@ -4,41 +4,75 @@
  *   Record<string, Schema.Json> }`, success `Schema.Boolean`, error `[HttpApiError.BadRequest,
  *   InvalidRequestError]`. Middlewares (exact order, matching groups/tui.ts:198-200):
  *   InstanceContextMiddleware → WorkspaceRoutingMiddleware → Authorization, plus
- *   `query: WorkspaceRoutingQuery`.
- * @interface GET /plugin-ui/snapshot — no payload, `query: WorkspaceRoutingQuery`, success
+ *   `query: WorkspaceRoutingQuery`. UNCHANGED by RFC 050 revision 5 — the write path stays
+ *   directory-scoped (D20's carve-out is read-only).
+ * @interface GET /plugin-ui/snapshot — no payload, `query: WorkspaceRoutingQuery` (still
+ *   DECLARED per the group-level middleware contract, but per revision 5's D22/C18 the query
+ *   params no longer NARROW the result — see @behavior below), success
  *   `{ serverTime: DateTimeUtcFromMillis, entries: SnapshotEntry[] }` where `SnapshotEntry =
- *   { pluginID, event, data, publishedAt: DateTimeUtcFromMillis }` — a FLAT array, never a nested
- *   `Record<pluginID, Record<eventName, …>>`. Empty scope → 200 `{ entries: [] }`, never 404.
+ *   { directory: Schema.String, pluginID, event, data, publishedAt: DateTimeUtcFromMillis }` —
+ *   **AMENDED (revision 5, D22): `SnapshotEntry` gains `directory` as its first field.** A FLAT
+ *   array, never a nested `Record<pluginID, Record<eventName, …>>`. Empty scope → 200
+ *   `{ entries: [] }`, never 404.
  * @interface `groups/plugin-ui.ts` MUST export `PluginUiPaths = { publish: "/plugin-ui/publish",
  *   snapshot: "/plugin-ui/snapshot" } as const`, mirroring `TuiPaths`/`EventPaths`/`WorkspacePaths`.
  * @behavior
  *   - Retained store: `Map<WorkspaceKey, Map<PluginID, Map<EventName, RetainedEntry>>>` per
  *     directory via `InstanceState.make` (`WorkspaceKey = WorkspaceID | typeof UNSCOPED`, a
- *     `unique symbol` — never a plain string key, anywhere, at any level).
- *   - Read is an OR-match: `UNSCOPED ∪ (workspaceID ?? nothing)`. Dedup key is
- *     `(pluginID, eventName)`; the entry with the greater `publishedAt` wins regardless of which
- *     bucket it came from (recency beats specificity — RFC 050 §1d).
+ *     `unique symbol` — never a plain string key, anywhere, at any level). UNCHANGED by revision
+ *     5 — this describes the STORE and the WRITE path, which D20 does not touch.
+ *   - **AMENDED (revision 5, D20): the READ is now cross-directory.** `GET /plugin-ui/snapshot`
+ *     aggregates over `InstanceState.entries(state)` — EVERY directory the server currently holds
+ *     plugin-UI state for — not only the caller's resolved directory. Each returned row carries
+ *     its OWN `directory` (D22), sourced from the `ScopedCache` key that directory's bucket lives
+ *     under, never from the caller's own directory context. A response-level cap (D23) then keeps
+ *     at most the 32 most-recently-updated `(directory, pluginID)` buckets, each truncated to its
+ *     16 most-recently-updated rows — the SAME two magnitudes as the client's own cap, over the
+ *     SAME composite key.
+ *   - **AMENDED (revision 5, D22): the workspace axis now COLLAPSES on read, per directory.**
+ *     Within one directory's aggregate, the snapshot unions `UNSCOPED` with EVERY `WorkspaceID`
+ *     bucket that directory's store holds — not an OR-match against the caller's own
+ *     `?workspace=` query param. Dedup key is still `(pluginID, eventName)`, still per directory;
+ *     the entry with the greater `publishedAt` wins regardless of which workspace bucket it came
+ *     from (recency beats specificity — unchanged from revision 3/4's own rule, now evaluated
+ *     over a wider per-directory input set). Per C18, the `?directory=`/`?workspace=` query
+ *     params are still DECLARED and still select which instance answers the request, but they no
+ *     longer NARROW which rows come back — a read with no `?workspace=` param returns the exact
+ *     same per-directory union as a read WITH one, for that same directory.
  *   - Validation order, all BEFORE `EventV2Bridge.publish` and before anything is retained, all
  *     reject (never truncate/sanitize) with `InvalidRequestError` (400):
  *     `payload_too_large` (`data` > 16 KiB of UTF-8 bytes, `TextEncoder`-measured, never
  *     `.length`), `invalid_event_name` (`event` not matching `/^[A-Za-z0-9._-]{1,128}$/`),
  *     `invalid_plugin_id` (`pluginID` empty or > 256 chars), `reserved_key` (`pluginID`, `event`,
- *     or any `data` key at any depth is `__proto__`/`constructor`/`prototype`).
+ *     or any `data` key at any depth is `__proto__`/`constructor`/`prototype`). UNCHANGED by
+ *     revision 5.
  *   - Eviction per `(directory, workspaceKey)` bucket, by least-recently-**updated** (never
  *     least-recently-inserted): 17th distinct `eventName` for one plugin evicts that plugin's
  *     oldest entry (cap 16); 33rd distinct `pluginID` evicts the whole oldest plugin bucket
- *     (cap 32).
+ *     (cap 32). UNCHANGED by revision 5 — this is the RETENTION cap (write-side, per-bucket), a
+ *     different thing from the new response-level cap named above (read-side, per-response).
  *   - `publishedAt` is server-stamped inside the handler — never taken from a plugin-supplied
  *     `data` field. `serverTime` in the snapshot response is always >= every `publishedAt` in
- *     that response.
+ *     that response. UNCHANGED by revision 5.
  * @edge-cases
- *   - Cross-directory isolation (D13): a snapshot read scoped to directory B never returns an
- *     entry published under directory A.
+ *   - **Cross-directory aggregation (D20), amending the former D13 isolation edge-case:** a
+ *     snapshot read from ANY directory now includes every OTHER directory's retained entries too,
+ *     each correctly attributed with its own `directory`. D13's write-side attribution is NOT
+ *     withdrawn — a directory's entries are still written only by that directory's own publishes
+ *     — only who may READ the aggregate is widened.
+ *   - **Workspace-axis full union (D22), amending the former per-request OR-match edge-case:** an
+ *     entry published under one `WorkspaceID` bucket in a directory is visible from EVERY read of
+ *     that directory's snapshot, regardless of the read's own `?workspace=` query param (including
+ *     no param at all) — never scoped down to just the UNSCOPED bucket or just the caller's own
+ *     workspace bucket.
  *   - A rejected (oversized) publish must not reach `EventV2Bridge.publish` — no SSE broadcast,
- *     not even a truncated one.
- * @see .yui-soul/rfcs/approved/050-opencode-plugin-ui-event-channel/README.md §1c/§1d
+ *     not even a truncated one. UNCHANGED by revision 5.
+ * @see .yui-soul/rfcs/approved/050-opencode-plugin-ui-event-channel/README.md §1c/§1d, D20, D21,
+ *      D22, D23, C18
  * @see ../../src/server/routes/instance/httpapi/groups/tui.ts (the endpoint this mirrors 1:1)
  * @see ../../src/server/routes/instance/httpapi/handlers/event.ts (InstanceState.workspaceID / WorkspaceRef read pattern)
+ * @see ../../src/effect/instance-state.ts (`InstanceState.entries`, the new one-line accessor D21
+ *      adds over the plugin-UI cell's own `ScopedCache`, enabling the cross-directory aggregate)
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
@@ -336,26 +370,47 @@ describe("plugin-ui HttpApi validation", () => {
 })
 
 describe("plugin-ui HttpApi retained snapshot", () => {
-  it.live("publish under directory A is not visible in a snapshot read at directory B (D13)", () =>
-    Effect.gen(function* () {
-      const dirA = yield* tmpdirScoped({ git: true })
-      const dirB = yield* tmpdirScoped({ git: true })
+  // REPLACES the former D13 isolation test ("publish under directory A is not visible in a
+  // snapshot read at directory B"), which asserted the OPPOSITE of what D20 now specifies. Kept
+  // in the same spot, same dirA/dirB fixture setup, same publish — only the assertion DIRECTION
+  // and the test name change, per RFC 050 revision 5 D20 ("a deliberate, explicit widening of
+  // D13's isolation property — on the read path only"; D13's WRITE-side attribution is unchanged
+  // and re-asserted below via each entry's own `directory` field).
+  it.live(
+    "a snapshot read from any directory includes every directory's retained entries, each attributed with its own directory (D20)",
+    () =>
+      Effect.gen(function* () {
+        const dirA = yield* tmpdirScoped({ git: true })
+        const dirB = yield* tmpdirScoped({ git: true })
 
-      const published = yield* requestInDirectory(PluginUiPaths.publish, dirA, {
-        method: "POST",
-        headers: jsonHeaders,
-        body: publishBody({ pluginID: "isolation-plugin", event: "status", data: { scope: "A" } }),
-      })
-      expect(published.status).toBe(200)
+        const published = yield* requestInDirectory(PluginUiPaths.publish, dirA, {
+          method: "POST",
+          headers: jsonHeaders,
+          body: publishBody({ pluginID: "isolation-plugin", event: "status", data: { scope: "A" } }),
+        })
+        expect(published.status).toBe(200)
 
-      const snapshotA = yield* requestInDirectory(PluginUiPaths.snapshot, dirA)
-      const bodyA = (yield* json(snapshotA)) as { entries: Array<{ pluginID: string; event: string }> }
-      expect(bodyA.entries).toContainEqual(expect.objectContaining({ pluginID: "isolation-plugin", event: "status" }))
+        const snapshotA = yield* requestInDirectory(PluginUiPaths.snapshot, dirA)
+        const bodyA = (yield* json(snapshotA)) as {
+          entries: Array<{ pluginID: string; event: string; directory: string }>
+        }
+        expect(bodyA.entries).toContainEqual(
+          expect.objectContaining({ pluginID: "isolation-plugin", event: "status", directory: dirA }),
+        )
 
-      const snapshotB = yield* requestInDirectory(PluginUiPaths.snapshot, dirB)
-      const bodyB = (yield* json(snapshotB)) as { entries: Array<{ pluginID: string }> }
-      expect(bodyB.entries).not.toContainEqual(expect.objectContaining({ pluginID: "isolation-plugin" }))
-    }),
+        // D20's carve-out, proven directly: a snapshot READ from directory B now DOES include
+        // directory A's own retained entry — not proving isolation (the former D13 assertion),
+        // but proving the cross-directory aggregate is real, bounded to what the server actually
+        // retains, and correctly attributed. `directory: dirA` is the load-bearing part of this
+        // assertion: the row must be labelled with the DIRECTORY IT WAS PUBLISHED UNDER, not the
+        // reading caller's own directory (dirB) — proving D13's write-side attribution still
+        // holds even though the read-side isolation it used to imply no longer does.
+        const snapshotB = yield* requestInDirectory(PluginUiPaths.snapshot, dirB)
+        const bodyB = (yield* json(snapshotB)) as { entries: Array<{ pluginID: string; directory: string }> }
+        expect(bodyB.entries).toContainEqual(
+          expect.objectContaining({ pluginID: "isolation-plugin", directory: dirA }),
+        )
+      }),
   )
 
   it.instance(
@@ -464,9 +519,18 @@ afterEach(() => {
 
 const withWorkspace = testEffect(Layer.mergeAll(workspaceAppLayer, httpApiLayer))
 
-describe("plugin-ui HttpApi workspace-axis merge (§1d)", () => {
+describe("plugin-ui HttpApi workspace-axis merge (§1d/D22)", () => {
+  // REPLACES the former test name "OR-matches UNSCOPED ∪ workspaceID, and the later publishedAt
+  // wins on a bucket collision" — that name described the pre-revision-5 per-request OR-match.
+  // Under D22 the workspace axis collapses to a FULL union of every workspace bucket a directory
+  // holds, on EVERY read of that directory regardless of the read's own `?workspace=` query
+  // param (C18: query params route the request but no longer narrow the result). Only assertion
+  // #2 below (the former "workspace non-match" check) and its trailing "no workspace param"
+  // corollary change direction; assertion #1 (UNSCOPED visible from both A and B reads) and
+  // assertion #3 (recency-wins tie-break on a (pluginID, eventName) collision) still hold exactly
+  // as written under D22 — the fixture setup and publish sequence are otherwise untouched.
   withWorkspace.live(
-    "OR-matches UNSCOPED ∪ workspaceID, and the later publishedAt wins on a bucket collision",
+    "unions EVERY workspace bucket on every read of a directory (D22), and the later publishedAt still wins on a bucket collision",
     () =>
       Effect.gen(function* () {
         Flag.OPENCODE_EXPERIMENTAL_WORKSPACES = true
@@ -510,7 +574,13 @@ describe("plugin-ui HttpApi workspace-axis merge (§1d)", () => {
         )) as { entries: Array<{ pluginID: string; event: string }> }
         expect(readB.entries).toContainEqual(expect.objectContaining({ pluginID: "ws-plugin", event: "unscoped-event" }))
 
-        // 2. Published under workspace B — NOT visible from a workspace-A-scoped read.
+        // 2. REPLACES the former "published under workspace B — NOT visible from a
+        //    workspace-A-scoped read" assertion (D13-era per-request OR-match), which asserted
+        //    the OPPOSITE of what D22 now specifies. Under D22 the workspace axis collapses on
+        //    read: a directory's snapshot unions UNSCOPED with EVERY WorkspaceID bucket that
+        //    directory holds, not an OR-match against the caller's own `?workspace=` query
+        //    param — so an entry published under workspace B's bucket IS now visible from a
+        //    workspace-A-scoped read of the SAME directory too.
         const scopedB = yield* requestInDirectory(`${PluginUiPaths.publish}?workspace=${workspaceB.id}`, dir, {
           method: "POST",
           headers: jsonHeaders,
@@ -521,7 +591,7 @@ describe("plugin-ui HttpApi workspace-axis merge (§1d)", () => {
         const readAAfterB = (yield* json(
           yield* requestInDirectory(`${PluginUiPaths.snapshot}?workspace=${workspaceA.id}`, dir),
         )) as { entries: Array<{ pluginID: string; event: string }> }
-        expect(readAAfterB.entries).not.toContainEqual(expect.objectContaining({ event: "b-only-event" }))
+        expect(readAAfterB.entries).toContainEqual(expect.objectContaining({ pluginID: "ws-plugin", event: "b-only-event" }))
 
         // 3. Collision on (pluginID, eventName): publish under workspace A first (older), then
         //    publish UNSCOPED later (newer) for the SAME pair. The later publishedAt wins even
@@ -549,12 +619,17 @@ describe("plugin-ui HttpApi workspace-axis merge (§1d)", () => {
         )
         expect(collided?.data.from).toBe("unscoped-newer")
 
-        // A read with NO workspace param sees only the UNSCOPED bucket — neither workspace-A-only
-        // nor workspace-B-only entries appear.
-        const readUnscopedOnly = (yield* json(yield* requestInDirectory(PluginUiPaths.snapshot, dir))) as {
+        // Corollary of the assertion #2 fix above, same D22/C18 rule, not a separately-flagged
+        // item in its own right — but leaving this check in its pre-revision-5 direction would
+        // make it permanently, unfixably red the moment assertion #2 above is satisfied
+        // correctly: under D22/C18 the query params never narrow the result at all, so a read
+        // with NO `?workspace=` param returns the EXACT SAME per-directory union as a read WITH
+        // one. A read with no workspace param therefore now sees workspace B's "b-only-event"
+        // too — not "only the UNSCOPED bucket", as it did pre-revision-5.
+        const readNoWorkspaceParam = (yield* json(yield* requestInDirectory(PluginUiPaths.snapshot, dir))) as {
           entries: Array<{ event: string }>
         }
-        expect(readUnscopedOnly.entries).not.toContainEqual(expect.objectContaining({ event: "b-only-event" }))
+        expect(readNoWorkspaceParam.entries).toContainEqual(expect.objectContaining({ event: "b-only-event" }))
       }),
   )
 })

@@ -1749,12 +1749,16 @@ const scenarios: Scenario[] = [
   // Shape-only assertion, deliberately never a specific count/entry: the
   // scenario array is traversed three times per `test:httpapi` run, so a
   // count/presence assertion would be order-dependent and fragile.
+  // RFC 050 revision 5 (D22): SnapshotEntry gains a `directory` field, the
+  // response's cross-directory attribution. Shape-only here too, same
+  // reasoning — never a specific directory value/count.
   http.protected.get("/plugin-ui/snapshot", "plugin-ui.snapshot").json(200, (body) => {
     object(body)
     check(typeof body.serverTime === "number", "snapshot should include a numeric serverTime")
     array(body.entries)
     body.entries.forEach((entry) => {
       object(entry)
+      check(typeof entry.directory === "string", "snapshot entry should have a string directory")
       check(typeof entry.pluginID === "string", "snapshot entry should have a string pluginID")
       check(typeof entry.event === "string", "snapshot entry should have a string event")
       object(entry.data)
