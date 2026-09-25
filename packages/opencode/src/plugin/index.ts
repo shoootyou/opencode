@@ -27,18 +27,14 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
+import { publishDirect } from "./ui-store"
+import { PluginUiEvent } from "@opencode-ai/schema/plugin-ui-event"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
-
-// Not imported from groups/plugin-ui.ts's `PluginUiPaths` — that module pulls
-// in the full HttpApi builder chain, which (transitively, via Provider)
-// re-imports this very file and deadlocks module initialization order
-// ("Cannot access 'node' before initialization").
-const PLUGIN_UI_PUBLISH_PATH = "/plugin-ui/publish"
 
 // Module-level (process-wide) re-entrancy guard, keyed by directory: tracks a
 // directory whose input.ui.publish flush is currently being awaited by
@@ -231,29 +227,31 @@ const layer = Layer.effect(
           if (dropped) warnPublishFailure(pluginID, dropped.event, "pending_queue_full")
         }
 
-        // Reuses the exact same routing decision already made for `client`'s
-        // own `fetch` override above — no new transport code, just calling it
-        // directly instead of through the (untyped-for-plugin-ui) SDK wrapper.
-        async function pluginUiFetch(url: URL, init: RequestInit): Promise<Response> {
-          if (!serverUrl) return Server.Default().app.request(url, init)
-          return fetch(url, init)
-        }
-
+        // E6c (D1): the self-flush no longer round-trips HTTP at all. It calls `publishDirect`
+        // using the `InstanceContext` this closure already has in hand (`ctx.directory`) — so it
+        // never re-enters InstanceContextMiddleware -> InstanceStore.load() for its own
+        // still-booting directory, and therefore cannot deadlock regardless of transport
+        // (in-process Server.Default() OR a real TCP Server.listen()). `publishDirect` validates
+        // with the SAME gate the HTTP handler uses (D3) before writing into the shared
+        // `@/plugin/ui-store` module-level store (D2).
         async function sendPublish(pluginID: string, event: string, body: string) {
           try {
-            const url = new URL(PLUGIN_UI_PUBLISH_PATH, serverUrl?.toString() ?? "http://localhost:4096")
-            const res = await pluginUiFetch(url, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "x-opencode-directory": ctx.directory,
-                ...ServerAuth.headers(),
-              },
-              body,
+            const parsed = JSON.parse(body) as typeof PluginUiEvent.Custom.data.Type
+            const reason = publishDirect({
+              directory: ctx.directory,
+              workspaceID: undefined,
+              pluginID: parsed.pluginID,
+              event: parsed.event,
+              data: parsed.data,
             })
-            if (res.ok) return
-            const text = await res.text().catch(() => "")
-            warnPublishFailure(pluginID, event, `http_${res.status}${text ? `: ${text}` : ""}`)
+            if (reason) {
+              warnPublishFailure(pluginID, event, reason)
+              return
+            }
+            // Retention alone is not enough: the HTTP handler also relays the event live over
+            // SSE so already-connected UI subscribers see it without refetching the snapshot.
+            // Mirror that here, or the direct path silently loses the live push.
+            bridge.fork(events.publish(PluginUiEvent.Custom, parsed))
           } catch (err) {
             warnPublishFailure(pluginID, event, errorMessage(err))
           }
