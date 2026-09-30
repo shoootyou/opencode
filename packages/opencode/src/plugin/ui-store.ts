@@ -123,9 +123,21 @@ export function hasReservedKey(value: unknown): boolean {
   return Object.keys(record).some((key) => RESERVED_KEYS.has(key) || hasReservedKey(record[key]))
 }
 
-export type ValidationKind = "payload_too_large" | "invalid_event_name" | "invalid_plugin_id" | "reserved_key"
+export type ValidationKind =
+  | "payload_too_large"
+  | "invalid_event_name"
+  | "invalid_plugin_id"
+  | "reserved_key"
+  | "invalid_data"
 
 export function validatePayload(payload: { pluginID: string; event: string; data: unknown }): ValidationKind | undefined {
+  // Must run before the byte-length check below — a non-object `data` can still `JSON.stringify`
+  // to something under `MAX_DATA_BYTES` (e.g. `"i-am-a-string"`), which would otherwise slip
+  // past the size gate and reach the reserved-key scan / shared store with the wrong shape
+  // (r2-sho-e6c-deadlock.md finding #1). Mirrors the wire path's own `PublishPayload` Schema
+  // decode (`Schema.Record(Schema.String, Schema.Json)`), which already rejects string, number,
+  // boolean, null, and array `data` with a 400 — this closes the same gap for `publishDirect`.
+  if (typeof payload.data !== "object" || payload.data === null || Array.isArray(payload.data)) return "invalid_data"
   const byteLength = new TextEncoder().encode(JSON.stringify(payload.data)).length
   if (byteLength > MAX_DATA_BYTES) return "payload_too_large"
   if (!EVENT_NAME_PATTERN.test(payload.event)) return "invalid_event_name"
