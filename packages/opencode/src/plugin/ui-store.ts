@@ -19,7 +19,8 @@
 // module's store using a directory string the caller (`plugin/index.ts`) already has in hand from
 // its own `InstanceContext` — there is no self-referential call to break in the first place.
 import { registerDisposer } from "@/effect/instance-registry"
-import type { Schema } from "effect"
+import { PluginUiEvent } from "@opencode-ai/schema/plugin-ui-event"
+import { Result, Schema } from "effect"
 
 type JsonRecord = Record<string, Schema.Json>
 
@@ -130,14 +131,29 @@ export type ValidationKind =
   | "reserved_key"
   | "invalid_data"
 
+// The EXACT same `data` schema the wire path decodes `PublishPayload.data` against
+// (`PluginUiEvent.Custom.data.fields.data`, i.e. `Schema.Record(Schema.String, Schema.Json)`) —
+// imported from the canonical definition rather than re-declared, so `publishDirect` and the HTTP
+// handler can never silently drift onto two different notions of "valid data" (D3).
+const DataSchema = PluginUiEvent.Custom.data.fields.data
+const decodeData = Schema.decodeUnknownResult(DataSchema)
+
+// Round-3's `typeof`/`Array.isArray`/`null` guard only inspected `data`'s own top-level shape —
+// a nested `Symbol` or `BigInt` at any depth (e.g. `{ nested: { deep: Symbol("x") } }`) passed it
+// cleanly, reproducing the exact same cross-directory DoS blast radius `JSON.stringify` throws
+// into for ALL directories, not just the offending one (round-3 re-audit HIGH, r3-sho/r3-shin).
+// Decoding through the real wire-path schema recursively validates every nested value against
+// `Schema.Json`, so a `Symbol`/`BigInt` at any depth is rejected cleanly as `invalid_data` — never
+// an uncaught throw — while still accepting any well-formed plain-JSON-safe nested object.
+function isInvalidData(data: unknown): boolean {
+  return Result.isFailure(decodeData(data))
+}
+
 export function validatePayload(payload: { pluginID: string; event: string; data: unknown }): ValidationKind | undefined {
-  // Must run before the byte-length check below — a non-object `data` can still `JSON.stringify`
-  // to something under `MAX_DATA_BYTES` (e.g. `"i-am-a-string"`), which would otherwise slip
-  // past the size gate and reach the reserved-key scan / shared store with the wrong shape
-  // (r2-sho-e6c-deadlock.md finding #1). Mirrors the wire path's own `PublishPayload` Schema
-  // decode (`Schema.Record(Schema.String, Schema.Json)`), which already rejects string, number,
-  // boolean, null, and array `data` with a 400 — this closes the same gap for `publishDirect`.
-  if (typeof payload.data !== "object" || payload.data === null || Array.isArray(payload.data)) return "invalid_data"
+  // Must run before the byte-length check below — invalid `data` can still `JSON.stringify` to
+  // something under `MAX_DATA_BYTES`, which would otherwise slip past the size gate and reach the
+  // reserved-key scan / shared store with the wrong shape (r2-sho-e6c-deadlock.md finding #1).
+  if (isInvalidData(payload.data)) return "invalid_data"
   const byteLength = new TextEncoder().encode(JSON.stringify(payload.data)).length
   if (byteLength > MAX_DATA_BYTES) return "payload_too_large"
   if (!EVENT_NAME_PATTERN.test(payload.event)) return "invalid_event_name"

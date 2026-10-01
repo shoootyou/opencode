@@ -165,6 +165,60 @@ test("direct path still accepts a well-formed plain-object data payload after th
   expect(directories().find(([d]) => d === directory)).toBeDefined()
 })
 
+// ---------------------------------------------------------------------------
+// Round-4 remediation: round-3's `typeof`/`Array.isArray`/`null` guard only inspected `data`'s
+// own TOP-LEVEL shape — a nested `Symbol`/`BigInt` at any depth passed it cleanly and reproduced
+// the exact same cross-directory DoS blast radius (r3-sho-publishdirect-fix.md / r3-shin-contracts.md,
+// HIGH, round-4-authorized by rodo, plan README D17). `validatePayload` now decodes `data` through
+// `Schema.decodeUnknownResult` against the SAME schema the wire path's `PublishPayload` already
+// uses (`PluginUiEvent.Custom.data.fields.data`), which recursively validates every nested value.
+// ---------------------------------------------------------------------------
+
+test("direct path REJECTS a nested Symbol at depth (currently accepted — red until fixed)", () => {
+  const directory = freshDirectory("invalid-data-nested-symbol")
+  const reason = publishDirect({
+    directory,
+    workspaceID: undefined,
+    pluginID: "p",
+    event: "e",
+    data: { nested: { deep: Symbol("x") } },
+  })
+  expect(reason).toBe("invalid_data")
+  expect(directories().find(([d]) => d === directory)).toBeUndefined()
+})
+
+test("direct path CLEANLY REJECTS a nested BigInt at depth, not an uncaught throw (currently accepted — red until fixed)", () => {
+  const directory = freshDirectory("invalid-data-nested-bigint")
+  // Must not throw — a hand-rolled recursive walker could plausibly explode on a BigInt reaching
+  // `JSON.stringify` inside the byte-length check; the schema decode must reject it BEFORE that
+  // point, as a clean `invalid_data` return, same as every other `ValidationKind`.
+  let reason: ReturnType<typeof publishDirect>
+  expect(() => {
+    reason = publishDirect({
+      directory,
+      workspaceID: undefined,
+      pluginID: "p",
+      event: "e",
+      data: { nested: { deep: 10n } },
+    })
+  }).not.toThrow()
+  expect(reason).toBe("invalid_data")
+  expect(directories().find(([d]) => d === directory)).toBeUndefined()
+})
+
+test("direct path still accepts a well-formed NESTED plain-object data payload (control, not over-rejected)", () => {
+  const directory = freshDirectory("invalid-data-nested-control")
+  const reason = publishDirect({
+    directory,
+    workspaceID: undefined,
+    pluginID: "p",
+    event: "e",
+    data: { nested: { deep: { a: 1, b: "x", c: [1, 2, 3], d: null } } },
+  })
+  expect(reason).toBeUndefined()
+  expect(directories().find(([d]) => d === directory)).toBeDefined()
+})
+
 test("direct path enforces invalid_event_name and invalid_plugin_id", () => {
   expect(validatePayload({ pluginID: "p", event: "bad name!", data: {} })).toBe("invalid_event_name")
   expect(validatePayload({ pluginID: "", event: "e", data: {} })).toBe("invalid_plugin_id")
