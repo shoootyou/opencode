@@ -219,6 +219,73 @@ test("direct path still accepts a well-formed NESTED plain-object data payload (
   expect(directories().find(([d]) => d === directory)).toBeDefined()
 })
 
+// ---------------------------------------------------------------------------
+// Round-5 remediation: round-4's own fix placed the new `Schema.decodeUnknownResult` recursive
+// decode check BEFORE the existing byte-length/size check in `validatePayload`'s ordering. This
+// inverted the intended cheap-check-first ordering — a sufficiently deep/wide nested object could
+// stack-overflow INSIDE the schema decoder's own recursion before the 16 KiB size cap ever got a
+// chance to reject it (r4-sho-schema-decode-fix.md finding #1, CRITICAL, round-5-authorized by
+// rodo, plan README D18). Sho measured the crash threshold drop from ~28,700+ nesting depth
+// (round 3) to ~12,256-16,384 (round 4) for the same shape, and empirically verified a reorder
+// (byte-length first, schema decode second) closes it cleanly up to depth 100,000. These tests
+// prove the SAME reorder: a payload deep enough to stack-overflow a naive recursive walker, but
+// also comfortably over `MAX_DATA_BYTES`, must be rejected via `payload_too_large` — the cheap,
+// non-recursive check — and must NEVER reach the recursive schema decoder in the first place.
+// ---------------------------------------------------------------------------
+
+test("direct path rejects a deeply-nested (depth 20,000) oversized payload via payload_too_large, never a stack-overflow throw", () => {
+  const directory = freshDirectory("deep-oversized-20k")
+  // Depth 20,000 is comfortably within the round-4 CRITICAL's measured crash band
+  // (~12,256-16,384) — if the schema decode still ran before the byte-length check, this would
+  // throw an uncaught RangeError instead of returning cleanly.
+  let obj: unknown = { a: 1 }
+  for (let i = 0; i < 20_000; i++) obj = { n: obj }
+
+  let reason: ReturnType<typeof publishDirect>
+  expect(() => {
+    reason = publishDirect({ directory, workspaceID: undefined, pluginID: "p", event: "e", data: obj })
+  }).not.toThrow()
+  expect(reason).toBe("payload_too_large")
+  expect(directories().find(([d]) => d === directory)).toBeUndefined()
+})
+
+test("direct path rejects a deeply-nested (depth 100,000) oversized payload via payload_too_large, never a stack-overflow throw", () => {
+  const directory = freshDirectory("deep-oversized-100k")
+  // Depth 100,000 matches Sho's own verified range (empirical reorder-and-retest up to depth
+  // 100,000, zero throws). This is the upper bound of what Sho independently confirmed closes
+  // the gap — proving the fix holds at the exact depth the reviewer validated, not just at the
+  // minimum depth needed to demonstrate the regression.
+  let obj: unknown = { a: 1 }
+  for (let i = 0; i < 100_000; i++) obj = { n: obj }
+
+  let reason: ReturnType<typeof publishDirect>
+  expect(() => {
+    reason = publishDirect({ directory, workspaceID: undefined, pluginID: "p", event: "e", data: obj })
+  }).not.toThrow()
+  expect(reason).toBe("payload_too_large")
+  expect(directories().find(([d]) => d === directory)).toBeUndefined()
+})
+
+test("direct path rejects a deeply-nested (depth 50,000) array-shaped oversized payload via payload_too_large, never a stack-overflow throw", () => {
+  const directory = freshDirectory("deep-oversized-array-50k")
+  // Array-nesting is a structurally distinct shape from object-nesting (different per-level byte
+  // overhead, different schema-decode code path for `Schema.Json`'s array branch) — covering it
+  // separately guards against a fix that only reorders correctly for the object shape. The deep
+  // array is wrapped in an object (`data` itself must be a `Record`, per `invalid_data`'s own
+  // top-level contract) so the recursive descent actually walks through the array branch of
+  // `Schema.Json` rather than being rejected immediately for being a non-Record top level.
+  let obj: unknown = [1]
+  for (let i = 0; i < 50_000; i++) obj = [obj]
+
+  let reason: ReturnType<typeof publishDirect>
+  expect(() => {
+    reason = publishDirect({ directory, workspaceID: undefined, pluginID: "p", event: "e", data: { wrapper: obj } })
+  }).not.toThrow()
+  expect(reason).toBe("payload_too_large")
+  expect(directories().find(([d]) => d === directory)).toBeUndefined()
+})
+
+
 test("direct path enforces invalid_event_name and invalid_plugin_id", () => {
   expect(validatePayload({ pluginID: "p", event: "bad name!", data: {} })).toBe("invalid_event_name")
   expect(validatePayload({ pluginID: "", event: "e", data: {} })).toBe("invalid_plugin_id")

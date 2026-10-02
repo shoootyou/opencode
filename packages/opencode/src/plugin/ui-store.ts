@@ -149,13 +149,49 @@ function isInvalidData(data: unknown): boolean {
   return Result.isFailure(decodeData(data))
 }
 
+// `JSON.stringify` is itself a recursive walk with no depth bound — a sufficiently deep nested
+// object can overflow the stack INSIDE this call, before it ever returns a byte count. Catching
+// that specific failure mode (`RangeError`, the engine's own stack-overflow signature) and
+// reporting it as `"stack_overflow"` lets the caller treat it as proof-of-oversized exactly like
+// a measured over-cap byte count. Any OTHER throw (e.g. `TypeError` for a `BigInt` leaf or a
+// circular reference, both of which `JSON.stringify` rejects regardless of depth) is NOT a size
+// signal — it is swallowed here (reported as `"undecided"`) so the caller skips straight to
+// `isInvalidData`'s clean, non-throwing classification instead of propagating an uncaught throw
+// out of `validatePayload` for a shallow, non-oversized payload (round-3/round-4 contract:
+// BigInt/Symbol must reject as `invalid_data`, never surface as an uncaught throw).
+function stringifiedByteLength(data: unknown): number | "stack_overflow" | "undecided" {
+  try {
+    return new TextEncoder().encode(JSON.stringify(data)).length
+  } catch (e) {
+    return e instanceof RangeError ? "stack_overflow" : "undecided"
+  }
+}
+
 export function validatePayload(payload: { pluginID: string; event: string; data: unknown }): ValidationKind | undefined {
-  // Must run before the byte-length check below — invalid `data` can still `JSON.stringify` to
-  // something under `MAX_DATA_BYTES`, which would otherwise slip past the size gate and reach the
+  // Byte-length runs FIRST, ahead of the schema decode below (round-4 regression, round-5 fix,
+  // r4-sho-schema-decode-fix.md finding #1). `isInvalidData`'s `Schema.decodeUnknownResult` call
+  // recurses with no depth bound — placing it before this cheap, non-recursive size check let a
+  // sufficiently deep/wide nested object stack-overflow INSIDE the schema decoder's own
+  // recursion before this size cap ever got a chance to reject it (Sho measured the crash
+  // threshold drop from ~28,700+ nesting depth to ~12,256-16,384 for the same shape). Running the
+  // cheap check first makes it an effective pre-recursion depth/size cap: anything large enough
+  // to blow a recursive walker's stack is already over `MAX_DATA_BYTES` and rejected here first.
+  //
+  // `JSON.stringify` itself is recursive and can throw on the SAME pathological depth before it
+  // ever returns a byte count — that throw is treated as proof the payload is already over the
+  // size cap (a `RangeError` from `JSON.stringify`'s own stack overflow is the stack-overflow
+  // signature this reorder exists to pre-empt, so it is classified the same way the size check
+  // would have classified it had it been able to finish). Any OTHER throw (e.g. `TypeError` for
+  // a `BigInt` leaf, which `JSON.stringify` rejects at any depth, not just deep ones) is NOT a
+  // size signal — it falls through to `isInvalidData` below, which classifies it cleanly via
+  // `Schema.decodeUnknownResult` without throwing (round-3/round-4 contract: BigInt/Symbol must
+  // reject as `invalid_data`, never surface as an uncaught throw).
+  const byteLength = stringifiedByteLength(payload.data)
+  if (byteLength === "stack_overflow" || (byteLength !== "undecided" && byteLength > MAX_DATA_BYTES))
+    return "payload_too_large"
+  // Must still run before the reserved-key scan below — invalid `data` could otherwise reach the
   // reserved-key scan / shared store with the wrong shape (r2-sho-e6c-deadlock.md finding #1).
   if (isInvalidData(payload.data)) return "invalid_data"
-  const byteLength = new TextEncoder().encode(JSON.stringify(payload.data)).length
-  if (byteLength > MAX_DATA_BYTES) return "payload_too_large"
   if (!EVENT_NAME_PATTERN.test(payload.event)) return "invalid_event_name"
   if (payload.pluginID.length === 0 || payload.pluginID.length > MAX_PLUGIN_ID_LENGTH) return "invalid_plugin_id"
   if (RESERVED_KEYS.has(payload.pluginID) || RESERVED_KEYS.has(payload.event) || hasReservedKey(payload.data))
