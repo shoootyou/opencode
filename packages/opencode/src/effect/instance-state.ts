@@ -66,4 +66,6 @@ export const invalidate = <A, E, R>(self: InstanceState<A, E, R>) =>
     return yield* ScopedCache.invalidate(self.cache, yield* directory)
   })
 
+export const entries = <A, E, R>(self: InstanceState<A, E, R>) => ScopedCache.entries(self.cache)
+
 export * as InstanceState from "./instance-state"

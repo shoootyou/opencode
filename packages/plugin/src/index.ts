@@ -53,7 +53,22 @@ export type WorkspaceAdapter = {
   target(config: WorkspaceInfo): WorkspaceTarget | Promise<WorkspaceTarget>
 }
 
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+
+export type PluginUiPublish = (event: string, data: Record<string, JsonValue>) => Promise<void>
+
 export type PluginInput = {
+  /**
+   * Sugar for publishing a `plugin.custom` event through the `/plugin-ui/publish`
+   * relay. Never rejects — unserializable data, oversized payloads, non-2xx
+   * server responses, and transport failures are all logged at `warn` and
+   * swallowed. Populated for every plugin shape, including legacy
+   * (non-`resolvePluginId`-backed) plugins, which receive a `load.spec`-derived
+   * fallback plugin id (RFC 050 OQ2, resolved Option B). See RFC 050 §1e.
+   */
+  ui?: {
+    publish: PluginUiPublish
+  }
   client: ReturnType<typeof createOpencodeClient>
   project: Project
   directory: string

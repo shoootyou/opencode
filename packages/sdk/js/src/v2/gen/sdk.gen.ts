@@ -130,6 +130,10 @@ import type {
   PermissionRuleset,
   PermissionV2Reply,
   PermissionV2Source,
+  PluginUiPublishErrors,
+  PluginUiPublishResponses,
+  PluginUiSnapshotErrors,
+  PluginUiSnapshotResponses,
   ProjectCommands,
   ProjectCurrentErrors,
   ProjectCurrentResponses,
@@ -5021,6 +5025,81 @@ export class Tui extends HeyApiClient {
   }
 }
 
+export class PluginUi extends HeyApiClient {
+  /**
+   * Publish a plugin UI event
+   *
+   * Validate, retain, then relay one plugin-authored `plugin.custom` event.
+   */
+  public publish<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      pluginID?: string
+      event?: string
+      data?: {
+        [key: string]: unknown
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "pluginID" },
+            { in: "body", key: "event" },
+            { in: "body", key: "data" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PluginUiPublishResponses, PluginUiPublishErrors, ThrowOnError>({
+      url: "/plugin-ui/publish",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Read retained plugin UI entries
+   *
+   * Last retained value per (directory, pluginID, eventName), aggregated across every directory the server currently holds plugin UI state for.
+   */
+  public snapshot<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<PluginUiSnapshotResponses, PluginUiSnapshotErrors, ThrowOnError>({
+      url: "/plugin-ui/snapshot",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Health extends HeyApiClient {
   /**
    * Check server health
@@ -7210,6 +7289,11 @@ export class OpencodeClient extends HeyApiClient {
   private _tui?: Tui
   get tui(): Tui {
     return (this._tui ??= new Tui({ client: this.client }))
+  }
+
+  private _pluginUi?: PluginUi
+  get pluginUi(): PluginUi {
+    return (this._pluginUi ??= new PluginUi({ client: this.client }))
   }
 
   private _v2?: V2

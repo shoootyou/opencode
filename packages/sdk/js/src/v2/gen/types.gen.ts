@@ -93,6 +93,7 @@ export type Event =
   | EventWorktreeFailed
   | EventServerConnected
   | EventGlobalDisposed
+  | EventPluginCustom
   | EventServerInstanceDisposed
 
 export type QuestionReplied = {
@@ -1600,6 +1601,17 @@ export type GlobalEvent = {
           [key: string]: unknown
         }
       }
+    | {
+        id: string
+        type: "plugin.custom"
+        properties: {
+          pluginID: string
+          event: string
+          data: {
+            [key: string]: unknown
+          }
+        }
+      }
     | EventServerInstanceDisposed
     | SyncEventSessionCreated
     | SyncEventSessionUpdated
@@ -2652,6 +2664,21 @@ export type EventTuiSessionSelect = {
   }
 }
 
+export type PluginUiSnapshotEntry = {
+  directory: string
+  pluginID: string
+  event: string
+  data: {
+    [key: string]: unknown
+  }
+  publishedAt: number
+}
+
+export type PluginUiSnapshotResponse = {
+  serverTime: number
+  entries: Array<PluginUiSnapshotEntry>
+}
+
 export type Workspace = {
   id: string
   type: string
@@ -2941,6 +2968,7 @@ export type V2Event =
   | WorktreeFailed
   | ServerConnected
   | GlobalDisposed
+  | PluginCustom
 
 export type V2EventStream = string
 
@@ -6105,6 +6133,27 @@ export type GlobalDisposed = {
   }
 }
 
+export type PluginCustom = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "plugin.custom"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    pluginID: string
+    event: string
+    data: {
+      [key: string]: unknown
+    }
+  }
+}
+
 export type QuestionV2Request = {
   id: string
   sessionID: string
@@ -7049,6 +7098,18 @@ export type EventGlobalDisposed = {
   type: "global.disposed"
   properties: {
     [key: string]: unknown
+  }
+}
+
+export type EventPluginCustom = {
+  id: string
+  type: "plugin.custom"
+  properties: {
+    pluginID: string
+    event: string
+    data: {
+      [key: string]: unknown
+    }
   }
 }
 
@@ -10999,6 +11060,68 @@ export type TuiControlResponseResponses = {
 }
 
 export type TuiControlResponseResponse = TuiControlResponseResponses[keyof TuiControlResponseResponses]
+
+export type PluginUiPublishData = {
+  body?: {
+    pluginID: string
+    event: string
+    data: {
+      [key: string]: unknown
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin-ui/publish"
+}
+
+export type PluginUiPublishErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type PluginUiPublishError = PluginUiPublishErrors[keyof PluginUiPublishErrors]
+
+export type PluginUiPublishResponses = {
+  /**
+   * Event published successfully
+   */
+  200: boolean
+}
+
+export type PluginUiPublishResponse = PluginUiPublishResponses[keyof PluginUiPublishResponses]
+
+export type PluginUiSnapshotData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin-ui/snapshot"
+}
+
+export type PluginUiSnapshotErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type PluginUiSnapshotError = PluginUiSnapshotErrors[keyof PluginUiSnapshotErrors]
+
+export type PluginUiSnapshotResponses = {
+  /**
+   * Retained plugin UI entries across every open directory
+   */
+  200: PluginUiSnapshotResponse
+}
+
+export type PluginUiSnapshotResponse2 = PluginUiSnapshotResponses[keyof PluginUiSnapshotResponses]
 
 export type ExperimentalWorkspaceAdapterListData = {
   body?: never

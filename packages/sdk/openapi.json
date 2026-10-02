@@ -9275,6 +9275,154 @@
         ]
       }
     },
+    "/plugin-ui/publish": {
+      "post": {
+        "tags": ["plugin-ui"],
+        "operationId": "plugin-ui.publish",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event published successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Event published successfully"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Validate, retain, then relay one plugin-authored `plugin.custom` event.",
+        "summary": "Publish a plugin UI event",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pluginID": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  }
+                },
+                "required": ["pluginID", "event", "data"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.plugin-ui.publish({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/plugin-ui/snapshot": {
+      "get": {
+        "tags": ["plugin-ui"],
+        "operationId": "plugin-ui.snapshot",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retained plugin UI entries across every open directory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUiSnapshotResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Last retained value per (directory, pluginID, eventName), aggregated across every directory the server currently holds plugin UI state for.",
+        "summary": "Read retained plugin UI entries",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.plugin-ui.snapshot({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/workspace/adapter": {
       "get": {
         "tags": ["workspace"],
@@ -15524,6 +15672,9 @@
             "$ref": "#/components/schemas/EventGlobalDisposed"
           },
           {
+            "$ref": "#/components/schemas/EventPluginCustom"
+          },
+          {
             "$ref": "#/components/schemas/EventServerInstanceDisposed"
           }
         ]
@@ -20416,6 +20567,37 @@
                 "additionalProperties": false
               },
               {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["plugin.custom"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "pluginID": {
+                        "type": "string"
+                      },
+                      "event": {
+                        "type": "string"
+                      },
+                      "data": {
+                        "type": "object"
+                      }
+                    },
+                    "required": ["pluginID", "event", "data"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
                 "$ref": "#/components/schemas/EventServerInstanceDisposed"
               },
               {
@@ -23366,6 +23548,44 @@
         "required": ["type", "properties"],
         "additionalProperties": false
       },
+      "PluginUiSnapshotEntry": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "pluginID": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          },
+          "publishedAt": {
+            "type": "number"
+          }
+        },
+        "required": ["directory", "pluginID", "event", "data", "publishedAt"],
+        "additionalProperties": false
+      },
+      "PluginUiSnapshotResponse": {
+        "type": "object",
+        "properties": {
+          "serverTime": {
+            "type": "number"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginUiSnapshotEntry"
+            }
+          }
+        },
+        "required": ["serverTime", "entries"],
+        "additionalProperties": false
+      },
       "Workspace": {
         "type": "object",
         "properties": {
@@ -24265,6 +24485,9 @@
           },
           {
             "$ref": "#/components/schemas/GlobalDisposed"
+          },
+          {
+            "$ref": "#/components/schemas/PluginCustom"
           }
         ]
       },
@@ -33700,6 +33923,59 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "PluginCustom": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["plugin.custom"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "pluginID": {
+                "type": "string"
+              },
+              "event": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object"
+              }
+            },
+            "required": ["pluginID", "event", "data"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "QuestionV2Request": {
         "type": "object",
         "properties": {
@@ -36680,6 +36956,37 @@
         "required": ["id", "type", "properties"],
         "additionalProperties": false
       },
+      "EventPluginCustom": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["plugin.custom"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "pluginID": {
+                "type": "string"
+              },
+              "event": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object"
+              }
+            },
+            "required": ["pluginID", "event", "data"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
       "CredentialOAuth": {
         "type": "object",
         "properties": {
@@ -36864,6 +37171,10 @@
     {
       "name": "tui",
       "description": "Experimental HttpApi TUI routes."
+    },
+    {
+      "name": "plugin-ui",
+      "description": "Plugin UI event channel relay + retained snapshot."
     },
     {
       "name": "workspace",

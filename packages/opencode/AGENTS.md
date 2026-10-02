@@ -105,7 +105,7 @@ See `specs/effect/migration.md` for the compact pattern reference and examples.
 - Use `Effect.addFinalizer` or `Effect.acquireRelease` inside the `InstanceState.make` closure for cleanup (subscriptions, process teardown, etc.).
 - Use `Effect.forkScoped` inside the closure for background stream consumers — the fiber is interrupted when the instance is disposed.
 - To make a service's `init()` non-blocking, fork `InstanceState.get(state)` at the `init()` call site (e.g. `Effect.forkIn(scope)`), not by forking work inside the `InstanceState.make` closure. Forking inside the closure leaves state incomplete for other methods that read it.
-- `src/project/bootstrap.ts` already wraps every service `init()` in `Effect.forkDetach`, so `init()` is fire-and-forget in production. Keep `init()` methods synchronous internally; the caller controls concurrency.
+- `src/project/bootstrap.ts:38` awaits `plugin.init()` directly (`yield* plugin.init()`), and `bootstrap.ts:41-45` awaits the remaining services' `init()` via `Effect.forEach` with `concurrency: "unbounded"`. None of this is wrapped in `Effect.forkDetach` — `init()` is synchronous/blocking from the bootstrap caller's perspective, in production. A plugin hook that re-enters bootstrap for the same directory during its own `init()` can deadlock on this (see the `directoriesFlushing` reentrancy guard in `src/plugin/index.ts`). If a service's own slow work needs to be non-blocking, fork it internally against its own scope (e.g. `Effect.forkScoped`) — bootstrap does not do this for you.
 
 ## Effect v4 beta API
 
