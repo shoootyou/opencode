@@ -8,6 +8,7 @@
  * @edge-cases
  *   - The probe is GET / with redirect: "manual", cache: "no-store", and same-origin credentials; it never re-enters the wrapper.
  *   - AbortError, cross-origin failures, non-TypeError failures, loop/in-flight guards, and non-Cloudflare probe outcomes do not trigger recovery.
+ *   - A rejected cloned HTML 403 body is handled by the fire-and-forget recovery path, preserves its original response, and permits a later genuine challenge recovery.
  *   - A recovery target carries the loop marker, remains same-origin, and service-worker teardown is best-effort.
  *   - The original TypeError rejects without waiting for a pending probe.
  *   - The event stream remains observable and bypasses request-queue accounting, not the guarded seam.
@@ -371,5 +372,47 @@ describe("createWebPlatform", () => {
     await flushRecovery()
     expect(clones).toBe(1)
     expect(browser.replacements).toEqual([])
+  })
+
+  test("handles a rejected HTML body without changing its response or suppressing a later challenge recovery", async () => {
+    const browser = installRecoveryBrowser()
+    const bodyFailure = new Error("body failed")
+    const rejectedBody = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(bodyFailure)
+        },
+      }),
+      { status: 403, headers: { "content-type": "text/html" } },
+    )
+    const unhandled: unknown[] = []
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", onUnhandledRejection)
+    let calls = 0
+    globalThis.fetch = mockBrowserFetch(async () => {
+      calls++
+      return calls === 1 ? rejectedBody : new Response(null, { status: 403, headers: { "cf-mitigated": "challenge" } })
+    })
+
+    try {
+      const guarded = createWebPlatform("2.0.28").platform.fetch!
+      const returned = await guarded("https://app.example.test/api/info")
+      await flushRecovery()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(returned).toBe(rejectedBody)
+      expect(returned.status).toBe(403)
+      expect(returned.bodyUsed).toBe(false)
+      expect(unhandled).toEqual([])
+      expect(browser.replacements).toEqual([])
+
+      await guarded("https://app.example.test/api/info")
+      await flushRecovery()
+      expect(browser.replacements).toEqual([
+        "https://app.example.test/project/path?tab=files&__cf_access_recover=1#changes",
+      ])
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection)
+    }
   })
 })

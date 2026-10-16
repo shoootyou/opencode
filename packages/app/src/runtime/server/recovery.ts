@@ -37,6 +37,7 @@ export function recoverCloudflareAccess(response: Response, browser: RecoveryBro
       browser.document.documentElement.setAttribute(recoveryMarker, "1")
       return completeRecovery(browser)
     })
+    .catch(() => false)
     .finally(() => {
       recoveryInFlight = false
     })

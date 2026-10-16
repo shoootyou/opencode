@@ -15,7 +15,7 @@ export type Resolved =
   | { readonly type: "command"; readonly definition: Command.Definition }
   | { readonly type: "skill"; readonly skill: Skill.Info; readonly snapshot: Snapshot }
 
-export type ReloadError = ConfigSkillReload.ReloadUnavailable | ConfigSkillReload.ReloadFailed
+export type ReloadError = ConfigSkillReload.ReloadUnavailable | ConfigSkillReload.ReloadFailed | ConfigSkillReload.ReloadTeardown
 
 export interface Interface {
   readonly snapshot: (input: { readonly session: Session.Info }) => Effect.Effect<Snapshot>

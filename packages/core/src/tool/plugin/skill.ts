@@ -67,6 +67,10 @@ export const Plugin = {
                     Effect.fail(
                       new ToolFailure({ message: "Unable to reload skills for this location.", error: undefined }),
                     ),
+                  "ConfigSkillReload.ReloadTeardown": () =>
+                    Effect.fail(
+                      new ToolFailure({ message: "Skill reload was interrupted because this location closed.", error: undefined }),
+                    ),
                 }),
               ),
           })

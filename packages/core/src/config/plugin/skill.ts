@@ -5,7 +5,7 @@ import type { Entry } from "@opencode/schema/config"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import path from "path"
-import { Cause, Effect, Exit, FiberMap, PubSub, Scope, Semaphore, Stream } from "effect"
+import { Cause, Effect, Exit, FiberMap, PubSub, Scope, Stream } from "effect"
 import { Config } from "../../config.js"
 import { ConfigSkillReload } from "../skill-reload.js"
 import { Watcher } from "../../filesystem/watcher.js"
@@ -32,7 +32,6 @@ export const Plugin = define({
       skills: [],
     }
     const changes = yield* PubSub.sliding<string>(1)
-    const lock = Semaphore.makeUnsafe(1)
 
     const watch = Effect.fn("ConfigSkillPlugin.watch")(function* (
       watches: FiberMap.FiberMap<string>,
@@ -148,92 +147,76 @@ export const Plugin = define({
 
     let watchScope = yield* Scope.make()
     yield* FiberMap.make<string>().pipe(Scope.provide(watchScope))
-    yield* Effect.addFinalizer(() => Scope.close(watchScope, Exit.void).pipe(Effect.uninterruptible))
-    const refresh = Effect.fn("ConfigSkillPlugin.refresh")(
-      function* (mode: "initial" | "reload", file?: string) {
-        const entries = yield* config.entries()
-        const candidateScope = yield* Scope.make()
-        const candidateWatches = yield* FiberMap.make<string>().pipe(Scope.provide(candidateScope))
-        const skills = new Map<Skill.ID, Skill.Info>()
-        const current = sources(entries)
-        const scan = Effect.forEach(current, (source) =>
-          load(candidateWatches, source).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterrupts(cause)
-                ? Effect.failCause(cause)
-                : Effect.logWarning("failed to load skill source", { source: Skill.Source.key(source), cause }).pipe(
-                    Effect.andThen(mode === "initial" ? Effect.succeed([]) : Effect.failCause(cause)),
-                  ),
-            ),
-          ).pipe(Effect.tap((items) => Effect.sync(() => items.forEach((skill) => skills.set(skill.id, skill))))),
-        )
-        yield* scan.pipe(
-          Effect.catchCause((cause) =>
-            Scope.close(candidateScope, Exit.failCause(cause)).pipe(
-              Effect.uninterruptible,
-              Effect.andThen(Effect.failCause(cause)),
-            ),
-          ),
-        )
-        const previousScope = watchScope
-        watchScope = candidateScope
-        loaded.entries = entries
-        loaded.skills = Array.from(skills.values())
-        yield* ctx.skill.reload()
-        yield* Scope.close(previousScope, Exit.void).pipe(Effect.uninterruptible)
-        if (file) {
-          yield* Effect.logInfo("skills rescanned", {
-            file,
-            sources: current.map(Skill.Source.key),
-            skills: loaded.skills.map((skill) => skill.id),
-          })
-        }
-      },
-      (effect, ..._args: [file?: string]) => lock.withPermit(effect),
-    )
-    yield* skillReload.install(() =>
-      refresh("reload").pipe(
-        Effect.andThen(() => Effect.succeed({ count: loaded.skills.length })),
-        Effect.catchCauseIf(
-          (cause) => !Cause.hasInterrupts(cause),
-          (cause) => Effect.fail(cause),
-        ),
-      ),
-    )
-
-    // Editor saves arrive as bursts of watcher events; settle before rescanning once. Subscribe
-    // before debouncing so no update slips through while the debounce starts its pull.
-    const updates = yield* PubSub.subscribe(changes)
-    yield* Stream.fromSubscription(updates).pipe(
-      Stream.debounce("100 millis"),
-      Stream.runForEach((file) =>
-        refresh("reload", file).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logWarning("failed to reload skills", { cause }),
-          ),
-        ),
-      ),
-      Effect.forkScoped({ startImmediately: true }),
-    )
-    yield* refresh("initial").pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("failed to activate skill source", { cause }).pipe(Effect.andThen(Effect.void)),
-      ),
-    )
     yield* ctx.skill.transform((editor) => {
       for (const skill of loaded.skills) editor.add(skill)
     })
-    yield* ctx.event.subscribe().pipe(
-      Stream.filter((event) => event.type === "config.updated"),
-      Stream.runForEach(() =>
-        refresh("reload").pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logWarning("failed to reload skills", { cause }),
+    const refresh = Effect.fn("ConfigSkillPlugin.refresh")(function* (mode: "initial" | "reload") {
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          let transferred = false
+          const candidateScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+            transferred ? Effect.void : Scope.close(scope, Exit.void),
+          )
+          const candidateWatches = yield* FiberMap.make<string>().pipe(Scope.provide(candidateScope))
+          const entries = yield* config.entries()
+          const skills = new Map<Skill.ID, Skill.Info>()
+          const current = sources(entries)
+          const scan = Effect.forEach(current, (source) =>
+            load(candidateWatches, source).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterrupts(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.logWarning("failed to load skill source", { source: Skill.Source.key(source), cause }).pipe(
+                      Effect.andThen(mode === "initial" ? Effect.succeed([]) : Effect.failCause(cause)),
+                    ),
+              ),
+            ).pipe(Effect.tap((items) => Effect.sync(() => items.forEach((skill) => skills.set(skill.id, skill))))),
+          )
+          yield* scan
+          const previousScope = yield* Effect.uninterruptible(
+            Effect.sync(() => {
+              const previous = watchScope
+              watchScope = candidateScope
+              loaded.entries = entries
+              loaded.skills = Array.from(skills.values())
+              transferred = true
+              return previous
+            }),
+          )
+          yield* ctx.skill.reload().pipe(Effect.ensuring(Scope.close(previousScope, Exit.void)))
+          return { count: loaded.skills.length }
+        }),
+      )
+    })
+    const installationScope = yield* Scope.make()
+    const registration = yield* skillReload.install(
+      (mode) =>
+        refresh(mode).pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterrupts(cause),
+            (cause) => Effect.fail(cause),
           ),
         ),
-      ),
+      { initial: true },
+    ).pipe(Scope.provide(installationScope))
+    yield* Effect.addFinalizer(() =>
+      Scope.close(installationScope, Exit.void).pipe(Effect.andThen(Scope.close(watchScope, Exit.void))),
+    )
+
+    // Editor saves arrive as bursts of watcher events; settle before one non-waiting admission.
+    const updates = yield* PubSub.subscribe(changes)
+    yield* Stream.fromSubscription(updates).pipe(
+      Stream.debounce("100 millis"),
+      Stream.runForEach(() => registration.invalidate()),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+    yield* registration.initial.pipe(
+      Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
+      Effect.asVoid,
+    )
+    yield* ctx.event.subscribe().pipe(
+      Stream.filter((event) => event.type === "config.updated"),
+      Stream.runForEach(() => registration.invalidate()),
       Effect.forkScoped({ startImmediately: true }),
     )
   }),

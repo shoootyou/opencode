@@ -6,10 +6,10 @@
  *   - Calls the location-scoped ConfigSkillReload service exactly once and records its count as a non-resuming synthetic result.
  *   - Does not admit a model prompt when it executes.
  * @edge-cases
- *   - ReloadFailed becomes the same safe reload-failure message as reload_skills.
+ *   - ReloadFailed and ReloadTeardown become their exact safe location-scoped messages.
  *   - A later user-defined reload command replaces this built-in command.
  * @see ../../src/fork/plugin/reload-command.ts
- * @mutation-targets executor-time capability lookup; double reload; resume flag; interruption catch
+ * @mutation-targets executor-time capability lookup; double reload; resume flag; interruption catch; teardown catch
  */
 import { describe, expect } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
@@ -138,6 +138,44 @@ describe("ReloadCommand.Plugin /reload", () => {
       yield* run(() => Effect.die(defect))
       const exit = yield* command.execute({ name: "reload", invocation }).pipe(Effect.exit)
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      expect(synthetic).toEqual([])
+    }),
+  )
+  it.effect("maps typed teardown to its exact safe message without converting interruption or admitting a synthetic result", () =>
+    Effect.gen(function* () {
+      const command = yield* Command.Service
+      const synthetic: string[] = []
+      yield* ReloadCommand.Plugin.effect(
+        host({
+          command: {
+            list: () => command.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
+            transform: command.transform,
+            reload: command.reload,
+          },
+          session: {
+            synthetic: (input) =>
+              Effect.sync(() => {
+                synthetic.push(input.text)
+                return SessionInbox.Synthetic.make({
+                  id: SessionMessage.ID.create(),
+                  sessionID: input.sessionID,
+                  time: { created: DateTime.makeUnsafe(0) },
+                  type: "synthetic",
+                  payload: { text: input.text },
+                  delivery: "steer",
+                })
+              }),
+          },
+        }),
+      ).pipe(
+        Effect.provideService(
+          ForkCapabilities.Service,
+          capturedCapabilities(() => Effect.fail(new ConfigSkillReload.ReloadTeardown())),
+        ),
+        Effect.provide(locationLayer),
+      )
+      const failure = yield* command.execute({ name: "reload", invocation }).pipe(Effect.flip)
+      expect(failure).toMatchObject({ message: "Skill reload was interrupted because this location closed." })
       expect(synthetic).toEqual([])
     }),
   )

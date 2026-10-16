@@ -26,6 +26,8 @@ export const Plugin = define({
               "ConfigSkillReload.ReloadUnavailable": () =>
                 Effect.fail(new Error("Skill reload is unavailable for this location.")),
               "ConfigSkillReload.ReloadFailed": () => Effect.fail(new Error("Unable to reload skills for this location.")),
+              "ConfigSkillReload.ReloadTeardown": () =>
+                Effect.fail(new Error("Skill reload was interrupted because this location closed.")),
             }),
           ),
       })

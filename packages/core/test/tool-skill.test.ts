@@ -6,8 +6,9 @@
  *   - Invokes the captured ConfigSkillReload service once and returns only its nonnegative count.
  *   - Renders a count-only singular/plural-safe confirmation without leaking skill metadata or reload causes.
  * @edge-cases
- *   - ReloadUnavailable and ReloadFailed become their distinct safe ToolFailure messages.
- *   - Unexpected defects remain defects rather than normal tool failures.
+ *   - ReloadUnavailable, ReloadFailed, and ReloadTeardown become their distinct safe ToolFailure messages.
+ *   - Unexpected defects and caller interruption remain unaltered rather than normal tool failures.
+ * @mutation-targets typed teardown catch; catchCause interruption conversion; defect conversion
  */
 import fs from "fs/promises"
 import path from "path"
@@ -137,6 +138,25 @@ describe("SkillTool", () => {
         error: { type: "tool.execution", message: "Unable to reload skills for this location." },
       })
       expect(JSON.stringify(failed)).not.toContain("sentinel reload cause")
+    }).pipe(Effect.provide(skillToolTestLayer())),
+  )
+
+  it.live("maps typed teardown to the exact safe tool failure without a synthetic success", () =>
+    Effect.gen(function* () {
+      const reload = yield* ConfigSkillReload.Service
+      yield* reload.install(() => Effect.fail(new ConfigSkillReload.ReloadTeardown()))
+      const result = yield* executeTool(yield* Tool.Service, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-reload-skills-teardown", name: "reload_skills", input: {} },
+      })
+      expect(result).toEqual({
+        status: "error",
+        error: {
+          type: "tool.execution",
+          message: "Skill reload was interrupted because this location closed.",
+        },
+      })
     }).pipe(Effect.provide(skillToolTestLayer())),
   )
 
