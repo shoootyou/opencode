@@ -6,6 +6,8 @@
  *   - Watcher, explicit, and config reload requests share one refresh lifecycle and publish only complete snapshots.
  *   - Initial activation keeps successfully scanned local skills when a URL source fails.
  *   - A failed later reload retains the previous complete snapshot and emits no update event.
+ *   - Public reload reports the committed replacement generation's count, not the prior generation's count.
+ *   - Rapid public reload calls coalesce to at most one active refresh plus one queued refresh.
  * @edge-cases
  *   - Captured prior snapshots remain immutable while a replacement source scan is blocked.
  *   - Only one reload owner is active; closing it permits reinstall without a stale close removing the newer owner.
@@ -47,7 +49,7 @@ const reloadLocation = Layer.succeed(
 )
 const it = testEffect(
   Layer.merge(
-    AppNodeBuilder.build(LayerNode.group([Skill.node, Bus.node, FSUtil.node, ConfigSkillReload.node]), [
+    AppNodeBuilder.build(LayerNode.group([Skill.node, Bus.node, FSUtil.node, ConfigSkillReload.node, SkillDiscovery.node]), [
       Location.node.replace(reloadLocation),
     ]),
     watcherLayer,
@@ -283,6 +285,124 @@ describe("ConfigSkillPlugin.Plugin", () => {
           }),
         ),
       ),
+  )
+
+  it.live(
+    "keeps the committed catalog and returns ReloadFailed when the real remote index starts returning HTTP 404",
+    () =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          let unavailable = false
+          const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+              const url = new URL(request.url)
+              if (url.pathname === "/catalog/index.json") {
+                if (unavailable) return new Response("Not Found", { status: 404 })
+                return Response.json({ skills: [{ name: "remote", files: ["SKILL.md"] }] })
+              }
+              if (url.pathname === "/catalog/remote/SKILL.md")
+                return new Response("---\nname: remote\ndescription: Remote catalog\n---\n# Remote")
+              return new Response("Not Found", { status: 404 })
+            },
+          })
+          return { server, fail: () => (unavailable = true) }
+        }),
+        ({ server }) => Effect.promise(() => server.stop(true)),
+      ).pipe(
+        Effect.flatMap(({ server, fail }) =>
+          Effect.gen(function* () {
+            const local = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir()))
+            const bus = yield* Bus.Service
+            const discovery = yield* SkillDiscovery.Service
+            const service = yield* startConfiguredEntries(
+              [new Document({ type: "document", info: decode({ skills: [server.url.href + "catalog/"] }) })],
+              local.path,
+              local.path,
+              discovery,
+              undefined,
+              { subscribe: () => bus.subscribe(Event.Updated) },
+            )
+            const published = yield* Deferred.make<void>()
+            const subscription = yield* bus.subscribe(Skill.Event.Updated).pipe(
+              Stream.runForEach(() => Deferred.succeed(published, undefined).pipe(Effect.asVoid)),
+              Effect.forkScoped,
+            )
+            expect((yield* service.list()).map((skill) => skill.id)).toEqual([Skill.ID.make("remote")])
+            fail()
+            const failed = yield* (yield* ConfigSkillReload.Service).reload().pipe(Effect.flip)
+            expect(failed._tag).toBe("ConfigSkillReload.ReloadFailed")
+            expect((yield* service.list()).map((skill) => skill.id)).toEqual([Skill.ID.make("remote")])
+            expect(yield* Deferred.await(published).pipe(Effect.timeout("100 millis"), Effect.exit)).toSatisfy(Exit.isFailure)
+            yield* Fiber.interrupt(subscription)
+          }),
+        ),
+      ),
+  )
+
+  it.live("returns the newly committed catalog size from public reload", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const first = path.join(tmp.path, "first")
+          const second = path.join(tmp.path, "second")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(first, "one"), { recursive: true })
+            await fs.mkdir(path.join(second, "one"), { recursive: true })
+            await fs.mkdir(path.join(second, "two"), { recursive: true })
+            await write(first, "one", "One")
+            await write(second, "one", "One")
+            await write(second, "two", "Two")
+          })
+          let next = first
+          const service = yield* start(["https://skills.example.test/catalog"], tmp.path, SkillDiscovery.Service.of({
+            pull: () => Effect.sync(() => [AbsolutePath.make(next)]),
+          }))
+          expect((yield* service.list())).toHaveLength(1)
+          next = second
+          expect(yield* (yield* ConfigSkillReload.Service).reload()).toEqual({ count: 2 })
+          expect(yield* service.list()).toHaveLength(2)
+        }),
+      ),
+    ),
+  )
+
+  it.live("coalesces a rapid public reload burst into no more than one active and one queued refresh", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const remote = path.join(tmp.path, "remote")
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          let pulls = 0
+          let block = false
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(remote, "remote"), { recursive: true })
+            await write(remote, "remote", "Remote")
+          })
+          const service = yield* start(["https://skills.example.test/catalog"], tmp.path, SkillDiscovery.Service.of({
+            pull: () =>
+              Effect.sync(() => ++pulls).pipe(
+                Effect.andThen(block ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))) : Effect.void),
+                Effect.as([AbsolutePath.make(remote)]),
+              ),
+          }))
+          block = true
+          const reload = yield* ConfigSkillReload.Service
+          const first = yield* reload.reload().pipe(Effect.forkScoped)
+          yield* Deferred.await(entered)
+          const second = yield* reload.reload().pipe(Effect.forkScoped)
+          const third = yield* reload.reload().pipe(Effect.forkScoped)
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(first)
+          yield* Fiber.join(second)
+          yield* Fiber.join(third)
+          expect(pulls).toBeLessThanOrEqual(3) // initial activation plus one active and one queued reload
+          expect(yield* service.list()).toHaveLength(1)
+        }),
+      ),
+    ),
   )
 
   it.live(

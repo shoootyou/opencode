@@ -164,12 +164,20 @@ describe("viewport preload", () => {
   test("does not attach a resize listener when not standalone", () => {
     mockMatchMedia(false)
     mockInnerHeight(812)
+    const originalAddEventListener = window.addEventListener
+    const listeners: string[] = []
+    window.addEventListener = ((type: string) => {
+      listeners.push(type)
+    }) as typeof window.addEventListener
 
-    run()
-    mockInnerHeight(1000)
-    window.dispatchEvent(new Event("resize"))
+    try {
+      run()
+    } finally {
+      window.addEventListener = originalAddEventListener
+    }
 
     expect(propertyValue()).toBe("")
+    expect(listeners).not.toContain("resize")
   })
 
   test("sets the property synchronously from visualViewport.height when standalone", () => {

@@ -21,9 +21,30 @@ describe("v2 archive-session English translations", () => {
       "command.session.archivedBrowse",
       "dialog.archivedSessions.title",
       "dialog.archivedSessions.empty",
+      "common.retry",
       "common.unarchive",
     ]
 
     expect(keys.filter((key) => !(key in dict))).toEqual([])
+  })
+
+  test("keeps every fork archive and retry key in every locale dictionary", async () => {
+    const keys = [
+      "command.session.archive",
+      "command.session.unarchive",
+      "command.session.archivedBrowse",
+      "dialog.archivedSessions.title",
+      "dialog.archivedSessions.empty",
+      "common.retry",
+      "common.unarchive",
+    ]
+    const locales = await Array.fromAsync(new Bun.Glob("*.ts").scan({ cwd: import.meta.dir }))
+    const dictionaries = await Promise.all(
+      locales
+        .filter((file) => !file.endsWith(".test.ts") && file !== "desktop-native.ts" && file !== "language.ts")
+        .map(async (file) => ({ file, dict: (await import(`./${file}`)).dict as Record<string, string> })),
+    )
+
+    expect(dictionaries.flatMap(({ file, dict }) => keys.filter((key) => !(key in dict)).map((key) => `${file}:${key}`))).toEqual([])
   })
 })

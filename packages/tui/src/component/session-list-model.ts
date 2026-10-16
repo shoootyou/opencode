@@ -8,6 +8,10 @@ export function sessionListItem(session: { time: { archived?: number | null } })
   return { archived: session.time.archived != null }
 }
 
+export function toggleArchivedVisibility(showArchived: boolean) {
+  return !showArchived
+}
+
 export async function toggleSessionArchive(input: {
   sessionID: string
   archivedAt?: number | null

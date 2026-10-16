@@ -62,7 +62,7 @@ class Index extends Schema.Class<Index>("SkillDiscovery.Index")({
 }) {}
 
 export interface Interface {
-  readonly pull: (url: string) => Effect.Effect<AbsolutePath[]>
+  readonly pull: (url: string) => Effect.Effect<AbsolutePath[], unknown>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SkillDiscovery") {}
@@ -89,7 +89,7 @@ const layer = Layer.effect(
         Effect.flatMap((body) => fs.writeWithDirs(destination, new Uint8Array(body))),
         Effect.as(true),
         Effect.catch((error) =>
-          Effect.logError("failed to download skill file", { url, error }).pipe(Effect.as(false)),
+          Effect.logError("failed to download skill file", { url, error }).pipe(Effect.andThen(Effect.die(error))),
         ),
       )
     })
@@ -104,10 +104,9 @@ const layer = Layer.effect(
           http.execute,
           Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
           Effect.catch((error) =>
-            Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.as(undefined)),
+            Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.andThen(Effect.die(error))),
           ),
         )
-        if (!data) return []
 
         const sourceRoot = path.resolve(global.cache, "skills", Hash.fast(base))
         return yield* Effect.forEach(
@@ -197,10 +196,7 @@ const layer = Layer.effect(
                       if (cached) yield* fs.remove(backup, { recursive: true, force: true }).pipe(Effect.ignore)
                     }),
                   )
-                }).pipe(
-                  Effect.catch((error) => Effect.logError("failed to refresh skill", { skill: skill.name, error })),
-                  Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)),
-                )
+                }).pipe(Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)))
               }
               const exists =
                 (yield* fs.exists(path.join(root, "SKILL.md")).pipe(Effect.orDie)) ||

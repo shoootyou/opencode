@@ -44,7 +44,7 @@ function responseWithURL(url: string) {
   return current
 }
 
-function browser(input?: Partial<RecoveryBrowser>) {
+function browser(input?: Partial<RecoveryBrowser> & { href?: string }) {
   const attributes = new Map<string, string>()
   const replacements: string[] = []
   const value: RecoveryBrowser = {
@@ -56,7 +56,7 @@ function browser(input?: Partial<RecoveryBrowser>) {
     },
     navigator: { serviceWorker: { getRegistrations: async () => [] } },
     location: {
-      href: "https://app.example.test/project/path?tab=files&__cf_access_recover=stale#changes",
+      href: input?.href ?? "https://app.example.test/project/path?tab=files&__cf_access_recover=stale#changes",
       replace: (url) => replacements.push(url),
     },
     ...input,
@@ -140,6 +140,26 @@ describe("Cloudflare Access recovery", () => {
 
     expect(await recoverCloudflareAccess(response(403, { "cf-mitigated": "challenge" }), target.value)).toBe(false)
     expect(target.replacements).toEqual([])
+  })
+
+  test("does not recover a Cloudflare response when the current URL already has the loop marker", async () => {
+    let registrations = 0
+    const target = browser({
+      href: "https://app.example.test/project/path?__cf_access_recover=1",
+      navigator: { serviceWorker: { getRegistrations: async () => (registrations++, []) } },
+    })
+
+    expect(await recoverCloudflareAccess(response(403, { "cf-mitigated": "challenge" }), target.value)).toBe(false)
+    expect(registrations).toBe(0)
+    expect(target.replacements).toEqual([])
+  })
+
+  test("allows a later Cloudflare recovery after an ordinary HTML 403", async () => {
+    const target = browser()
+
+    expect(await recoverCloudflareAccess(response(403, { "content-type": "text/html" }, "Forbidden"), target.value)).toBe(false)
+    expect(await recoverCloudflareAccess(response(403, { "cf-mitigated": "challenge" }), target.value)).toBe(true)
+    expect(target.replacements).toHaveLength(1)
   })
 
   test("continues to replace the clean same-origin URL when registration lookup or unregistering fails", async () => {

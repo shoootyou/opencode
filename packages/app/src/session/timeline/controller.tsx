@@ -292,11 +292,11 @@ export function createTimelineController(input: { session: TimelineSessionSource
 
     if (!success) return false
     const current = data.session.get(id)
+    const active = data.session.list().filter((item) => !item.parentID && typeof item.time?.archived !== "number")
+    const index = active.findIndex((item) => item.id === id)
+    const next = index === -1 ? undefined : (active[index + 1] ?? active[index - 1])
 
     if (current) data.session.remember({ ...current, time: { ...current.time, archived } })
-    const sessions = data.session.list().filter((item) => !item.parentID && typeof item.time?.archived !== "number")
-    const index = sessions.findIndex((item) => item.id === id)
-    const next = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
     data.session.evict(id)
 

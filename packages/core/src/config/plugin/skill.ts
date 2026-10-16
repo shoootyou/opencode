@@ -5,7 +5,7 @@ import type { Entry } from "@opencode/schema/config"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import path from "path"
-import { Cause, Effect, FiberMap, PubSub, Semaphore, Stream } from "effect"
+import { Cause, Effect, Exit, FiberMap, PubSub, Scope, Semaphore, Stream } from "effect"
 import { Config } from "../../config.js"
 import { ConfigSkillReload } from "../skill-reload.js"
 import { Watcher } from "../../filesystem/watcher.js"
@@ -109,9 +109,9 @@ export const Plugin = define({
 
     const load = Effect.fn("ConfigSkillPlugin.load")(function* (watches: FiberMap.FiberMap<string>, source: Source) {
       const directories =
-        source.type === "directory"
-          ? [source.path]
-          : yield* discovery.pull(source.url)
+          source.type === "directory"
+            ? [source.path]
+          : yield* discovery.pull(source.url).pipe(Effect.catch(Effect.die))
       const roots = (yield* Effect.forEach(directories, (directory) => watchDirectory(watches, directory))).flat()
       const skills: Skill.Info[] = []
       for (const directory of directories) {
@@ -146,14 +146,17 @@ export const Plugin = define({
       return skills
     })
 
-    let watches = yield* FiberMap.make<string>()
+    let watchScope = yield* Scope.make()
+    yield* FiberMap.make<string>().pipe(Scope.provide(watchScope))
+    yield* Effect.addFinalizer(() => Scope.close(watchScope, Exit.void).pipe(Effect.uninterruptible))
     const refresh = Effect.fn("ConfigSkillPlugin.refresh")(
       function* (mode: "initial" | "reload", file?: string) {
         const entries = yield* config.entries()
-        const candidateWatches = yield* FiberMap.make<string>()
+        const candidateScope = yield* Scope.make()
+        const candidateWatches = yield* FiberMap.make<string>().pipe(Scope.provide(candidateScope))
         const skills = new Map<Skill.ID, Skill.Info>()
         const current = sources(entries)
-        yield* Effect.forEach(current, (source) =>
+        const scan = Effect.forEach(current, (source) =>
           load(candidateWatches, source).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterrupts(cause)
@@ -163,19 +166,21 @@ export const Plugin = define({
                   ),
             ),
           ).pipe(Effect.tap((items) => Effect.sync(() => items.forEach((skill) => skills.set(skill.id, skill))))),
-        ).pipe(
+        )
+        yield* scan.pipe(
           Effect.catchCause((cause) =>
-            Cause.hasInterrupts(cause)
-              ? Effect.failCause(cause)
-              : FiberMap.clear(candidateWatches).pipe(Effect.andThen(Effect.failCause(cause))),
+            Scope.close(candidateScope, Exit.failCause(cause)).pipe(
+              Effect.uninterruptible,
+              Effect.andThen(Effect.failCause(cause)),
+            ),
           ),
         )
-        const previous = watches
-        watches = candidateWatches
+        const previousScope = watchScope
+        watchScope = candidateScope
         loaded.entries = entries
         loaded.skills = Array.from(skills.values())
         yield* ctx.skill.reload()
-        yield* FiberMap.clear(previous)
+        yield* Scope.close(previousScope, Exit.void).pipe(Effect.uninterruptible)
         if (file) {
           yield* Effect.logInfo("skills rescanned", {
             file,
@@ -188,7 +193,7 @@ export const Plugin = define({
     )
     yield* skillReload.install(() =>
       refresh("reload").pipe(
-        Effect.as({ count: loaded.skills.length }),
+        Effect.andThen(() => Effect.succeed({ count: loaded.skills.length })),
         Effect.catchCauseIf(
           (cause) => !Cause.hasInterrupts(cause),
           (cause) => Effect.fail(cause),

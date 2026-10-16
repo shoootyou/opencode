@@ -16,22 +16,30 @@ export async function classifyCloudflareAccess(response: Response, requestURL: s
 }
 
 export function recoverCloudflareAccess(response: Response, browser: RecoveryBrowser): Promise<boolean> {
-  if (browser.document.documentElement.hasAttribute(recoveryMarker) || recoveryInFlight) return Promise.resolve(false)
+  if (
+    browser.document.documentElement.hasAttribute(recoveryMarker) ||
+    new URL(browser.location.href).searchParams.get(recoveryMarker) === "1" ||
+    recoveryInFlight
+  )
+    return Promise.resolve(false)
   const classified = classifyImmediately(response, browser.location.href)
   if (classified === false) return Promise.resolve(false)
 
   recoveryInFlight = true
-  browser.document.documentElement.setAttribute(recoveryMarker, "1")
-
-  if (classified === true) return completeRecovery(browser)
-
-  return classifyCloudflareAccess(response, browser.location.href).then((isAccess) => {
-    if (!isAccess) {
-      recoveryInFlight = false
-      return false
-    }
+  if (classified === true) {
+    browser.document.documentElement.setAttribute(recoveryMarker, "1")
     return completeRecovery(browser)
-  })
+  }
+
+  return classifyCloudflareAccess(response, browser.location.href)
+    .then((isAccess) => {
+      if (!isAccess) return false
+      browser.document.documentElement.setAttribute(recoveryMarker, "1")
+      return completeRecovery(browser)
+    })
+    .finally(() => {
+      recoveryInFlight = false
+    })
 }
 
 export function isCloudflareAccessRecoveryInFlight() {

@@ -1,7 +1,7 @@
 export * as ConfigSkillReload from "./skill-reload.js"
 
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { Cause, Context, Effect, Layer, Option, Ref, Schema, Scope, Semaphore } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope, Semaphore } from "effect"
 
 export class ReloadUnavailable extends Schema.TaggedError<ReloadUnavailable>()("ConfigSkillReload.ReloadUnavailable", {}) {}
 
@@ -26,6 +26,7 @@ const make = Effect.gen(function* () {
     Option.none(),
   )
   const gate = Semaphore.makeUnsafe(1)
+  const pending = yield* Ref.make<Option.Option<Deferred.Deferred<{ readonly count: number }, unknown>>>(Option.none())
   const install = (reload: () => Effect.Effect<{ readonly count: number }, unknown, Scope.Scope>) =>
     gate.withPermit(
       Effect.gen(function* () {
@@ -47,8 +48,15 @@ const make = Effect.gen(function* () {
     )
   return {
     reload: (): Effect.Effect<{ readonly count: number }, ReloadUnavailable | ReloadFailed> =>
-      gate.withPermit(
-        Effect.gen(function* () {
+      Effect.gen(function* () {
+        const done = yield* Deferred.make<{ readonly count: number }, unknown>()
+        const [owner, active] = yield* gate.withPermit(
+          Ref.modify(pending, (current): readonly [readonly [boolean, Deferred.Deferred<{ readonly count: number }, unknown>], Option.Option<Deferred.Deferred<{ readonly count: number }, unknown>>] =>
+            Option.isSome(current) ? [[false, current.value], current] : [[true, done], Option.some(done)],
+          ),
+        )
+        if (!owner) return yield* Deferred.await(active)
+        return yield* Effect.gen(function* () {
           const current = yield* Ref.get(installed)
           if (Option.isNone(current)) return yield* new ReloadUnavailable()
           return yield* current.value.reload().pipe(
@@ -57,8 +65,13 @@ const make = Effect.gen(function* () {
               (cause) => Effect.fail(new ReloadFailed({ cause })),
             ),
           )
-        }),
-      ).pipe(
+        }).pipe(
+          Effect.exit,
+          Effect.tap((exit) => Deferred.done(done, exit)),
+          Effect.ensuring(Ref.set(pending, Option.none())),
+          Effect.flatMap((exit) => Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause)),
+        )
+      }).pipe(
         Effect.mapError((error): ReloadUnavailable | ReloadFailed =>
           error instanceof ReloadUnavailable || error instanceof ReloadFailed ? error : new ReloadFailed({ cause: error }),
         ),

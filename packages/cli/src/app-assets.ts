@@ -18,9 +18,10 @@ export const load = Effect.fn("cli.app-assets.load")(function* () {
     return {
       files: lazy(embedded.value, (key) => brotliDecompressSync(embedded.value[key]!)),
       brotli: embedded.value,
+      embedded: true,
     }
   if (!OPENCODE_LOCAL) return yield* Effect.fail(new Error("Web UI assets are missing from the CLI build"))
-  return { files: yield* sourceAssets(), brotli: undefined }
+  return { files: yield* sourceAssets(), brotli: undefined, embedded: false }
 })
 
 const sourceAssets = Effect.fnUntraced(function* () {

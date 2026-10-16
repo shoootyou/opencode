@@ -23,7 +23,7 @@ import { useConfig } from "../config"
 import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
 import { projectName } from "../util/project"
 import { useLocation } from "../context/location"
-import { createSessionListQuery, sessionListItem, toggleSessionArchive } from "./session-list-model"
+import { createSessionListQuery, sessionListItem, toggleArchivedVisibility, toggleSessionArchive } from "./session-list-model"
 
 export function DialogSessionList() {
   const dialog = useDialog()
@@ -316,7 +316,8 @@ export function DialogSessionList() {
         {
           command: "session.archived.toggle_visibility",
           title: showArchived() ? "hide archived" : "show archived",
-          onTrigger: () => setShowArchived((value) => !value),
+          selection: "none",
+          onTrigger: () => setShowArchived(toggleArchivedVisibility),
         },
       ]}
       footerHints={[

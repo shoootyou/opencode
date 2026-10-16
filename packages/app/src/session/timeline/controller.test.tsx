@@ -61,9 +61,10 @@ mock.module("@/runtime/server/current", () => ({
           pending: { list: () => [] },
           get: (id: string) => sessions.find((session) => session.id === id),
           list: () => sessions,
-          remember: (session: unknown) => {
+          remember: (session: Record<string, unknown>) => {
             effects.push("remember")
             remembered.push(session)
+            sessions = sessions.map((current) => (current.id === session.id ? session : current))
           },
           evict: (id: string) => {
             effects.push(`evict:${id}`)

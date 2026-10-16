@@ -1,12 +1,13 @@
 /**
  * @spec-handoff
- * @interface WebUi.handler(options?: { assets?: AssetMap; brotli?: BrotliMap }): RouteTransform
+ * @interface WebUi.handler(options?: { assets?: AssetMap; brotli?: BrotliMap; onLocalFileValidated?(input: { path: string }): Promise<void> }): RouteTransform
  * @behavior
  *   - Serves SPA destinations and static web assets publicly when the server has a password.
  *   - Sends /api, /api/*, /auth/*, and /openapi.json to the authenticated inner server before SPA fallback.
  *   - Returns a structured browser-fetch 401 without WWW-Authenticate while retaining challenges for non-browser clients.
  *   - Hashes every retained oc-*-preload-script inline body in the HTML CSP.
  *   - With OPENCODE_LOCAL_WEB_UI set and no embedded UI, serves its resolved local build root's SPA shell and assets.
+ *   - A valid UI loaded through the production embedded-archive loader takes precedence over OPENCODE_LOCAL_WEB_UI.
  *   - Serves a local candidate only when its realpath remains within that resolved root.
  * @edge-cases
  *   - Unknown authenticated API routes are 404 responses, never index.html.
@@ -14,9 +15,11 @@
  *   - Missing /_assets/* files are 404 no-store, while SPA HTML remains revalidated and receives preload-script CSP hashes.
  *   - Local escaping symlinks are misses: navigations receive the SPA shell; /_assets/* receives 404 no-store.
  *   - A root symlink and candidates symlinked within its resolved root are served normally.
+ *   - Local bytes are read from the same opened object whose canonical target passed root containment, even if its pathname is swapped afterwards.
+ *   - onLocalFileValidated runs after that opened object is validated and before its bytes are read, enabling deterministic swap probes.
  */
 import { NodeFileSystem, NodeHttpServer } from "@effect/platform-node"
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, mock, test } from "bun:test"
 import { Effect } from "effect"
 import { FetchHttpClient, HttpServer, HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
@@ -27,6 +30,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { brotliCompressSync } from "node:zlib"
 import { WebUi } from "../src/services/web-ui"
+import { AppArchive } from "../src/app-archive"
 import { it } from "../../core/test/lib/effect"
 
 const root = await mkdtemp(path.join(tmpdir(), "opencode-web-ui-"))
@@ -479,6 +483,76 @@ describe("web UI", () => {
         ).pipe(Effect.provide(NodeFileSystem.layer)),
       )
     } finally {
+      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
+      else process.env.OPENCODE_LOCAL_WEB_UI = previous
+      await rm(local, { recursive: true, force: true })
+    }
+  })
+
+  test("serves bytes from the contained file object after its pathname is swapped to an outside symlink", async () => {
+    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
+    const outside = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-outside-"))
+    const asset = path.join(local, "_assets", "app.js")
+    const secret = path.join(outside, "secret.js")
+    const previous = process.env.OPENCODE_LOCAL_WEB_UI
+    process.env.OPENCODE_LOCAL_WEB_UI = local
+    try {
+      await mkdir(path.dirname(asset), { recursive: true })
+      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
+      await writeFile(asset, "console.log('contained asset')")
+      await writeFile(secret, "outside secret")
+      let validated = false
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const transform = yield* WebUi.handler({
+              onLocalFileValidated: async ({ path: validatedPath }) => {
+                expect(validatedPath).toBe(asset)
+                validated = true
+                await rm(asset)
+                await symlink(secret, asset)
+              },
+            })
+            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
+            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
+            const response = yield* Effect.promise(() => fetch(`${HttpServer.formatAddress(http.address)}/_assets/app.js`))
+            expect(validated).toBeTrue()
+            expect(response.status).toBe(200)
+            expect(yield* Effect.promise(() => response.text())).toBe("console.log('contained asset')")
+          }),
+        ).pipe(Effect.provide(NodeFileSystem.layer)),
+      )
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
+      else process.env.OPENCODE_LOCAL_WEB_UI = previous
+      await Promise.all([rm(local, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })])
+    }
+  })
+
+  test("keeps production-loaded embedded assets ahead of OPENCODE_LOCAL_WEB_UI", async () => {
+    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
+    const previous = process.env.OPENCODE_LOCAL_WEB_UI
+    process.env.OPENCODE_LOCAL_WEB_UI = local
+    mock.module("virtual:opencode-app-assets", () => ({
+      default: () =>
+        AppArchive.encode([["index.html", brotliCompressSync("<html><body>embedded archive shell</body></html>")]]),
+    }))
+    try {
+      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const transform = yield* WebUi.handler()
+            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
+            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
+            const response = yield* Effect.promise(() => fetch(HttpServer.formatAddress(http.address)))
+            expect(response.status).toBe(200)
+            expect(yield* Effect.promise(() => response.text())).toContain("embedded archive shell")
+          }),
+        ).pipe(Effect.provide(NodeFileSystem.layer)),
+      )
+    } finally {
+      mock.restore()
       if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
       else process.env.OPENCODE_LOCAL_WEB_UI = previous
       await rm(local, { recursive: true, force: true })
