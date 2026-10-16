@@ -21,7 +21,7 @@
 import type { FileSystem } from "@opencode/core/filesystem"
 import path from "path"
 import { describe, expect } from "bun:test"
-import { Duration, Effect, Layer, LayerMap } from "effect"
+import { Deferred, Duration, Effect, Fiber, Layer, LayerMap } from "effect"
 import { Database } from "@opencode/core/database/database"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -451,6 +451,43 @@ describe("Session.skill", () => {
       ).pipe(Effect.provide(locations.get(session.location)))
       const admitted = yield* sessions.prompt({ sessionID: session.id, text: "No skill was requested", resume: false })
       expect(admitted.payload.skills).toEqual([expect.objectContaining({ id: info.id })])
+      yield* hook.dispose
+    }),
+  )
+
+  it.effect("materializes a resolved command from its snapshot when reload changes live skills while admission is held", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const locations = yield* LocationServiceMap.Service
+      const session = yield* sessions.create({ location })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const hook = yield* PluginHooks.Service.use((hooks) =>
+        hooks.register("session", "prompt", () =>
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        ),
+      ).pipe(Effect.provide(locations.get(session.location)))
+      const admission = yield* sessions
+        .command({ sessionID: session.id, command: "effect", text: "Apply the resolved skill" })
+        .pipe(Effect.forkScoped)
+
+      yield* Deferred.await(entered)
+      const reloaded = Skill.Info.make({ ...info, content: "Reloaded skill guidance" })
+      yield* Skill.Service.use((skills) =>
+        skills.transform((editor) => {
+          editor.update(info.id, (skill) => Object.assign(skill, reloaded))
+        }),
+      ).pipe(Effect.provide(locations.get(session.location)))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(admission)
+
+      expect(yield* sessions.inbox(session.id)).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            skills: [expect.objectContaining({ id: info.id, text: Skill.toModelOutput(info, []) })],
+          }),
+        }),
+      ])
       yield* hook.dispose
     }),
   )
