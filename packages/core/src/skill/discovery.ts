@@ -89,7 +89,7 @@ const layer = Layer.effect(
         Effect.flatMap((body) => fs.writeWithDirs(destination, new Uint8Array(body))),
         Effect.as(true),
         Effect.catch((error) =>
-          Effect.logError("failed to download skill file", { url, error }).pipe(Effect.andThen(Effect.die(error))),
+          Effect.logError("failed to download skill file", { url, error }).pipe(Effect.as(false)),
         ),
       )
     })
