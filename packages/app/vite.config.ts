@@ -1,8 +1,9 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin"
+import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
-import { VitePWA } from "vite-plugin-pwa"
-import desktopPlugin from "./vite"
-import { navigateFallbackAllowlist, navigateFallbackDenylist } from "./src/pwa"
+import desktopPlugin, { channel } from "./vite.js"
+import { icons } from "./vite.icons"
+import { serviceWorker } from "./vite.pwa"
 
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
@@ -21,42 +22,41 @@ const sentry =
       })
     : false
 
+const pwaOptions = Object.freeze({
+  globDirectory: fileURLToPath(new URL("./dist", import.meta.url)),
+})
+
+export const pwaComposition = Object.freeze({
+  options: pwaOptions,
+  plugin: serviceWorker(pwaOptions.globDirectory),
+})
+
 export default defineConfig({
   plugins: [
     desktopPlugin,
-    VitePWA({
-      registerType: "autoUpdate",
-      manifest: false,
-      devOptions: {
-        // SW disabled in dev — active SW intercepts Vite HMR requests and breaks hot reload
-        enabled: false,
-      },
-      includeAssets: ["favicon*.{ico,png,svg}", "apple-touch-icon*.png", "web-app-manifest-*.png", "site.webmanifest"],
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,woff,woff2,ttf,eot,png,svg,ico}"],
-        // Default Workbox limit is 2 MiB; the v1.17.13 upstream merge grew the main
-        // bundle past that (~2.68 MB), which made precaching fail the build.
-        // Raised with headroom for reasonable future growth.
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        navigateFallback: "/index.html",
-        // Only explicit SPA routes receive the navigation fallback.
-        // All other paths (API, auth, events, etc.) pass to the network by default.
-        // Allowlist is the shared source of truth in ./src/pwa (assertable in tests).
-        navigateFallbackAllowlist,
-        // Denylist wins over the allowlist: Workbox evaluates it first, so
-        // `/cdn-cgi/` navigations always bypass the SPA fallback and reach the CF
-        // edge for Cloudflare Access reauth. Shared source of truth in ./src/pwa.
-        navigateFallbackDenylist,
-      },
-    }),
+    icons(channel),
+    pwaComposition.plugin,
     sentry,
-  ] as any, // as any: vite.js custom plugin typings don't fully satisfy Vite's Plugin union
+  ] as any,
   server: {
     host: "0.0.0.0",
     allowedHosts: true,
     port: 3000,
   },
   build: {
+    ...(process.env.VITE_OPENCODE_TEST_FIXTURES === "1"
+      ? {
+          rolldownOptions: {
+            input: [
+              "index.html",
+              "e2e/utils/settings-wsl.html",
+              "e2e/utils/app-direction.html",
+              "e2e/utils/windows-menu.html",
+            ],
+          },
+        }
+      : {}),
+    assetsDir: "_assets",
     target: "esnext",
     sourcemap: true,
   },

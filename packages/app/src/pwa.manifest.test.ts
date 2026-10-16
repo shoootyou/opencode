@@ -1,8 +1,8 @@
 /**
  * @spec-handoff
- * @interface site.webmanifest (static JSON file)
- *   File: packages/app/public/site.webmanifest
- *   Consumed by the browser when the app is installed as a PWA.
+ * @interface manifest.json (PWA manifest source)
+ *   File: packages/app/manifest.json
+ *   Emitted as site.webmanifest by vite.icons.ts for browser PWA installation.
  *
  * @behavior
  *   - `name` is "OpenCode"
@@ -20,7 +20,7 @@
  *   - `theme_color` must be a valid CSS colour string after the fix
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/Manifest
- * @see packages/app/public/site.webmanifest
+ * @see packages/app/manifest.json
  */
 
 import { describe, expect, test } from "bun:test"
@@ -30,7 +30,7 @@ import { join } from "node:path"
 // Load the manifest from disk — resolve relative to this source file so the
 // test works regardless of where `bun test` is invoked from.
 // ---------------------------------------------------------------------------
-const manifestPath = join(import.meta.dir, "../public/site.webmanifest")
+const manifestPath = join(import.meta.dir, "../manifest.json")
 
 type ManifestIcon = {
   src: string
@@ -59,7 +59,7 @@ const manifest: WebManifest = await Bun.file(manifestPath).json()
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("site.webmanifest", () => {
+describe("manifest.json", () => {
   test("name is 'OpenCode'", () => {
     expect(manifest.name).toBe("OpenCode")
   })

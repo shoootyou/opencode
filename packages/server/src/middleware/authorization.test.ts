@@ -2,45 +2,20 @@
  * @spec-handoff
  * @interface authorizationLayer: Layer.Layer<Authorization, ConfigError, ServerAuth.Config>
  * @behavior
- *   - Unauthenticated/unauthorized request with auth required → bare 401
- *     (UnauthorizedError body), NEVER a `www-authenticate` header.
- *   - authorizationLayer never issues a 302 redirect under any credential
- *     state (missing, wrong, or ticketed).
- *   - `hasPtyConnectTicketURL` (from `@opencode-ai/protocol/groups/pty`, regex
- *     anchored to `/api/pty/:id/connect`) bypasses credential checks when the
- *     ticket query param is present. This layer only ever guards routes
- *     mounted under `@opencode-ai/protocol`'s `Api` (see packages/server/src/api.ts,
- *     packages/protocol/src/groups/pty.ts), which are declared at `/api/pty/...`
- *     — so the `/api` prefix in the regex is the correct assumption for THIS
- *     layer's real mounted paths (contrast with the fork's own unprefixed
- *     `/pty/:id/connect` instance route, guarded by a separate
- *     ptyConnectAuthorizationLayer in packages/opencode, not this file).
+ *   - Accepts valid Basic credentials and same-origin signed session cookies.
+ *   - Rejects invalid credentials before protected handlers; browser fetches receive
+ *     structured 401 without a challenge or redirect, other clients receive Basic challenge.
+ *   - Bypasses only exact pairing, PTY, and persistent-PTY ticket routes.
  * @edge-cases
- *   - No password configured → passthrough without any credential check.
- *   - Ticket present on the exact `/api/pty/:id/connect` shape → passthrough,
- *     no credential check, regardless of Basic-Auth state.
- *   - Ticket present on a path that does NOT match the fork's real mounted
- *     PTY-connect shape (e.g. missing `/api` prefix) → NOT bypassed, still 401
- *     without credentials. This is the sanity check for the regex-prefix risk
- *     flagged by Taku: a wrong/missing prefix would make this assertion fail
- *     (the request would incorrectly bypass and return 200).
+ *   - Expired, tampered, rotated, and cross-origin session cookies are denied.
+ *   - Empty/malformed Basic or auth-token input and bypass-path near-misses are denied.
  * @see ./authorization.ts
- * @see ../../protocol/src/groups/pty.ts (hasPtyConnectTicketURL, PTY_CONNECT_TICKET_QUERY)
- * @see ../../../opencode/src/server/routes/instance/httpapi/middleware/authorization.ts (fork's
- *   ptyConnectAuthorizationLayer, a SEPARATE middleware guarding the fork's own unprefixed
- *   `/pty/:id/connect` instance route — NOT exercised by this file's tests, which only cover
- *   this package's own `authorizationLayer`/`hasPtyConnectTicketURL` regex-prefix assumption).
- * @see ../../../opencode/test/server/httpapi-instance-route-auth.test.ts (real ticket-bypass
- *   coverage for ptyConnectAuthorizationLayer against the production `/pty/:id/connect` route —
- *   corrected citation: the `middleware/authorization.test.ts` file in packages/opencode only
- *   covers `authorizationRouterMiddleware` (the `/doc` guard), never ptyConnectAuthorizationLayer;
- *   Sho r1 flagged the prior version of this citation as implying coverage that did not exist)
  */
 
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Option, Schema } from "effect"
-import { HttpRouter, HttpServer } from "effect/unstable/http"
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpRouter, HttpServer } from "effect/http"
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import { ServerAuth } from "../auth"
 import { Authorization, authorizationLayer } from "./authorization"
 
@@ -51,26 +26,34 @@ const GuardedApi = HttpApi.make("test-authorization").add(
     .add(
       HttpApiEndpoint.get("probe", "/probe", { success: Schema.String }),
       HttpApiEndpoint.get("ptyConnect", "/api/pty/:ptyID/connect", { success: Schema.String }),
-      // Deliberately missing the "/api" prefix — exercises the regex-prefix
-      // sanity check. This path is never actually mounted in production; it
-      // exists here only to prove the bypass does NOT match on path shape
-      // alone (see @edge-cases above).
       HttpApiEndpoint.get("unprefixedPtyConnect", "/pty/:ptyID/connect", { success: Schema.String }),
+      HttpApiEndpoint.get("persistentPtyConnect", "/api/experimental/persistent-pty/:ptyID/connect", {
+        success: Schema.String,
+      }),
+      HttpApiEndpoint.get("persistentPtyNearMiss", "/api/experimental/persistent-pty/:ptyID/connect-token", {
+        success: Schema.String,
+      }),
+      HttpApiEndpoint.get("pairingConnect", "/auth/connect/:code", { success: Schema.String }),
+      HttpApiEndpoint.get("pairingNearMiss", "/auth/connect/:code/extra", { success: Schema.String }),
     )
     .middleware(Authorization),
 )
 
-const guardedHandlers = HttpApiBuilder.group(GuardedApi, "test", (handlers) =>
-  handlers
-    .handle("probe", () => Effect.succeed("ok"))
-    .handle("ptyConnect", () => Effect.succeed("connected"))
-    .handle("unprefixedPtyConnect", () => Effect.succeed("connected")),
-)
-
-const secretLayer = ServerAuth.Config.configLayer({ password: Option.some("secret"), username: "opencode" })
-const noAuthLayer = ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })
+const secretLayer = ServerAuth.Config.configLayer({ password: Option.some("secret") })
+const noAuthLayer = ServerAuth.Config.configLayer({ password: Option.none() })
 
 function guardedApp(configLayer: typeof secretLayer) {
+  const calls = { probe: 0, pty: 0, persistentPty: 0, pairing: 0 }
+  const guardedHandlers = HttpApiBuilder.group(GuardedApi, "test", (handlers) =>
+    handlers
+      .handle("probe", () => Effect.sync(() => (calls.probe++, "ok")))
+      .handle("ptyConnect", () => Effect.sync(() => (calls.pty++, "connected")))
+      .handle("unprefixedPtyConnect", () => Effect.sync(() => (calls.pty++, "connected")))
+      .handle("persistentPtyConnect", () => Effect.sync(() => (calls.persistentPty++, "connected")))
+      .handle("persistentPtyNearMiss", () => Effect.sync(() => (calls.persistentPty++, "connected")))
+      .handle("pairingConnect", () => Effect.sync(() => (calls.pairing++, "paired")))
+      .handle("pairingNearMiss", () => Effect.sync(() => (calls.pairing++, "paired"))),
+  )
   const handler = HttpRouter.toWebHandler(
     HttpApiBuilder.layer(GuardedApi).pipe(
       Layer.provide(guardedHandlers),
@@ -80,70 +63,143 @@ function guardedApp(configLayer: typeof secretLayer) {
     ),
     { disableLogger: true },
   ).handler
-  return (path: string, init?: RequestInit) => handler(new Request(new URL(path, "http://localhost"), init))
+  return {
+    request: (path: string, init?: RequestInit) => handler(new Request(new URL(path, "http://localhost:4096"), init)),
+    calls,
+  }
 }
 
 describe("authorizationLayer (packages/server, base layer)", () => {
-  test("unauthorized request → bare 401, no www-authenticate header", async () => {
-    const response = await guardedApp(secretLayer)("/probe")
+  test("browser fetch rejection is structured 401 without Basic challenge, redirect, secret, or handler call", async () => {
+    const app = guardedApp(secretLayer)
+    const response = await app.request("/probe", { headers: { "sec-fetch-mode": "cors" } })
 
     expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ _tag: "UnauthorizedError", message: "Authentication required" })
     expect(response.headers.get("www-authenticate")).toBeNull()
+    expect(response.headers.get("location")).toBeNull()
+    expect(app.calls.probe).toBe(0)
   })
 
-  test("authorizationLayer never issues a 302 redirect", async () => {
+  test("non-browser and navigation rejections include the Basic challenge without redirect", async () => {
     const app = guardedApp(secretLayer)
-    const [missing, badCredentials, ticketedWrongShape] = await Promise.all([
-      app("/probe"),
-      app("/probe", { headers: { authorization: `Basic ${btoa("opencode:wrong")}` } }),
-      app("/pty/abc/connect?ticket=whatever"),
+    const [nonBrowser, navigation] = await Promise.all([
+      app.request("/probe"),
+      app.request("/probe", { headers: { "sec-fetch-mode": "navigate" } }),
     ])
 
-    for (const response of [missing, badCredentials, ticketedWrongShape]) {
-      expect(response.status).not.toBe(302)
+    for (const response of [nonBrowser, navigation]) {
+      expect(response.status).toBe(401)
+      expect(response.headers.get("www-authenticate")).toBe('Basic realm="Secure Area"')
       expect(response.headers.get("location")).toBeNull()
     }
+    expect(app.calls.probe).toBe(0)
   })
 
   test("no password configured → passthrough without credentials", async () => {
-    const response = await guardedApp(noAuthLayer)("/probe")
+    const app = guardedApp(noAuthLayer)
+    const response = await app.request("/probe")
 
     expect(response.status).toBe(200)
+    expect(app.calls.probe).toBe(1)
   })
 
-  test("valid basic auth credentials → passthrough", async () => {
-    const response = await guardedApp(secretLayer)("/probe", {
-      headers: { authorization: `Basic ${btoa("opencode:secret")}` },
-    })
+  test("valid direct password, auth_token, and same-origin signed session → protected handler", async () => {
+    const app = guardedApp(secretLayer)
+    const token = ServerAuth.issueSession({ password: Option.some("secret"), username: "opencode" })
+    if (!token) throw new Error("Expected signed session")
+    const [password, authToken, session] = await Promise.all([
+      app.request("/probe", {
+        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+      }),
+      app.request(`/probe?auth_token=${btoa("opencode:secret")}`, {
+        headers: { "sec-fetch-mode": "cors" },
+      }),
+      app.request("/probe", {
+        headers: {
+          cookie: `opencode_session_4096=${token}`,
+          host: "localhost:4096",
+          origin: "http://localhost:4096",
+        },
+      }),
+    ])
 
-    expect(response.status).toBe(200)
+    expect(password.status).toBe(200)
+    expect(authToken.status).toBe(200)
+    expect(session.status).toBe(200)
+    expect(app.calls.probe).toBe(3)
+  })
+
+  test("wrong or malformed Basic/auth-token credentials fail closed before handler without reflecting secrets", async () => {
+    const app = guardedApp(secretLayer)
+    const secret = "secret"
+    const responses = await Promise.all([
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", authorization: `Basic ${btoa("opencode:wrong")}` } }),
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", authorization: `Basic ${btoa("other:secret")}` } }),
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", authorization: "Basic " } }),
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", authorization: "Basic !!!not-base64!!!" } }),
+      app.request("/probe?auth_token=", { headers: { "sec-fetch-mode": "cors" } }),
+      app.request("/probe?auth_token=not-base64", { headers: { "sec-fetch-mode": "cors" } }),
+      app.request("/probe?auth_token=Zm9ybWF0d2l0aG91dGNvbG9u", { headers: { "sec-fetch-mode": "cors" } }),
+    ])
+
+    expect(app.calls.probe).toBe(0)
+    for (const response of responses) {
+      expect(response.status).toBe(401)
+      expect(response.headers.get("www-authenticate")).toBeNull()
+      expect(await response.text()).not.toContain(secret)
+    }
+  })
+
+  test("expired, tampered, rotated, and cross-origin session cookies fail closed before handler", async () => {
+    const app = guardedApp(secretLayer)
+    const token = ServerAuth.issueSession({ password: Option.some("secret"), username: "opencode" })
+    if (!token) throw new Error("Expected signed session")
+    const expired = ServerAuth.issueSession({ password: Option.some("secret"), username: "opencode" }, 0)
+    if (!expired) throw new Error("Expected expired signed session")
+    const rotated = guardedApp(ServerAuth.Config.configLayer({ password: Option.some("rotated") }))
+    const responses = await Promise.all([
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", cookie: `opencode_session=${expired}` } }),
+      app.request("/probe", { headers: { "sec-fetch-mode": "cors", cookie: `opencode_session=${token}x` } }),
+      app.request("/probe", {
+        headers: { "sec-fetch-mode": "cors", cookie: `opencode_session=${token}`, origin: "http://evil.example" },
+      }),
+      rotated.request("/probe", { headers: { "sec-fetch-mode": "cors", cookie: `opencode_session=${token}` } }),
+    ])
+
+    expect(app.calls.probe).toBe(0)
+    expect(rotated.calls.probe).toBe(0)
+    for (const response of responses) {
+      expect(response.status).toBe(401)
+      expect(await response.text()).not.toContain(token)
+    }
   })
 })
 
 describe("authorizationLayer — PTY connect ticket bypass (hasPtyConnectTicketURL)", () => {
   test("valid ticket on the real mounted shape (/api/pty/:id/connect) → passthrough, no credentials needed", async () => {
-    const response = await guardedApp(secretLayer)("/api/pty/abc123/connect?ticket=some-ticket")
+    const app = guardedApp(secretLayer)
+    const response = await app.request("/api/pty/abc123/connect?ticket=some-ticket")
 
     expect(response.status).toBe(200)
     expect(await response.json()).toBe("connected")
+    expect(app.calls.pty).toBe(1)
   })
 
-  test("missing ticket on the real mounted shape → still bare 401", async () => {
-    const response = await guardedApp(secretLayer)("/api/pty/abc123/connect")
+  test("pairing, PTY, and persistent-PTY bypass only exact legitimate paths", async () => {
+    const app = guardedApp(secretLayer)
+    const [pairing, pty, persistentPty, missingTicket, unprefixed, persistentNearMiss, pairingNearMiss] = await Promise.all([
+      app.request("/auth/connect/code"),
+      app.request("/api/pty/abc/connect?ticket=ticket"),
+      app.request("/api/experimental/persistent-pty/abc/connect?ticket=ticket"),
+      app.request("/api/pty/abc/connect", { headers: { "sec-fetch-mode": "cors" } }),
+      app.request("/pty/abc/connect?ticket=ticket", { headers: { "sec-fetch-mode": "cors" } }),
+      app.request("/api/experimental/persistent-pty/abc/connect-token?ticket=ticket", { headers: { "sec-fetch-mode": "cors" } }),
+      app.request("/auth/connect/code/extra", { headers: { "sec-fetch-mode": "cors" } }),
+    ])
 
-    expect(response.status).toBe(401)
-    expect(response.headers.get("www-authenticate")).toBeNull()
-  })
-
-  // Sanity check for the regex-prefix risk (Taku, spec-reconciliation.md Point 2):
-  // if hasPtyConnectTicketURL's regex ever lost its "/api" prefix — or if this
-  // layer were wired to guard a route tree that does NOT mount PTY connect
-  // under "/api/pty" — a ticket on the unprefixed shape would ALSO bypass,
-  // and this assertion would flip to 200, catching the regression.
-  test("ticket present but path does not match the real /api/pty/:id/connect shape → NOT bypassed", async () => {
-    const response = await guardedApp(secretLayer)("/pty/abc123/connect?ticket=some-ticket")
-
-    expect(response.status).toBe(401)
-    expect(response.headers.get("www-authenticate")).toBeNull()
+    for (const response of [pairing, pty, persistentPty]) expect(response.status).toBe(200)
+    for (const response of [missingTicket, unprefixed, persistentNearMiss, pairingNearMiss]) expect(response.status).toBe(401)
+    expect(app.calls).toEqual({ probe: 0, pty: 1, persistentPty: 1, pairing: 1 })
   })
 })

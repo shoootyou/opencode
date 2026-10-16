@@ -3,7 +3,7 @@
  * @interface navigateFallbackAllowlist (RegExp[])
  *   File: packages/app/src/pwa.ts
  *   The Workbox `navigateFallbackAllowlist` used by the PWA service worker.
- *   It is the single source of truth: `vite.config.ts` imports it into
+ *   It is the single source of truth: `vite.pwa.ts` imports it into
  *   `VitePWA({ workbox: { navigateFallbackAllowlist } })`. The drift guard test
  *   below asserts that import stays wired (must_have #6 regression class).
  *
@@ -54,9 +54,8 @@
  *     against a `/^\/login/` prefix bug and an over-broad catch-all).
  *   - Existing `/`, `/login`, and `/foo/session/bar` matches MUST be preserved.
  *
- * @see packages/app/src/app.tsx (Route definitions, ~lines 412-417)
- * @see packages/app/vite.config.ts (VitePWA workbox options — drift guard below)
- * @see packages/core/src/util/encode.ts (base64Encode — URL-safe alphabet)
+ * @see packages/app/src/shell/routes/routes.tsx (Route definitions)
+ * @see packages/app/vite.pwa.ts (VitePWA workbox options — drift guard below)
  *
  * ---------------------------------------------------------------------------
  * @spec-handoff (E2 additive — Cloudflare Access navigateFallbackDenylist)
@@ -167,7 +166,7 @@ const { navigateFallbackDenylist } = (await import("./pwa")) as typeof import(".
   navigateFallbackDenylist: RegExp[]
 }
 
-const viteConfigPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "vite.config.ts")
+const vitePwaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "vite.pwa.ts")
 
 const matches = (p: string) => navigateFallbackAllowlist.some((re) => re.test(p))
 const denied = (p: string) => navigateFallbackDenylist.some((re: RegExp) => re.test(p))
@@ -182,8 +181,8 @@ describe("PWA navigateFallbackAllowlist", () => {
     expect(matches("/login")).toBe(true)
   })
 
-  test("matches a session route '/foo/session/bar'", () => {
-    expect(matches("/foo/session/bar")).toBe(true)
+  test("matches a server session route", () => {
+    expect(matches("/server/local/session/bar")).toBe(true)
   })
 
   // --- finding #2: /new-session and bare /:dir (RED until Kou patches pwa.ts) ---
@@ -201,10 +200,12 @@ describe("PWA navigateFallbackAllowlist", () => {
   })
 
   // --- over-match guards (server routes + multi-segment paths must NOT match) ---
-  test("does not over-match the server-owned '/doc' route", () => {
-    // /doc is the auth-protected OpenAPI page served by docRoute. A bare-dir
-    // pattern must exclude it so an active SW never shadows it with the SPA shell.
-    expect(matches("/doc")).toBe(false)
+  test("denies the server-owned '/doc' route", () => {
+    expect(denied("/doc")).toBe(true)
+  })
+
+  test("denies the server-owned '/openapi.json' route", () => {
+    expect(denied("/openapi.json")).toBe(true)
   })
 
   test("does not over-match '/login/extra' (multi-segment)", () => {
@@ -279,7 +280,7 @@ describe("PWA navigateFallbackDenylist (Cloudflare Access /cdn-cgi/ bypass)", ()
   test("existing SPA routes still match the allowlist", () => {
     expect(matches("/")).toBe(true)
     expect(matches("/login")).toBe(true)
-    expect(matches("/foo/session/bar")).toBe(true)
+    expect(matches("/server/local/session/bar")).toBe(true)
   })
 })
 
@@ -302,21 +303,21 @@ function extractWorkboxBlock(source: string): string {
   return ""
 }
 
-describe("PWA allowlist drift guard (vite.config.ts ↔ src/pwa.ts)", () => {
-  // Finding #3: nothing else asserts that vite.config.ts still CONSUMES the shared
-  // allowlist. A future re-inline of the array into the workbox option would leave
+describe("PWA policy drift guard (vite.pwa.ts ↔ src/pwa.ts)", () => {
+  // Finding #3: nothing else asserts that vite.pwa.ts still CONSUMES the shared
+  // policy. A future re-inline of the array into the workbox option would leave
   // pwa.test.ts green while the real SW config silently drifts (must_have #6). Read
   // the vite.config.ts source and assert the shared import is wired, and that the
   // allowlist is NOT re-inlined as a literal array.
-  test("vite.config.ts imports navigateFallbackAllowlist from ./src/pwa", async () => {
-    const source = await readFile(viteConfigPath, "utf8")
+  test("vite.pwa.ts imports navigateFallbackAllowlist from ./src/pwa", async () => {
+    const source = await readFile(vitePwaPath, "utf8")
     expect(source).toMatch(
       /import\s*\{[^}]*\bnavigateFallbackAllowlist\b[^}]*\}\s*from\s*["']\.\/src\/pwa["']/,
     )
   })
 
-  test("vite.config.ts consumes the shared allowlist without re-inlining a literal array", async () => {
-    const source = await readFile(viteConfigPath, "utf8")
+  test("vite.pwa.ts consumes the shared allowlist without re-inlining a literal array", async () => {
+    const source = await readFile(vitePwaPath, "utf8")
     // The workbox option references the imported constant (shorthand or explicit)…
     expect(source).toMatch(/navigateFallbackAllowlist\s*[},:]/)
     // …and must NOT assign an inline array literal (the re-inline regression).
@@ -328,31 +329,31 @@ describe("PWA allowlist drift guard (vite.config.ts ↔ src/pwa.ts)", () => {
   //     constant is referenced there. Guards against a stale import that no longer
   //     feeds the SW config. ---
   test("navigateFallbackAllowlist is consumed INSIDE the workbox options block", async () => {
-    const workbox = extractWorkboxBlock(await readFile(viteConfigPath, "utf8"))
+    const workbox = extractWorkboxBlock(await readFile(vitePwaPath, "utf8"))
     expect(workbox).not.toBe("")
     expect(workbox).toMatch(/\bnavigateFallbackAllowlist\b/)
     // Still must not be a re-inlined literal array inside the block.
     expect(workbox).not.toMatch(/navigateFallbackAllowlist\s*:\s*\[/)
   })
 
-  // E4-pending (EXPECTED RED until E4 wires the denylist): vite.config.ts must
+  // vite.pwa.ts must
   // import the shared navigateFallbackDenylist from ./src/pwa and consume it in
   // the workbox option without re-inlining a literal array. This is the drift
   // guard for the new denylist source of truth; it fails now by design.
-  test("[E4-pending] vite.config.ts imports navigateFallbackDenylist from ./src/pwa", async () => {
-    const source = await readFile(viteConfigPath, "utf8")
+  test("vite.pwa.ts imports navigateFallbackDenylist from ./src/pwa", async () => {
+    const source = await readFile(vitePwaPath, "utf8")
     expect(source).toMatch(/import\s*\{[^}]*\bnavigateFallbackDenylist\b[^}]*\}\s*from\s*["']\.\/src\/pwa["']/)
   })
 
-  test("[E4-pending] vite.config.ts consumes the shared denylist without re-inlining a literal array", async () => {
-    const source = await readFile(viteConfigPath, "utf8")
+  test("vite.pwa.ts consumes the shared denylist without re-inlining a literal array", async () => {
+    const source = await readFile(vitePwaPath, "utf8")
     expect(source).toMatch(/navigateFallbackDenylist\s*[},:]/)
     expect(source).not.toMatch(/navigateFallbackDenylist\s*:\s*\[/)
   })
 
   // --- item 12: denylist consumption scoped INSIDE the workbox block too. ---
   test("navigateFallbackDenylist is consumed INSIDE the workbox options block", async () => {
-    const workbox = extractWorkboxBlock(await readFile(viteConfigPath, "utf8"))
+    const workbox = extractWorkboxBlock(await readFile(vitePwaPath, "utf8"))
     expect(workbox).not.toBe("")
     expect(workbox).toMatch(/\bnavigateFallbackDenylist\b/)
     expect(workbox).not.toMatch(/navigateFallbackDenylist\s*:\s*\[/)

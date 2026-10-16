@@ -1,23 +1,31 @@
-/assets/*
+/_assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-/assets/*.js
+/_assets/*.js
   Content-Type: application/javascript
 
-/assets/*.mjs
+/_assets/*.mjs
   Content-Type: application/javascript
 
-/assets/*.css
+/_assets/*.css
   Content-Type: text/css
 
 /*.js
-  Cache-Control: no-cache
   Content-Type: application/javascript
 
 /*.mjs
-  Cache-Control: no-cache
   Content-Type: application/javascript
 
 /*.css
-  Cache-Control: no-cache
   Content-Type: text/css
+
+/site.webmanifest
+  Content-Type: application/manifest+json
+
+/sw.js
+  Content-Type: application/javascript
+  Cache-Control: no-cache
+
+/registerSW.js
+  Content-Type: application/javascript
+  Cache-Control: no-cache
