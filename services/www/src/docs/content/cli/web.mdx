@@ -111,15 +111,3 @@ Connect a client to it with `--server`:
 ```bash
 $ opencode --server http://127.0.0.1:4096
 ```
-
-## Local web UI
-
-When OpenCode has no embedded web UI, set `OPENCODE_LOCAL_WEB_UI` to a local
-web UI build directory to serve it instead:
-
-```bash
-$ OPENCODE_LOCAL_WEB_UI=./packages/app/dist opencode serve
-```
-
-API and authentication routes remain handled by the server. Requested files
-must resolve inside the configured directory; files outside it are not served.

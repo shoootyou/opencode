@@ -1,23 +1,17 @@
 import { FSUtil } from "@opencode/util/fs-util"
-import { Effect, FileSystem, Option } from "effect"
+import { Effect, FileSystem } from "effect"
 import { HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createHash } from "node:crypto"
-import { open, realpath } from "node:fs/promises"
-import path from "node:path"
 import { load, type AssetMap, type BrotliMap } from "../app-assets"
 
 export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
   readonly assets?: AssetMap
   readonly brotli?: BrotliMap
-  readonly onLocalFileValidated?: (input: { readonly path: string }) => Promise<void>
 }) {
   const fileSystem = yield* FileSystem.FileSystem
-  const assetsEffect = options?.assets
-    ? Effect.succeed(Option.some({ files: options.assets, brotli: options.brotli, embedded: true }))
-    : yield* Effect.cached(load().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem), Effect.option))
-  const localRoot = !options?.assets && process.env.OPENCODE_LOCAL_WEB_UI
-    ? yield* Effect.promise(() => resolveLocalRoot(process.env.OPENCODE_LOCAL_WEB_UI)).pipe(Effect.option)
-    : Option.none()
+  const assets = options?.assets
+    ? Effect.succeed({ files: options.assets, brotli: options.brotli })
+    : yield* Effect.cached(load().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)))
   return <E, R>(api: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -31,20 +25,8 @@ export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
       )
         return yield* api.pipe(
           Effect.catchIf(isRouteNotFound, () => Effect.succeed(HttpServerResponse.empty({ status: 404 }))),
-      )
-      if (options?.assets)
-        return yield* assetsEffect.pipe(
-          Effect.flatMap((loaded) => {
-            if (Option.isSome(loaded)) return serveUI(request, url, loaded.value.files, loaded.value.brotli)
-            return Effect.succeed(HttpServerResponse.empty({ status: 404 }))
-          }),
         )
-      const assets = yield* assetsEffect
-      if (Option.isSome(assets) && assets.value.embedded)
-        return yield* serveUI(request, url, assets.value.files, assets.value.brotli)
-      if (Option.isSome(localRoot)) return yield* serveLocalUI(request, url, localRoot.value, options?.onLocalFileValidated)
-      if (Option.isSome(assets)) return yield* serveUI(request, url, assets.value.files, assets.value.brotli)
-      return yield* Effect.succeed(HttpServerResponse.empty({ status: 404 }))
+      return yield* assets.pipe(Effect.flatMap((loaded) => serveUI(request, url, loaded.files, loaded.brotli)))
     })
 })
 
@@ -83,102 +65,6 @@ function serveUI(
       ? HttpServerResponse.empty({ status: 200, headers })
       : HttpServerResponse.raw(file, { headers, contentType: headers["content-type"] }),
   )
-}
-
-async function resolveLocalRoot(root: string | undefined) {
-  if (!root) throw new Error("OPENCODE_LOCAL_WEB_UI is unset")
-  return realpath(root)
-}
-
-function serveLocalUI(
-  request: HttpServerRequest.HttpServerRequest,
-  url: URL,
-  root: string,
-  onValidated: ((input: { readonly path: string }) => Promise<void>) | undefined,
-) {
-  if (request.method !== "GET" && request.method !== "HEAD") return Effect.succeed(HttpServerResponse.empty({ status: 405 }))
-  const rawPath = request.url.split("?", 1)[0] ?? ""
-  const assets = url.pathname.startsWith("/_assets/") || url.pathname.startsWith("/icons/")
-  if (hasTraversal(rawPath) || (url.pathname.startsWith("/_assets/") && rawPath.includes("..")))
-    return assets ? localAssetNotFound() : serveLocalIndex(request, root, onValidated)
-  const candidate = localCandidate(url.pathname, root)
-  if (!candidate) return assets ? localAssetNotFound() : serveLocalIndex(request, root, onValidated)
-  return serveLocalFile(request, candidate, root, onValidated).pipe(
-    Effect.flatMap((response) =>
-      response === undefined
-        ? assets ? localAssetNotFound() : serveLocalIndex(request, root, onValidated)
-        : Effect.succeed(response),
-    ),
-    Effect.catch(() => (assets || isStaticPath(url.pathname) ? localAssetNotFound() : serveLocalIndex(request, root, onValidated))),
-  )
-}
-
-function localCandidate(pathname: string, root: string) {
-  const relative = pathname.replace(/^\//, "")
-  const candidate = path.resolve(root, relative)
-  if (!isWithinRoot(candidate, root)) return
-  return isStaticPath(pathname) ? candidate : path.join(root, "index.html")
-}
-
-function isStaticPath(pathname: string) {
-  return (pathname.split("/").at(-1) ?? "").includes(".")
-}
-
-function hasTraversal(pathname: string) {
-  return pathname.split("/").some((segment) => segment === ".." || /%2e/i.test(segment))
-}
-
-function isWithinRoot(candidate: string, root: string) {
-  return candidate === root || candidate.startsWith(root + path.sep)
-}
-
-function serveLocalIndex(
-  request: HttpServerRequest.HttpServerRequest,
-  root: string,
-  onValidated: ((input: { readonly path: string }) => Promise<void>) | undefined,
-) {
-  return serveLocalFile(request, path.join(root, "index.html"), root, onValidated).pipe(
-    Effect.flatMap((response) => response === undefined ? Effect.succeed(HttpServerResponse.empty({ status: 404 })) : Effect.succeed(response)),
-    Effect.catch(() => Effect.succeed(HttpServerResponse.empty({ status: 404 }))),
-  )
-}
-
-function serveLocalFile(
-  request: HttpServerRequest.HttpServerRequest,
-  file: string,
-  root: string,
-  onValidated: ((input: { readonly path: string }) => Promise<void>) | undefined,
-) {
-  return Effect.tryPromise(async () => {
-    const handle = await open(file, "r")
-    try {
-      const resolved = await realpath(`/proc/self/fd/${handle.fd}`).catch(() => realpath(file))
-      if (!isWithinRoot(resolved, root)) return
-      await onValidated?.({ path: file })
-      return { body: await handle.readFile(), resolved }
-    } finally {
-      await handle.close()
-    }
-  }).pipe(
-    Effect.map((file) => {
-      if (!file) return
-      const { body, resolved } = file
-      const html = path.basename(resolved) === "index.html"
-      const headers = {
-        "content-type": FSUtil.mimeType(resolved),
-        "cache-control": html || path.basename(resolved) === "sw.js" || path.basename(resolved) === "registerSW.js" ? "no-cache" : "public, max-age=31536000, immutable",
-        "content-security-policy": html ? cspForHtml(body.toString()) : csp(),
-        "x-content-type-options": "nosniff",
-      }
-      return request.method === "HEAD"
-        ? HttpServerResponse.empty({ status: 200, headers })
-        : HttpServerResponse.raw(body, { headers, contentType: headers["content-type"] })
-    }),
-  )
-}
-
-function localAssetNotFound() {
-  return Effect.succeed(HttpServerResponse.empty({ status: 404, headers: { "cache-control": "no-store" } }))
 }
 
 function acceptsBrotli(header: string | undefined) {

@@ -1,36 +1,27 @@
 /**
  * @spec-handoff
- * @interface WebUi.handler(options?: { assets?: AssetMap; brotli?: BrotliMap; onLocalFileValidated?(input: { path: string }): Promise<void> }): RouteTransform
+ * @interface WebUi.handler(options?: { assets?: AssetMap; brotli?: BrotliMap }): RouteTransform
  * @behavior
  *   - Serves SPA destinations and static web assets publicly when the server has a password.
  *   - Sends /api, /api/*, /auth/*, and /openapi.json to the authenticated inner server before SPA fallback.
  *   - Returns a structured browser-fetch 401 without WWW-Authenticate while retaining challenges for non-browser clients.
  *   - Hashes every retained oc-*-preload-script inline body in the HTML CSP.
- *   - With OPENCODE_LOCAL_WEB_UI set and no embedded UI, serves its resolved local build root's SPA shell and assets.
- *   - A valid UI loaded through the production embedded-archive loader takes precedence over OPENCODE_LOCAL_WEB_UI.
- *   - Serves a local candidate only when its realpath remains within that resolved root.
  * @edge-cases
  *   - Unknown authenticated API routes are 404 responses, never index.html.
  *   - Pairing /auth/connect/:code reaches its handler rather than the SPA shell.
  *   - Missing /_assets/* files are 404 no-store, while SPA HTML remains revalidated and receives preload-script CSP hashes.
- *   - Local escaping symlinks are misses: navigations receive the SPA shell; /_assets/* receives 404 no-store.
- *   - A root symlink and candidates symlinked within its resolved root are served normally.
- *   - Local bytes are read from the same opened object whose canonical target passed root containment, even if its pathname is swapped afterwards.
- *   - onLocalFileValidated runs after that opened object is validated and before its bytes are read, enabling deterministic swap probes.
  */
 import { NodeFileSystem, NodeHttpServer } from "@effect/platform-node"
-import { afterAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { FetchHttpClient, HttpServer, HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
-import { connect } from "node:net"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { brotliCompressSync } from "node:zlib"
 import { WebUi } from "../src/services/web-ui"
-import { AppArchive } from "../src/app-archive"
 import { it } from "../../core/test/lib/effect"
 
 const root = await mkdtemp(path.join(tmpdir(), "opencode-web-ui-"))
@@ -294,268 +285,6 @@ describe("web UI", () => {
     )
   })
 
-  test("serves a local web UI directory without exposing its protected routes or missing assets", async () => {
-    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
-    const previous = process.env.OPENCODE_LOCAL_WEB_UI
-    process.env.OPENCODE_LOCAL_WEB_UI = local
-    try {
-      const preload = "document.documentElement.dataset.theme = 'local'"
-      await mkdir(path.join(local, "_assets"), { recursive: true })
-      await writeFile(
-        path.join(local, "index.html"),
-        `<html><head><script id="oc-theme-preload-script">${preload}</script></head><body>local shell</body></html>`,
-      )
-      await writeFile(path.join(local, "_assets", "app.js"), "console.log('local asset')")
-      await writeFile(path.join(local, "_assets", "%2e%2e%2fsecret.js"), "console.log('encoded traversal name')")
 
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const transform = yield* WebUi.handler()
-            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
-            yield* http.serve(
-              transform(
-                Effect.gen(function* () {
-                  const request = yield* HttpServerRequest.HttpServerRequest
-                  return yield* Effect.fail(
-                    new HttpServerError.HttpServerError({ reason: new HttpServerError.RouteNotFound({ request }) }),
-                  )
-                }),
-              ),
-            )
-            const origin = HttpServer.formatAddress(http.address)
-            const rawGet = (pathname: string) =>
-              Effect.promise(
-                () =>
-                  new Promise<{ status: number; body: string }>((resolve, reject) => {
-                    const address = new URL(origin)
-                    const socket = connect({ host: address.hostname, port: Number(address.port) })
-                    const chunks: Buffer[] = []
-                    socket.on("connect", () =>
-                      socket.write(`GET ${pathname} HTTP/1.1\r\nHost: ${address.host}\r\nConnection: close\r\n\r\n`),
-                    )
-                    socket.on("data", (chunk) => chunks.push(chunk))
-                    socket.on("error", reject)
-                    socket.on("close", () => {
-                      const response = Buffer.concat(chunks).toString()
-                      const [head, body = ""] = response.split("\r\n\r\n", 2)
-                      resolve({ status: Number(head.match(/^HTTP\/1\.1 (\d+)/)?.[1]), body })
-                    })
-                  }),
-              )
 
-            const shell = yield* Effect.promise(() => fetch(`${origin}/workspace/local`))
-            expect(shell.status).toBe(200)
-            expect(shell.headers.get("cache-control")).toBe("no-cache")
-            expect(yield* Effect.promise(() => shell.text())).toContain("local shell")
-            expect(shell.headers.get("content-security-policy")).toContain(
-              `'sha256-${createHash("sha256").update(preload).digest("base64")}'`,
-            )
-
-            const asset = yield* Effect.promise(() => fetch(`${origin}/_assets/app.js`))
-            expect(asset.status).toBe(200)
-            expect(asset.headers.get("content-type")).toContain("javascript")
-            expect(yield* Effect.promise(() => asset.text())).toBe("console.log('local asset')")
-
-            const missingAsset = yield* Effect.promise(() => fetch(`${origin}/_assets/missing.js`))
-            expect(missingAsset.status).toBe(404)
-            expect(missingAsset.headers.get("cache-control")).toBe("no-store")
-
-            yield* Effect.forEach(["/_assets/../secret.js", "/_assets/%2e%2e/secret.js"], (pathname) =>
-              Effect.gen(function* () {
-                const response = yield* Effect.promise(() => fetch(`${origin}${pathname}`))
-                expect(response.status).toBe(404)
-                expect(yield* Effect.promise(() => response.text())).not.toContain("local shell")
-              }),
-            )
-
-            yield* Effect.forEach(["/_assets/%2e%2e%2fsecret.js", "/_assets/%2e%2e%5csecret.js"], (pathname) =>
-              Effect.gen(function* () {
-                const response = yield* rawGet(pathname)
-                expect(response.status).toBe(404)
-                expect(response.body).not.toContain("local shell")
-              }),
-            )
-
-            yield* Effect.forEach(["/api", "/api/missing", "/auth/missing", "/openapi.json"], (pathname) =>
-              Effect.gen(function* () {
-                const response = yield* Effect.promise(() => fetch(`${origin}${pathname}`))
-                expect(response.status).toBe(404)
-                expect(yield* Effect.promise(() => response.text())).not.toContain("local shell")
-              }),
-            )
-          }),
-        ).pipe(Effect.provide(NodeFileSystem.layer)),
-      )
-    } finally {
-      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
-      else process.env.OPENCODE_LOCAL_WEB_UI = previous
-      await rm(local, { recursive: true, force: true })
-    }
-  })
-
-  test("contains local web UI symlinks within its resolved root", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
-    const local = path.join(parent, "ui")
-    const outside = path.join(parent, "ui-evil")
-    const links = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-links-"))
-    const rootLink = path.join(links, "web-ui")
-    const previous = process.env.OPENCODE_LOCAL_WEB_UI
-    process.env.OPENCODE_LOCAL_WEB_UI = rootLink
-    try {
-      await mkdir(path.join(local, "_assets"), { recursive: true })
-      await mkdir(path.join(outside, "directory"), { recursive: true })
-      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
-      await writeFile(path.join(local, "_assets", "inside.js"), "console.log('inside root')")
-      await writeFile(path.join(outside, "secret.js"), "console.log('outside file secret')")
-      await writeFile(path.join(outside, "directory", "secret.js"), "console.log('outside directory secret')")
-      await symlink(local, rootLink)
-      await symlink(path.join(local, "_assets", "inside.js"), path.join(local, "_assets", "inside-link.js"))
-      await symlink(path.join(outside, "secret.js"), path.join(local, "escape-file.js"))
-      await symlink(path.join(outside, "secret.js"), path.join(local, "_assets", "escape-file.js"))
-      await symlink(path.join(outside, "directory"), path.join(local, "escape-directory"))
-      await symlink(path.join(outside, "directory"), path.join(local, "_assets", "escape-directory"))
-      // coverage backfill: a string-prefix containment check must not allow a sibling whose name shares the root prefix.
-      await symlink(outside, path.join(local, "_assets", "near-miss"))
-
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const transform = yield* WebUi.handler()
-            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
-            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
-            const origin = HttpServer.formatAddress(http.address)
-
-            const root = yield* Effect.promise(() => fetch(`${origin}/workspace/local`))
-            expect(root.status).toBe(200)
-            expect(yield* Effect.promise(() => root.text())).toContain("local shell")
-
-            const inside = yield* Effect.promise(() => fetch(`${origin}/_assets/inside-link.js`))
-            expect(inside.status).toBe(200)
-            expect(yield* Effect.promise(() => inside.text())).toBe("console.log('inside root')")
-
-            yield* Effect.forEach(["/escape-file.js", "/escape-directory/secret.js"], (pathname) =>
-              Effect.gen(function* () {
-                const response = yield* Effect.promise(() => fetch(`${origin}${pathname}`))
-                expect(response.status).toBe(200)
-                expect(yield* Effect.promise(() => response.text())).toContain("local shell")
-              }),
-            )
-
-            yield* Effect.forEach(
-              ["/_assets/escape-file.js", "/_assets/escape-directory/secret.js", "/_assets/near-miss/secret.js"],
-              (pathname) =>
-                Effect.gen(function* () {
-                  const response = yield* Effect.promise(() => fetch(`${origin}${pathname}`))
-                  expect(response.status).toBe(404)
-                  expect(response.headers.get("cache-control")).toBe("no-store")
-                  expect(yield* Effect.promise(() => response.text())).toBe("")
-                }),
-            )
-          }),
-        ).pipe(Effect.provide(NodeFileSystem.layer)),
-      )
-    } finally {
-      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
-      else process.env.OPENCODE_LOCAL_WEB_UI = previous
-      await Promise.all([rm(parent, { recursive: true, force: true }), rm(links, { recursive: true, force: true })])
-    }
-  })
-
-  test("keeps explicitly supplied embedded assets ahead of OPENCODE_LOCAL_WEB_UI", async () => {
-    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
-    const previous = process.env.OPENCODE_LOCAL_WEB_UI
-    process.env.OPENCODE_LOCAL_WEB_UI = local
-    try {
-      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const transform = yield* WebUi.handler({
-              assets: { "index.html": "<html><body>embedded shell</body></html>" },
-            })
-            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
-            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
-            const response = yield* Effect.promise(() => fetch(HttpServer.formatAddress(http.address)))
-            expect(response.status).toBe(200)
-            expect(yield* Effect.promise(() => response.text())).toContain("embedded shell")
-          }),
-        ).pipe(Effect.provide(NodeFileSystem.layer)),
-      )
-    } finally {
-      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
-      else process.env.OPENCODE_LOCAL_WEB_UI = previous
-      await rm(local, { recursive: true, force: true })
-    }
-  })
-
-  test("serves bytes from the contained file object after its pathname is swapped to an outside symlink", async () => {
-    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
-    const outside = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-outside-"))
-    const asset = path.join(local, "_assets", "app.js")
-    const secret = path.join(outside, "secret.js")
-    const previous = process.env.OPENCODE_LOCAL_WEB_UI
-    process.env.OPENCODE_LOCAL_WEB_UI = local
-    try {
-      await mkdir(path.dirname(asset), { recursive: true })
-      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
-      await writeFile(asset, "console.log('contained asset')")
-      await writeFile(secret, "outside secret")
-      let validated = false
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const transform = yield* WebUi.handler({
-              onLocalFileValidated: async ({ path: validatedPath }) => {
-                expect(validatedPath).toBe(asset)
-                validated = true
-                await rm(asset)
-                await symlink(secret, asset)
-              },
-            })
-            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
-            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
-            const response = yield* Effect.promise(() => fetch(`${HttpServer.formatAddress(http.address)}/_assets/app.js`))
-            expect(validated).toBeTrue()
-            expect(response.status).toBe(200)
-            expect(yield* Effect.promise(() => response.text())).toBe("console.log('contained asset')")
-          }),
-        ).pipe(Effect.provide(NodeFileSystem.layer)),
-      )
-    } finally {
-      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
-      else process.env.OPENCODE_LOCAL_WEB_UI = previous
-      await Promise.all([rm(local, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })])
-    }
-  })
-
-  test("keeps production-loaded embedded assets ahead of OPENCODE_LOCAL_WEB_UI", async () => {
-    const local = await mkdtemp(path.join(tmpdir(), "opencode-local-web-ui-"))
-    const previous = process.env.OPENCODE_LOCAL_WEB_UI
-    process.env.OPENCODE_LOCAL_WEB_UI = local
-    mock.module("virtual:opencode-app-assets", () => ({
-      default: () =>
-        AppArchive.encode([["index.html", brotliCompressSync("<html><body>embedded archive shell</body></html>")]]),
-    }))
-    try {
-      await writeFile(path.join(local, "index.html"), "<html><body>local shell</body></html>")
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const transform = yield* WebUi.handler()
-            const http = yield* NodeHttpServer.make(createServer, { host: "127.0.0.1", port: 0 })
-            yield* http.serve(transform(Effect.succeed(HttpServerResponse.empty({ status: 404 }))))
-            const response = yield* Effect.promise(() => fetch(HttpServer.formatAddress(http.address)))
-            expect(response.status).toBe(200)
-            expect(yield* Effect.promise(() => response.text())).toContain("embedded archive shell")
-          }),
-        ).pipe(Effect.provide(NodeFileSystem.layer)),
-      )
-    } finally {
-      mock.restore()
-      if (previous === undefined) delete process.env.OPENCODE_LOCAL_WEB_UI
-      else process.env.OPENCODE_LOCAL_WEB_UI = previous
-      await rm(local, { recursive: true, force: true })
-    }
-  })
 })
