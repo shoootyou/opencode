@@ -1,4 +1,12 @@
-/** @jsxImportSource @opentui/solid */
+/**
+ * @jsxImportSource @opentui/solid
+ * @spec-handoff
+ * @interface DialogSessionList(): JSX.Element
+ * @behavior
+ *   - Queries sessions at the active session location rather than the process working directory.
+ *   - The archive-visibility action runs with no selected row, including before an empty result list loads.
+ * @see ../../../src/component/dialog-session-list.tsx
+ */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { onMount } from "solid-js"
@@ -27,6 +35,7 @@ test("scopes sessions to the active session location", async () => {
   const active = "/tmp/opencode/project-b"
   const events = createEventStream()
   const requestedProjects: string[] = []
+  const requestedArchived: string[] = []
   const calls = createFetch((url) => {
     if (url.pathname === "/api/location") {
       const directory = url.searchParams.get("location[directory]") ?? process.cwd()
@@ -39,18 +48,22 @@ test("scopes sessions to the active session location", async () => {
     if (parentID && parentID !== "null") return json({ data: [], cursor: {} })
     const project = url.searchParams.get("project") ?? ""
     requestedProjects.push(project)
+    requestedArchived.push(url.searchParams.get("archived") ?? "")
     return json({
-      data: [
-        {
-          id: project === "proj_b" ? "ses_b" : "ses_a",
-          projectID: project,
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          time: { created: 1, updated: 2 },
-          title: project === "proj_b" ? "Project B session" : "Project A session",
-          location: { directory: project === "proj_b" ? active : process.cwd() },
-        },
-      ],
+      data:
+        project === "proj_b"
+          ? [
+              {
+                id: "ses_b",
+                projectID: project,
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 1, updated: 2 },
+                title: "Project B session",
+                location: { directory: active },
+              },
+            ]
+          : [],
       cursor: {},
     })
   }, events)
@@ -61,19 +74,23 @@ test("scopes sessions to the active session location", async () => {
     const data = useData()
     const dialog = useDialog()
     const route = useRoute()
+    const keymap = Keymap.use()
     storage = useStorage()
     onMount(() => {
-      data.session.remember({
-        id: "ses_active",
-        projectID: "proj_b",
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 1, updated: 3 },
-        title: "Active session",
-        location: { directory: active },
-      })
-      route.navigate({ type: "session", sessionID: "ses_active" })
       dialog.replace(() => <DialogSessionList />)
+      setTimeout(() => {
+        keymap.dispatch("session.archived.toggle_visibility")
+        data.session.remember({
+          id: "ses_active",
+          projectID: "proj_b",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 3 },
+          title: "Active session",
+          location: { directory: active },
+        })
+        route.navigate({ type: "session", sessionID: "ses_active" })
+      })
     })
     return null
   }
@@ -122,6 +139,7 @@ test("scopes sessions to the active session location", async () => {
     const frame = await app.waitForFrame((value) => value.includes("Project B session"))
     expect(frame).not.toContain("Project A session")
     expect(requestedProjects.at(-1)).toBe("proj_b")
+    await app.waitFor(() => requestedArchived.includes("true"))
   } finally {
     app.renderer.destroy()
     await storage.flush()

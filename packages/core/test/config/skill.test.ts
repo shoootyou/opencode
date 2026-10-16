@@ -6,6 +6,7 @@
  *   - Watcher, explicit, and config reload requests share one refresh lifecycle and publish only complete snapshots.
  *   - Initial activation keeps successfully scanned local skills when a URL source fails.
  *   - A failed later reload retains the previous complete snapshot and emits no update event.
+ *   - A failed or interrupted candidate refresh releases its watcher subscriptions before plugin teardown.
  *   - Public reload reports the committed replacement generation's count, not the prior generation's count.
  *   - Rapid public reload calls coalesce to at most one active refresh plus one queued refresh.
  * @edge-cases
@@ -536,6 +537,59 @@ describe("ConfigSkillPlugin.Plugin", () => {
       )
       .pipe(Effect.provide(Logger.layer([logger])))
   })
+
+  it.live("releases candidate watcher subscriptions when a reload fails before plugin teardown", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const local = path.join(tmp.path, "local")
+        const candidate = path.join(tmp.path, "candidate")
+        const catalog = "https://skills.example.test/catalog"
+        const required = "https://skills.example.test/required"
+        return Effect.gen(function* () {
+          let unavailable = false
+          let pulls = 0
+          let root = local
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(local, "local"), { recursive: true })
+            await fs.mkdir(path.join(candidate, "candidate"), { recursive: true })
+            await write(local, "local", "Local")
+            await write(candidate, "candidate", "Candidate")
+          })
+          const service = yield* start(
+            [catalog, required],
+            tmp.path,
+            SkillDiscovery.Service.of({
+              pull: (url) =>
+                Effect.sync(() => ++pulls).pipe(
+                  Effect.andThen(
+                    url === catalog
+                      ? Effect.succeed([AbsolutePath.make(root)])
+                      : unavailable
+                        ? Effect.die(new Error("catalog unavailable"))
+                        : Effect.succeed([]),
+                  ),
+                ),
+            }),
+          )
+          expect(yield* service.list()).toHaveLength(1)
+
+          root = candidate
+          unavailable = true
+          const reload = yield* ConfigSkillReload.Service
+          const failed = yield* reload.reload().pipe(Effect.flip)
+          expect(failed._tag).toBe("ConfigSkillReload.ReloadFailed")
+          expect(yield* service.list()).toHaveLength(1)
+
+          root = local
+          unavailable = false
+          const watcher = yield* Watcher.Test
+          yield* watcher.emit({ type: "update", path: path.join(candidate, "candidate", "SKILL.md") })
+          yield* Effect.sleep("250 millis")
+          expect(pulls).toBe(4)
+        })
+      }),
+    ),
+  )
 
   it.live("rejects a duplicate active reload installation", () =>
     Effect.gen(function* () {
