@@ -6,6 +6,7 @@
  *   - Requests admitted while a scan runs resolve from its one follow-up generation.
  *   - A burst during that follow-up schedules exactly one further scan.
  *   - A required-source failure preserves the committed catalogue and reports ReloadFailed.
+ *   - config.updated is level-triggered: while a scan is blocked, a burst of 1,000 updates has at most one outstanding signal and one admission fiber.
  * @edge-cases
  *   - Watcher and config events admit work without waiting for the active scan.
  * @see ../../src/config/plugin/skill.ts
@@ -78,6 +79,8 @@ describe("ConfigSkillPlugin reload burst", () => {
            const started = [yield* Deferred.make<void>(), yield* Deferred.make<void>(), yield* Deferred.make<void>()]
            const release = [yield* Deferred.make<void>(), yield* Deferred.make<void>(), yield* Deferred.make<void>()]
            const events = yield* PubSub.unbounded<PluginEvent>()
+           const watcherReturned = yield* Deferred.make<void>()
+           const configReturned = yield* Deferred.make<void>()
            const secondConfigEventConsumed = yield* Deferred.make<void>()
            let configEventsConsumed = 0
           let scans = 0
@@ -182,20 +185,24 @@ describe("ConfigSkillPlugin reload burst", () => {
           const commandWaiter = yield* command.execute({ name: "reload", invocation: { sessionID: Session.ID.make("ses_burst"), prompt: { text: "" }, delivery: "steer" } }).pipe(Effect.forkScoped)
           const toolWaiter = yield* toolReload!().pipe(Effect.forkScoped)
           const watcher = yield* Watcher.Test
-           const watcherEvent = yield* watcher.emit({ type: "update", path: path.join(tmp.path, "remote", "SKILL.md") }).pipe(Effect.forkScoped)
-           const configEvent = yield* PubSub.publish(events, { type: "config.updated" } as PluginEvent).pipe(Effect.forkScoped)
+           const watcherEvent = yield* watcher
+             .emit({ type: "update", path: path.join(tmp.path, "remote", "SKILL.md") })
+             .pipe(Effect.andThen(Deferred.succeed(watcherReturned, undefined)), Effect.forkScoped)
+           const configEvent = yield* PubSub.publish(events, { type: "config.updated" } as PluginEvent).pipe(
+             Effect.andThen(Deferred.succeed(configReturned, undefined)),
+             Effect.forkScoped,
+           )
           // A direct refresh bypass would start scan 2 before G is released, making maxActive 2;
           // waiting here would leave either event fiber unresolved while G is blocked.
-            expect(Exit.isSuccess(yield* Fiber.join(watcherEvent).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
-            expect(Exit.isSuccess(yield* Fiber.join(configEvent).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
+             expect(Exit.isSuccess(yield* Fiber.join(watcherEvent).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
+             expect(Exit.isSuccess(yield* Fiber.join(configEvent).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
+            yield* Deferred.await(watcherReturned).pipe(Effect.timeout("1 second"))
+            yield* Deferred.await(configReturned).pipe(Effect.timeout("1 second"))
            const secondConfigEvent = yield* PubSub.publish(events, { type: "config.updated" } as PluginEvent).pipe(Effect.forkScoped)
            yield* Deferred.await(secondConfigEventConsumed).pipe(Effect.timeout("1 second"))
            expect(Exit.isSuccess(yield* Fiber.join(secondConfigEvent).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
-           // After the debounce boundary, a watcher must still admit through the gate: a direct
-           // refresh would begin scan 3 and resolve this handshake before the blocked G is released.
-           expect(
-             Exit.isFailure(yield* Deferred.await(started[1]).pipe(Effect.timeout("150 millis"), Effect.exit)),
-           ).toBe(true)
+            // Both emitters returned while G remains blocked; neither bypassed the shared gate.
+            expect(scans).toBe(2)
            expect(maxActive).toBe(1)
 
           yield* Deferred.succeed(release[0], undefined)
@@ -386,7 +393,14 @@ describe("ConfigSkillPlugin reload burst", () => {
            const burstStarted = yield* Deferred.make<void>()
            const burstRelease = yield* Deferred.make<void>()
            const followUpStarted = yield* Deferred.make<void>()
-          const events = yield* PubSub.unbounded<PluginEvent>()
+           const events = yield* PubSub.unbounded<PluginEvent>()
+           const configDelivered = yield* Deferred.make<void>()
+           const admissionStarted = yield* Deferred.make<void>()
+           const admissionRelease = yield* Deferred.make<void>()
+           let rawConfigEvents = 0
+           let blockAdmissions = false
+           let activeAdmissions = 0
+           let maxActiveAdmissions = 0
           let scans = 0
           let active = 0
           let maxActive = 0
@@ -411,9 +425,29 @@ describe("ConfigSkillPlugin reload burst", () => {
           })
           const skill = yield* Skill.Service
           const entries = [new Document({ type: "document", info: decode({ skills: ["https://skills.example.test/catalog"] }) })]
-          yield* ConfigSkillPlugin.Plugin.effect(
-            host({
-              event: { subscribe: () => Stream.fromPubSub(events) },
+           const admissionHook = () =>
+             Effect.sync(() => {
+               activeAdmissions += 1
+               maxActiveAdmissions = Math.max(maxActiveAdmissions, activeAdmissions)
+             }).pipe(
+               Effect.tap(() => Deferred.succeed(admissionStarted, undefined)),
+               Effect.andThen(() => (blockAdmissions ? Deferred.await(admissionRelease) : Effect.void)),
+               Effect.ensuring(Effect.sync(() => activeAdmissions--)),
+             )
+           yield* ConfigSkillPlugin.Plugin.effect(
+             host({
+               event: {
+                 subscribe: () =>
+                   Stream.fromPubSub(events).pipe(
+                     Stream.tap(() =>
+                       Effect.sync(() => ++rawConfigEvents).pipe(
+                         Effect.andThen((count) =>
+                           count === 1_000 ? Deferred.succeed(configDelivered, undefined).pipe(Effect.asVoid) : Effect.void,
+                         ),
+                       ),
+                     ),
+                   ),
+               },
               skill: {
                 list: () => skill.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
                 transform: skill.transform,
@@ -424,9 +458,10 @@ describe("ConfigSkillPlugin reload burst", () => {
             Effect.provideService(SkillDiscovery.Service, discovery),
             Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: tmp.path })),
             Effect.provide(locationLayer),
-            Effect.provide(Watcher.testLayer),
-            Effect.provide(Config.testLayer(entries)),
-          )
+             Effect.provide(Watcher.testLayer),
+             Effect.provide(Config.testLayer(entries)),
+             Effect.provideService(ConfigSkillReload.Test.admissionHook, admissionHook),
+           )
           const reload = yield* ConfigSkillReload.Service
           const withoutEvents = yield* reload.reload().pipe(Effect.forkScoped)
           yield* Deferred.await(idleStarted).pipe(Effect.timeout("1 second"))
@@ -434,15 +469,29 @@ describe("ConfigSkillPlugin reload burst", () => {
           expect(yield* Fiber.join(withoutEvents)).toEqual({ count: 1 })
           expect(scans).toBe(2)
 
-          const running = yield* reload.reload().pipe(Effect.forkScoped)
-          yield* Deferred.await(burstStarted).pipe(Effect.timeout("1 second"))
-          const watcher = yield* Watcher.Test
-           yield* watcher.emit({ type: "update", path: path.join(tmp.path, "remote", "SKILL.md") })
-           yield* PubSub.publish(events, { type: "config.updated" } as PluginEvent)
+           const running = yield* reload.reload().pipe(Effect.forkScoped)
+           yield* Deferred.await(burstStarted).pipe(Effect.timeout("1 second"))
+           const watcher = yield* Watcher.Test
+           blockAdmissions = true
+           yield* Effect.forEach(Array.from({ length: 1_000 }), () =>
+             PubSub.publish(events, { type: "config.updated" } as PluginEvent),
+           )
+           yield* Deferred.await(configDelivered).pipe(Effect.timeout("1 second"))
+           yield* Deferred.await(admissionStarted).pipe(Effect.timeout("1 second"))
+           yield* Effect.forEach(Array.from({ length: 1_000 }), () =>
+             watcher.emit({ type: "update", path: path.join(tmp.path, "remote", "SKILL.md") }),
+           )
+           const [status] = yield* ConfigSkillPlugin.Test.backgroundStatus()
+           expect(status?.pendingConfigSignals ?? 0).toBeLessThanOrEqual(1)
+           expect(status?.pendingWatcherSignals ?? 0).toBeLessThanOrEqual(1)
+           expect(status?.configAdmissionFibers).toBe(1)
+           expect(status?.watcherAdmissionFibers).toBe(1)
+           expect(maxActiveAdmissions).toBeLessThanOrEqual(1)
           // With no events, the prior cycle proved no follow-up. Here both must reach the gate:
           // ignoring either event loses its isolated test, while direct refresh bypasses make
           // maxActive exceed one before G is released instead of sharing one pending ticket.
-          yield* Deferred.succeed(burstRelease, undefined)
+           yield* Deferred.succeed(admissionRelease, undefined)
+           yield* Deferred.succeed(burstRelease, undefined)
           expect(yield* Fiber.join(running)).toEqual({ count: 1 })
            yield* Deferred.await(followUpStarted).pipe(Effect.timeout("1 second"))
            expect(scans).toBe(4)

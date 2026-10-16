@@ -16,6 +16,30 @@ import { SkillDiscovery } from "../../skill/discovery.js"
 import { SkillFile } from "./skill-file.js"
 
 type Source = Skill.DirectorySource | Skill.UrlSource
+type BackgroundResources = {
+  readonly configSignals: PubSub.PubSub<void>
+  readonly configConsumers: FiberMap.FiberMap<string>
+  readonly watcherSignals: PubSub.PubSub<string>
+  readonly watcherConsumers: FiberMap.FiberMap<string>
+}
+
+// This deep-module hook is test-only; production callers only receive the plugin definition.
+const backgroundResources = new Set<BackgroundResources>()
+export const Test = {
+  backgroundStatus: () =>
+    Effect.sync(() => Array.from(backgroundResources)).pipe(
+      Effect.flatMap((resources) =>
+        Effect.forEach(resources, (resource) =>
+          Effect.all({
+            pendingConfigSignals: PubSub.size(resource.configSignals),
+            configAdmissionFibers: FiberMap.size(resource.configConsumers),
+            pendingWatcherSignals: PubSub.size(resource.watcherSignals),
+            watcherAdmissionFibers: FiberMap.size(resource.watcherConsumers),
+          }),
+        ),
+      ),
+    ),
+}
 
 export const Plugin = define({
   id: "opencode.config.skill",
@@ -32,6 +56,12 @@ export const Plugin = define({
       skills: [],
     }
     const changes = yield* PubSub.sliding<string>(1)
+    const configUpdates = yield* PubSub.sliding<void>(1)
+    const configConsumers = yield* FiberMap.make<string>()
+    const watcherConsumers = yield* FiberMap.make<string>()
+    const resources = { configSignals: configUpdates, configConsumers, watcherSignals: changes, watcherConsumers }
+    yield* Effect.sync(() => backgroundResources.add(resources))
+    yield* Effect.addFinalizer(() => Effect.sync(() => backgroundResources.delete(resources)))
 
     const watch = Effect.fn("ConfigSkillPlugin.watch")(function* (
       watches: FiberMap.FiberMap<string>,
@@ -167,7 +197,9 @@ export const Plugin = define({
                 Cause.hasInterrupts(cause)
                   ? Effect.failCause(cause)
                   : Effect.logWarning("failed to load skill source", { source: Skill.Source.key(source), cause }).pipe(
-                      Effect.andThen(mode === "initial" ? Effect.succeed([]) : Effect.failCause(cause)),
+                      // A source boundary may report a defect-shaped failure. It is still an
+                      // expected discovery failure before commit; notification failures are not.
+                      Effect.andThen(mode === "initial" ? Effect.succeed([]) : Effect.fail(new ConfigSkillReload.ReloadFailed({ cause }))),
                     ),
               ),
             ).pipe(Effect.tap((items) => Effect.sync(() => items.forEach((skill) => skills.set(skill.id, skill))))),
@@ -190,25 +222,18 @@ export const Plugin = define({
     })
     const installationScope = yield* Scope.make()
     const registration = yield* skillReload.install(
-      (mode) =>
-        refresh(mode).pipe(
-          Effect.catchCauseIf(
-            (cause) => !Cause.hasInterrupts(cause),
-            (cause) => Effect.fail(cause),
-          ),
-        ),
-      { initial: true },
+      (mode) => refresh(mode),
+      { initial: true, release: () => Scope.close(watchScope, Exit.void) },
     ).pipe(Scope.provide(installationScope))
-    yield* Effect.addFinalizer(() =>
-      Scope.close(installationScope, Exit.void).pipe(Effect.andThen(Scope.close(watchScope, Exit.void))),
-    )
+    yield* Effect.addFinalizer(() => Scope.close(installationScope, Exit.void))
 
     // Editor saves arrive as bursts of watcher events; settle before one non-waiting admission.
     const updates = yield* PubSub.subscribe(changes)
-    yield* Stream.fromSubscription(updates).pipe(
-      Stream.debounce("100 millis"),
-      Stream.runForEach(() => registration.invalidate()),
-      Effect.forkScoped({ startImmediately: true }),
+    yield* FiberMap.run(
+      watcherConsumers,
+      "watcher-signals",
+      Stream.fromSubscription(updates).pipe(Stream.debounce("100 millis"), Stream.runForEach(() => registration.invalidate())),
+      { onlyIfMissing: true, startImmediately: true },
     )
     yield* registration.initial.pipe(
       Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
@@ -216,8 +241,15 @@ export const Plugin = define({
     )
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),
-      Stream.runForEach(() => registration.invalidate()),
+      Stream.runForEach(() => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
+    )
+    const configSignals = yield* PubSub.subscribe(configUpdates)
+    yield* FiberMap.run(
+      configConsumers,
+      "config-signals",
+      Stream.fromSubscription(configSignals).pipe(Stream.runForEach(() => registration.invalidate())),
+      { onlyIfMissing: true, startImmediately: true },
     )
   }),
 })

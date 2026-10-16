@@ -25,17 +25,33 @@ export interface Interface {
 }
 
 type Scanner = (mode: "initial" | "reload") => Effect.Effect<Result, unknown>
+type AdmissionHook = () => Effect.Effect<void>
 type Registration = {
   readonly initial: Effect.Effect<Result, ReloadUnavailable | ReloadFailed | ReloadTeardown>
   readonly invalidate: () => Effect.Effect<void>
 }
+type Installation = {
+  readonly scanner: Scanner
+  readonly context: Context.Context<never>
+}
 type Internal = Interface & {
-  readonly install: (scanner: Scanner, options?: { readonly initial?: boolean }) => Effect.Effect<Registration, never, Scope.Scope>
+  readonly install: (
+    scanner: Scanner,
+    options?: { readonly initial?: boolean; readonly release?: () => Effect.Effect<void> },
+  ) => Effect.Effect<Registration, never, Scope.Scope>
+}
+
+// This reference is only for lifecycle tests; production installations use its no-op default.
+export const Test = {
+  admissionHook: Context.Reference("@opencode/ConfigSkillReload/Test/admission-hook", {
+    defaultValue: () => () => Effect.void,
+  }),
 }
 
 const make = Effect.gen(function* () {
   const state = yield* Ref.make<State>({ _tag: "Unavailable" })
   const gate = Semaphore.makeUnsafe(1)
+  const admissionHooks = yield* Ref.make(new Map<symbol, AdmissionHook>())
 
   const makeBatch = (mode: Batch["mode"]) =>
     Deferred.make<Result, unknown>().pipe(
@@ -93,34 +109,48 @@ const make = Effect.gen(function* () {
       }),
     )
 
-  // The scanner is captured per installation, rather than per caller. This Ref is only read by a
-  // worker after its token has made it current under the gate.
-  const scanners = yield* Ref.make(new Map<symbol, Scanner>())
+  // The scanner and its execution context belong to the installation, never to a caller that
+  // happens to admit a batch. This Ref is only read after the token is current under the gate.
+  const scanners = yield* Ref.make(new Map<symbol, Installation>())
   const scannerFor = (token: symbol) => (mode: Batch["mode"]) =>
-    Effect.flatMap(Ref.get(scanners), (all) => all.get(token)?.(mode) ?? Effect.fail(new ReloadUnavailable()))
+    Effect.flatMap(Ref.get(scanners), (all) => {
+      const installation = all.get(token)
+      if (!installation) return Effect.fail(new ReloadUnavailable())
+      return installation.scanner(mode).pipe(Effect.provide(installation.context))
+    })
 
   const admit = (mode: Batch["mode"]) =>
-    gate.withPermit(
-      Effect.uninterruptibleMask(() =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(state)
-          if (current._tag === "Unavailable" || current._tag === "Closing") return yield* new ReloadUnavailable()
-          if (current._tag === "Idle") {
-            const batch = yield* makeBatch(mode)
-            yield* Ref.set(state, { _tag: "Scheduled", token: current.token, scope: current.scope, batch })
-            yield* start(current.token, current.scope, batch)
-            return batch.done
-          }
-          if (current._tag === "Scheduled") return current.batch.done
-          if (current.pending) return current.pending.done
-          const pending = yield* makeBatch("reload")
-          yield* Ref.set(state, { ...current, pending })
-          return pending.done
-        }),
+    Effect.flatMap(Ref.get(state), (current) =>
+      current._tag === "Unavailable" || current._tag === "Closing"
+        ? Effect.succeed(() => Effect.void)
+        : Ref.get(admissionHooks).pipe(Effect.map((hooks) => hooks.get(current.token) ?? (() => Effect.void))),
+    ).pipe(
+      // Keep the hook outside the gate: test synchronization must not block teardown or admission.
+      Effect.flatMap((admissionHook) => admissionHook()),
+      Effect.andThen(
+        gate.withPermit(
+          Effect.uninterruptibleMask(() =>
+            Effect.gen(function* () {
+              const current = yield* Ref.get(state)
+              if (current._tag === "Unavailable" || current._tag === "Closing") return yield* new ReloadUnavailable()
+              if (current._tag === "Idle") {
+                const batch = yield* makeBatch(mode)
+                yield* Ref.set(state, { _tag: "Scheduled", token: current.token, scope: current.scope, batch })
+                yield* start(current.token, current.scope, batch)
+                return batch.done
+              }
+              if (current._tag === "Scheduled") return current.batch.done
+              if (current.pending) return current.pending.done
+              const pending = yield* makeBatch("reload")
+              yield* Ref.set(state, { ...current, pending })
+              return pending.done
+            }),
+          ),
+        ),
       ),
     )
 
-  const teardown = (token: symbol, workerScope: Scope.Closeable): Effect.Effect<void> =>
+  const teardown = (token: symbol, workerScope: Scope.Closeable, release: () => Effect.Effect<void>): Effect.Effect<void> =>
     gate.withPermit(
       Effect.uninterruptible(
         Effect.gen(function* () {
@@ -134,12 +164,15 @@ const make = Effect.gen(function* () {
       ),
     ).pipe(
       Effect.andThen(Scope.close(workerScope, Exit.void)),
+      // A replacement may only observe Unavailable after plugin-owned committed resources close.
+      Effect.andThen(release()),
       Effect.andThen(
         gate.withPermit(
           Ref.update<State>(state, (current) => (current._tag === "Closing" && current.token === token ? { _tag: "Unavailable" } : current)),
         ),
       ),
       Effect.andThen(Ref.update(scanners, (all) => (all.delete(token), all))),
+      Effect.andThen(Ref.update(admissionHooks, (all) => (all.delete(token), all))),
     )
 
   const install: Internal["install"] = (scanner, options) =>
@@ -147,23 +180,26 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const token = Symbol("ConfigSkillReload")
         const workerScope = yield* Scope.make()
+        const context = yield* Effect.context()
+        const admissionHook = yield* Test.admissionHook
         yield* gate.withPermit(
           Effect.gen(function* () {
             const current = yield* Ref.get(state)
             if (current._tag !== "Unavailable") return yield* Effect.die("ConfigSkillReload is already installed")
-            yield* Ref.update(scanners, (all) => (all.set(token, scanner), all))
+            yield* Ref.update(scanners, (all) => (all.set(token, { scanner, context }), all))
+            yield* Ref.update(admissionHooks, (all) => (all.set(token, admissionHook), all))
             yield* Ref.set(state, { _tag: "Idle", token, scope: workerScope })
           }),
         )
-        yield* Effect.addFinalizer(() => teardown(token, workerScope))
+        yield* Effect.addFinalizer(() => teardown(token, workerScope, options?.release ?? (() => Effect.void)))
         const initial = options?.initial ? yield* admit("initial").pipe(Effect.orDie) : undefined
         return {
           initial: initial ? awaitBatch(initial) : Effect.fail(new ReloadUnavailable()),
+          // Invalidation only performs the short, masked admission transition. `start()` owns the
+          // scanner worker, so this never waits for scan completion or creates an admission fiber.
           invalidate: () =>
             admit("reload").pipe(
               Effect.catch((error) => Effect.logWarning("failed to admit skill reload", { error })),
-              Effect.asVoid,
-              Effect.forkIn(workerScope),
               Effect.asVoid,
             ),
         }

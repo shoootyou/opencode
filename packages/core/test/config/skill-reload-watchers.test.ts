@@ -4,7 +4,8 @@
  * @behavior
  *   - Candidate watcher streams are released when discovery fails, is interrupted, or plugin teardown interrupts it.
  *   - Commit transfers candidate streams to the plugin, retires the old streams after notification, and teardown releases all streams.
- *   - Notification defects and interrupts release retiring streams without releasing the committed generation.
+ *   - Notification defects and interrupts release retiring streams without releasing the committed generation or becoming ReloadFailed.
+ *   - Reinstallation remains unavailable until committed watcher teardown has finished.
  * @edge-cases
  *   - Teardown fails active and pending callers with ReloadTeardown without starting a successor.
  * @see ../../src/config/plugin/skill.ts
@@ -43,6 +44,7 @@ const it = testEffect(
 function activeWatcher() {
   const active = new Map<string, number>()
   const waiters = new Set<() => void>()
+  let blockedUnsubscribe: { readonly started: () => void; readonly release: Promise<void> } | undefined
   const notify = () => waiters.forEach((resolve) => resolve())
   const native = Watcher.Native.of({
     subscribe: (input) =>
@@ -52,6 +54,12 @@ function activeWatcher() {
           notify()
           return {
             unsubscribe: async () => {
+            const blocked = blockedUnsubscribe
+            blockedUnsubscribe = undefined
+            if (blocked) {
+              blocked.started()
+              await blocked.release
+            }
             const count = active.get(key)! - 1
             if (count === 0) active.delete(key)
             else active.set(key, count)
@@ -64,6 +72,18 @@ function activeWatcher() {
     layer: Watcher.layer().pipe(Layer.provide(Layer.succeed(Watcher.Native, native))),
     count: (target?: string) => (target ? active.get(path.resolve(target)) ?? 0 : [...active.values()].reduce((a, b) => a + b, 0)),
     reset: () => active.clear(),
+    blockNextUnsubscribe: () => {
+      let release: (() => void) | undefined
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let started: (() => void) | undefined
+      const startedPromise = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      blockedUnsubscribe = { started: started!, release: released }
+      return { started: startedPromise, release: release! }
+    },
     waitFor: (target: string, count: number) =>
       new Promise<void>((resolve) => {
         const check = () => {
@@ -213,8 +233,14 @@ describe("ConfigSkillPlugin watcher ownership", () => {
             }
             const exit = yield* Fiber.await(reload)
             expect(Exit.isFailure(exit)).toBe(true)
+            if (mode === "defect" && Exit.isFailure(exit)) {
+              expect(Cause.hasDies(exit.cause)).toBe(true)
+              expect(Cause.hasFails(exit.cause)).toBe(false)
+            }
             expect(watcher.count(old)).toBe(0)
             expect(watcher.count(next)).toBe(1)
+            // The committed watcher has moved to `next` before notification; the old generation
+            // has retired even when notification terminates with a defect or interruption.
             yield* Scope.close(scope, Exit.void)
             expect(watcher.count()).toBe(0)
           }),
@@ -267,6 +293,40 @@ describe("ConfigSkillPlugin watcher ownership", () => {
           }
           expect(calls).toBe(callsBeforeClose)
           expect(watcher.count()).toBe(0)
+        }),
+      ),
+    ),
+  )
+
+  it.live("rejects replacement while Closing waits for committed watcher teardown, then permits it after cleanup", () =>
+    Effect.promise(() => fs.mkdtemp("/tmp/opencode-watcher-")).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const committed = path.join(tmp, "committed")
+          yield* Effect.promise(() => skill(committed, "committed"))
+          watcher.reset()
+          const scope = yield* install(
+            SkillDiscovery.Service.of({ pull: () => Effect.succeed([AbsolutePath.make(committed)]) }),
+            entries(["https://test/catalog"]),
+            () => Effect.void,
+          )
+          yield* Effect.promise(() => watcher.waitFor(committed, 1)).pipe(Effect.timeout("1 second"))
+          const blocked = watcher.blockNextUnsubscribe()
+          const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkScoped)
+          yield* Effect.promise(() => blocked.started).pipe(Effect.timeout("1 second"))
+          yield* Effect.gen(function* () {
+            const reload = yield* ConfigSkillReload.Service
+            const replacementScope = yield* Scope.make()
+            const whileClosing = yield* reload
+              .install(() => Effect.succeed({ count: 2 }))
+              .pipe(Scope.provide(replacementScope), Effect.exit)
+            expect(Exit.isFailure(whileClosing)).toBe(true)
+            blocked.release()
+            yield* Fiber.join(closing)
+            yield* reload.install(() => Effect.succeed({ count: 2 })).pipe(Scope.provide(replacementScope))
+            expect(yield* reload.reload()).toEqual({ count: 2 })
+            yield* Scope.close(replacementScope, Exit.void)
+          }).pipe(Effect.ensuring(Effect.sync(blocked.release)))
         }),
       ),
     ),

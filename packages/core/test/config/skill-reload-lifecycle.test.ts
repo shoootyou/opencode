@@ -6,14 +6,17 @@
  *   - Cancelling an initiating or pending-ticket caller interrupts only that caller, never shared installation-owned work.
  *   - A finite burst has one running scan and exactly one follow-up; a burst during that follow-up gets one further scan.
  *   - Closing an installation settles active and pending tickets with ReloadTeardown and starts no successor.
+ *   - Shared scanner work always runs with the execution context captured at installation, not a triggering caller's overrides.
  *   - Installation rejects duplicates and Closing blocks reinstall until teardown completes.
+ *   - Background invalidations return after admission and never await the shared scan.
  * @edge-cases
  *   - Scanner interruption settles waiters with interruption and a later reload can run.
+ *   - Replacing invalidate's fork with asVoid is equivalent today because admit returns a Deferred without awaiting it; non-waiting behavior is instead proven through production event handshakes.
  * @mutation-targets running Deferred reuse; pending promotion; caller-owned worker; catchCause finalizer; teardown ticket completion; installation token check
  * @see ../../src/config/skill-reload.ts
  */
 import { describe, expect, test } from "bun:test"
-import { Cause, Deferred, Effect, Exit, Fiber, Scope } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Scope } from "effect"
 import { ConfigSkillReload } from "@opencode/core/config/skill-reload"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -96,6 +99,60 @@ describe("ConfigSkillReload lifecycle", () => {
       expect(yield* Fiber.join(firstFollowUp)).toEqual({ count: 2 })
       expect(yield* Fiber.join(secondFollowUp)).toEqual({ count: 3 })
       expect(scans).toBe(3)
+    }),
+  )
+
+  it.live("runs the active and pending shared scans with the installation context rather than either caller context", () =>
+    Effect.gen(function* () {
+      const reload = yield* ConfigSkillReload.Service
+      const ExecutionOwner = Context.Reference("test/config-skill-reload/execution-owner", {
+        defaultValue: () => "missing",
+      })
+      const owner = yield* Scope.make()
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const observed: string[] = []
+      let scans = 0
+      yield* reload
+        .install(() =>
+          Effect.gen(function* () {
+            scans += 1
+            observed.push(yield* ExecutionOwner)
+            if (scans === 1) {
+              yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(firstRelease)
+            }
+            return { count: scans }
+          }),
+        )
+        .pipe(Scope.provide(owner), Effect.provideService(ExecutionOwner, "installation"))
+
+      const active = yield* reload.reload().pipe(Effect.provideService(ExecutionOwner, "active-caller"), Effect.forkScoped)
+      yield* Deferred.await(firstStarted).pipe(Effect.timeout("1 second"))
+      const pending = yield* reload.reload().pipe(Effect.provideService(ExecutionOwner, "pending-caller"), Effect.forkScoped)
+      yield* Deferred.succeed(firstRelease, undefined)
+      expect(yield* Fiber.join(active)).toEqual({ count: 1 })
+      expect(yield* Fiber.join(pending)).toEqual({ count: 2 })
+      expect(observed).toEqual(["installation", "installation"])
+      yield* Scope.close(owner, Exit.void)
+    }),
+  )
+
+  it.live("returns background invalidation after admission without awaiting its blocked shared scan", () =>
+    Effect.gen(function* () {
+      const reload = yield* ConfigSkillReload.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const registration = yield* reload.install(() =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as({ count: 1 }),
+        ),
+      )
+      const invalidation = yield* registration.invalidate().pipe(Effect.forkScoped)
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
+      expect(Exit.isSuccess(yield* Fiber.join(invalidation).pipe(Effect.timeout("100 millis"), Effect.exit))).toBe(true)
+      yield* Deferred.succeed(release, undefined)
     }),
   )
 
