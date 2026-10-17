@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.sr,
   "session.queue.attachments.few": "Још {{count}} прилога",
   "settings.workspaces.sessions.filtered.few": "{{count}} сесије",
   "settings.workspaces.deleteAll.confirm.few": "Овим ћете трајно избрисати {{count}} изабрана радна стабла.",

@@ -2,7 +2,10 @@ import en from "./en"
 
 type Keys = keyof typeof en
 
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.ne,
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "फाइल",
   "desktop.menu.edit": "सम्पादन गर्नुहोस्",

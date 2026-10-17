@@ -71,7 +71,10 @@ const desktop = [
   "Pasirinkti priedai viršija {{limit}} MB ribą",
 ]
 
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.lt,
   ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
   "command.category.suggested": "Siūloma",
   "command.category.view": "Rodinys",

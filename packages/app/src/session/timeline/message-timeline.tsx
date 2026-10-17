@@ -571,8 +571,10 @@ function MessageTimelineView(
                                 {language.t("common.export")}…
                               </Menu.Item>
                             </Show>
-                            <Show when={!parentID()}>
-                              {/* TODO: Need a session archive API. */}
+                             <Show when={!parentID()}>
+                              <Menu.Item disabled={props.pending.archive()} onSelect={() => void props.action.archive()}>
+                                {language.t(props.action.archiveLabel())}
+                              </Menu.Item>
                               <Menu.Separator />
                               <Menu.Item onSelect={() => props.action.showDelete(id)}>
                                 {language.t("common.delete")}…

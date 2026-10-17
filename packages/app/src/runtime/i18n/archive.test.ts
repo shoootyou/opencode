@@ -1,0 +1,21 @@
+/**
+ * @spec-handoff
+ * @interface archive locale dictionaries: Record<ArchiveKey, string>
+ * @behavior
+ *   - Provides every archive UI key in each of the 63 locale dictionaries.
+ *   - Preserves each key's interpolation placeholder multiset.
+ * @see RFC 057 Addendum A.7
+ */
+import { expect, test } from "bun:test"
+import en from "./en"
+import { DESKTOP_NATIVE_LOCALES } from "./desktop-native"
+const expected = { "common.unarchive": "Unarchive", "command.session.archive": "Archive session", "command.session.archive.description": "Archive the current session", "command.session.unarchive": "Unarchive session", "command.session.unarchive.description": "Restore the current session to the session list", "command.session.archivedBrowse": "Browse archived sessions", "command.session.archivedBrowse.description": "Find and restore an archived session", "dialog.archivedSessions.title": "Archived sessions", "dialog.archivedSessions.empty": "No archived sessions found", "dialog.archivedSessions.error": "Could not load archived sessions", "dialog.archivedSessions.loading": "Loading archived sessions…", "session.archive.refreshFailed": "Session updated, but its details could not be refreshed." } as const
+const slots = (value: string) => [...value.matchAll(/{{([^{}]+)}}/g)].map((x) => x[1]).sort()
+test("defines exact English archive copy and 63 locale own-property parity", async () => {
+  expect(DESKTOP_NATIVE_LOCALES).toHaveLength(63); expect(new Set(DESKTOP_NATIVE_LOCALES).size).toBe(63)
+  for (const [key, value] of Object.entries(expected)) expect(en[key as keyof typeof en]).toBe(value)
+  for (const locale of DESKTOP_NATIVE_LOCALES) {
+    const dictionary = locale === "en" ? en : (await import(`./${locale}.ts`)).dict
+    for (const key of Object.keys(expected)) { expect(Object.hasOwn(dictionary, key)).toBe(true); expect(dictionary[key as keyof typeof dictionary]?.trim()).not.toBe(""); expect(slots(dictionary[key as keyof typeof dictionary] as string)).toEqual(slots(expected[key as keyof typeof expected])) }
+  }
+})

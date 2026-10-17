@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.my,
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ဖိုင်",
   "desktop.menu.edit": "တည်းဖြတ်ပါ။",

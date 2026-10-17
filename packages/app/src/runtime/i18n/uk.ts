@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.uk,
   "session.queue.attachments.few": "Ще {{count}} вкладення",
   "session.queue.attachments.many": "Ще {{count}} вкладень",
   "settings.workspaces.sessions.filtered.few": "{{count}} сесії",

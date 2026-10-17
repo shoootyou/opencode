@@ -1,0 +1,35 @@
+/**
+ * @spec-handoff
+ * @interface createSessionArchiveActions(deps): ArchiveActions; isArchivedSession(session): boolean
+ * @behavior
+ *   - PATCHes a captured server/session once, then canonically hydrates it.
+ *   - Is pending per server/session and reports update or refresh failures once.
+ * @edge-cases
+ *   - Epoch zero is archived; null and undefined are active.
+ * @see RFC 057 Addendum A.2
+ */
+import { expect, test } from "bun:test"
+import { canOpenReferencedSession, createSessionArchiveActions, isArchivedSession, isSessionVisibleInPalette } from "./archive"
+
+const session = (archived?: number | null) => ({ id: "a", location: { directory: "/a" }, time: { archived } })
+test("archives once per captured server/session, hydrates, and releases pending", async () => {
+  const calls: string[] = []
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => (release = resolve))
+  const actions = createSessionArchiveActions({ update: async (x) => { calls.push(`update:${x.server}:${x.archive}`); await wait }, sync: async (x) => calls.push(`sync:${x.server}`), toast: () => calls.push("toast"), now: () => 0, onPendingChange: () => calls.push("pending") })
+  const first = actions.archiveSession({ server: "a:b", sessionID: "c" })
+  expect(actions.isPending({ server: "a:b", sessionID: "c" })).toBe(true)
+  expect(await actions.setSessionArchive({ server: "a:b", sessionID: "c", archive: null })).toBe(false)
+  release(); expect(await first).toBe(true)
+  expect(calls).toEqual(["pending", "update:a:b:0", "sync:a:b", "pending"])
+})
+test("reports update failure without sync but treats refresh failure as committed", async () => {
+  const update = new Error("update"); const refresh = new Error("refresh"); const notices: string[] = []
+  expect(await createSessionArchiveActions({ update: async () => { throw update }, sync: async () => {}, toast: (n) => notices.push(n.kind), now: () => 1 }).archiveSession({ server: "s", sessionID: "x" })).toBe(false)
+  expect(await createSessionArchiveActions({ update: async () => {}, sync: async () => { throw refresh }, toast: (n) => notices.push(n.kind), now: () => 1 }).setSessionArchive({ server: "s", sessionID: "x", archive: null })).toBe(true)
+  expect(notices).toEqual(["update", "refresh"])
+})
+test("uses numeric archive presence, including epoch zero", () => {
+  expect(isArchivedSession(session(0))).toBe(true); expect(isArchivedSession(session(null))).toBe(false); expect(isArchivedSession(session())).toBe(false)
+  expect(isSessionVisibleInPalette(session(0))).toBe(false); expect(canOpenReferencedSession(session(0))).toBe(false)
+})

@@ -20,11 +20,13 @@ import { useSettings } from "@/settings/model"
 import { timelinePreset } from "@opencode/session-ui/timeline/detail"
 import type { SessionInfo } from "@opencode/client/promise"
 import { resolveProjectForSession, resolveSessionDetailsProject } from "@/shell/layout/helpers"
+import { createSessionArchiveActions } from "@/session/archive"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
   init: () => {
     const server = useServers()
+    const language = useLanguage()
 
     const serverHealth = useServerHealth(
       () => server.list,
@@ -91,12 +93,32 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       }
     })
 
+    const sessionArchive = createSessionArchiveActions({
+      update: async ({ server: key, sessionID, archive }) => {
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+        if (!ctx) throw new Error("Server is unavailable")
+        await ctx.sdk.api.session.update({ sessionID, archive })
+      },
+      sync: async ({ server: key, sessionID }) => {
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+        if (!ctx) throw new Error("Server is unavailable")
+        ctx.data.session.invalidate(sessionID)
+        await ctx.data.session.sync(sessionID)
+      },
+      toast: ({ kind, error }) => {
+        const title = language.t("common.requestFailed")
+        showToast({ title, description: kind === "refresh" ? language.t("session.archive.refreshFailed") : formatServerError(error, language.t) })
+      },
+      now: Date.now,
+    })
+
     return {
       servers: {
         list: () => server.list,
         health: serverHealth,
       },
       models,
+      sessionArchive,
       ensureServerCtx(conn: ServerConnection.Any) {
         return ensureServerCtx(conn)
       },

@@ -71,7 +71,10 @@ const desktop = [
   "Valin viðhengi fara yfir {{limit}} MB hámarkið",
 ]
 
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.is,
   ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
   "command.category.suggested": "Tillögur",
   "command.category.view": "Skoða",

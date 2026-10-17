@@ -2,7 +2,10 @@ import en from "./en"
 
 type Keys = keyof typeof en
 
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.no,
   "common.color.orange": "oransje",
   "common.color.yellow": "gul",
   "common.color.cyan": "cyan",

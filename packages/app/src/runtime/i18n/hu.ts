@@ -71,7 +71,10 @@ const desktop = [
   "A kiválasztott mellékletek meghaladják a(z) {{limit}} MB-os korlátot",
 ]
 
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.hu,
   ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
   "command.category.suggested": "Javasolt",
   "command.category.view": "Nézet",

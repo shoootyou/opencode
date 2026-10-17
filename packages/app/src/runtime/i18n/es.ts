@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.es,
   "common.color.orange": "naranja",
   "common.color.yellow": "amarillo",
   "common.color.cyan": "cian",

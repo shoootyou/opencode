@@ -24,6 +24,8 @@ import { createTimelineProjection } from "./projection"
 import { useServer } from "@/runtime/server/current"
 import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui/timeline/projection"
+import { useGlobal } from "@/runtime/server/runtime"
+import { archiveLabelKey, runTimelineArchive } from "./archive-model"
 
 const emptyMessages: SessionMessageInfo[] = []
 
@@ -67,6 +69,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
+  const global = useGlobal()
 
   const visibleMessages = createMemo(() => {
     const id = input.session.identity.sessionID()
@@ -182,7 +185,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
     queuedCompactionIDs,
   })
 
-  const [pending, setPending] = createStore({ rename: false })
+  const [pending, setPending] = createStore({ rename: false, archive: false })
 
   const errorMessage = (cause: unknown) =>
     Option.match(decodeErrorData(cause), {
@@ -248,6 +251,35 @@ export function createTimelineController(input: { session: TimelineSessionSource
         title: language.t("toast.session.export.failed.title"),
         description: error instanceof Error ? error.message : language.t("toast.session.export.failed.description"),
       })
+    }
+  }
+
+  const archive = async () => {
+    const session = input.session.data.info()
+    const sessionID = input.session.identity.sessionID()
+    if (!session || !sessionID || pending.archive) return false
+    setPending("archive", true)
+    try {
+      return await runTimelineArchive(
+        { target: { server: server.key, sessionID }, session, sessions: data.session.list() },
+        {
+          setArchive: global.sessionArchive.setSessionArchive,
+          now: Date.now,
+          isActive: () => input.session.identity.sessionID() === sessionID,
+          currentRoute: () => {
+            const route = input.session.identity.params
+            return route.id ? { server: server.key, sessionID: route.id } : undefined
+          },
+          navigate: async (landing) => {
+            if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+            await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
+          },
+          removeTabs: (detail) => notifySessionTabsRemoved({ ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] }),
+          toast: ({ kind, error }) => showToast({ title: language.t("common.requestFailed"), description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error) }),
+        },
+      )
+    } finally {
+      setPending("archive", false)
     }
   }
 
@@ -334,12 +366,15 @@ export function createTimelineController(input: { session: TimelineSessionSource
       shellToolPartsExpanded,
       editToolPartsExpanded,
     },
-    pending: {
-      rename: () => pending.rename,
+      pending: {
+        rename: () => pending.rename,
+        archive: () => pending.archive,
     },
     action: {
       rename,
       export: exportSession,
+      archive,
+      archiveLabel: () => archiveLabelKey(input.session.data.info()),
       showDelete: (id: string) => dialog.show(() => <DeleteDialog sessionID={id} />),
       navigateParent: () => {
         const id = input.session.data.parentID()

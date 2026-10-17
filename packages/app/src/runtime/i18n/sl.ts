@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.sl,
   "session.queue.attachments.two": "Še {{count}} priponki",
   "session.queue.attachments.few": "Še {{count}} priponke",
   "settings.workspaces.sessions.filtered.two": "{{count}} seji",

@@ -1,4 +1,7 @@
+import { ARCHIVE_MESSAGES } from "./archive"
+
 export const dict = {
+  ...ARCHIVE_MESSAGES.sk,
   "session.queue.attachments.few": "Plus {{count}} prílohy",
   "session.queue.attachments.many": "Plus {{count}} prílohy",
   "settings.workspaces.sessions.filtered.few": "{{count}} relácie",
