@@ -5,7 +5,7 @@ import type { Entry } from "@opencode/schema/config"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import path from "path"
-import { Cause, Effect, Exit, FiberMap, PubSub, Scope, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, FiberMap, PubSub, Scope, Stream } from "effect"
 import { Config } from "../../config.js"
 import { ConfigSkillReload } from "../skill-reload.js"
 import { Watcher } from "../../filesystem/watcher.js"
@@ -22,10 +22,15 @@ type BackgroundResources = {
   readonly watcherSignals: PubSub.PubSub<string>
   readonly watcherConsumers: FiberMap.FiberMap<string>
 }
+type StartupHook = (input: { readonly publishInternalConfigUpdate: () => Effect.Effect<void> }) => Effect.Effect<void>
 
 // This deep-module hook is test-only; production callers only receive the plugin definition.
 const backgroundResources = new Set<BackgroundResources>()
 export const Test = {
+  // The hook is deliberately kept in this deep module so production plugin consumers do not gain a seam.
+  startupHooks: Context.Reference("@opencode/ConfigSkillPlugin/Test/startup-hooks", {
+    defaultValue: (): StartupHook => () => Effect.void,
+  }),
   backgroundStatus: () =>
     Effect.sync(() => Array.from(backgroundResources)).pipe(
       Effect.flatMap((resources) =>
@@ -236,20 +241,30 @@ export const Plugin = define({
       { onlyIfMissing: true, startImmediately: true },
     )
     const configSignals = yield* PubSub.subscribe(configUpdates)
+    const startupHook = yield* Test.startupHooks
+    const configConsumerReady = yield* Deferred.make<void>()
+    const upstreamReady = yield* Deferred.make<void>()
+    yield* startupHook({ publishInternalConfigUpdate: () => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid) })
     yield* FiberMap.run(
       configConsumers,
       "config-signals",
       Stream.fromSubscription(configSignals).pipe(Stream.runForEach(() => registration.invalidate())),
       { onlyIfMissing: true, startImmediately: true },
     )
-    yield* registration.initial.pipe(
-      Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
-      Effect.asVoid,
-    )
+    yield* Deferred.succeed(configConsumerReady, undefined)
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),
       Stream.runForEach(() => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
+    )
+    yield* Deferred.succeed(upstreamReady, undefined)
+    // Both streams are started before the initial batch. The waits stay interruptible so scope
+    // shutdown cannot leave activation waiting on a readiness signal.
+    yield* Deferred.await(configConsumerReady)
+    yield* Deferred.await(upstreamReady)
+    yield* registration.initial.pipe(
+      Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
+      Effect.asVoid,
     )
   }),
 })

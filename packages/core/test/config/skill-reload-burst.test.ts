@@ -8,6 +8,7 @@
  *   - A required-source failure preserves the committed catalogue and reports ReloadFailed.
  *   - config.updated is level-triggered: while a scan is blocked, a burst of 1,000 updates has at most one outstanding signal and one admission fiber.
  *   - A config.updated event emitted synchronously when the host stream subscribes during activation causes exactly one follow-up scan.
+ *   - An event emitted before or during the blocked initial scan is retained and causes exactly one follow-up scan.
  * @edge-cases
  *   - Watcher and config events admit work without waiting for the active scan.
  * @see ../../src/config/plugin/skill.ts
@@ -434,6 +435,75 @@ describe("ConfigSkillPlugin reload burst", () => {
           yield* Deferred.await(upstreamDelivered).pipe(Effect.timeout("1 second"))
           yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
           expect(scans).toBe(2)
+        }),
+      ),
+    ),
+  )
+
+  it.live("retains host config events published before and during the blocked initial scan", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const upstream = yield* PubSub.unbounded<PluginEvent>()
+          const initialAdmissionReady = yield* Deferred.make<void>()
+          const releaseInitialAdmission = yield* Deferred.make<void>()
+          const initialStarted = yield* Deferred.make<void>()
+          const releaseInitial = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const upstreamSubscribed = yield* Deferred.make<void>()
+          let scans = 0
+          yield* Effect.promise(() => write(tmp.path, "startup-gap"))
+          const discovery = SkillDiscovery.Service.of({
+            pull: () =>
+              Effect.sync(() => ++scans).pipe(
+                Effect.tap((scan) =>
+                  scan === 1
+                    ? Deferred.succeed(initialStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseInitial)))
+                    : Deferred.succeed(secondStarted, undefined),
+                ),
+                Effect.as([AbsolutePath.make(path.join(tmp.path, "remote"))]),
+              ),
+          })
+          const skill = yield* Skill.Service
+          const entries = [new Document({ type: "document", info: decode({ skills: ["https://skills.example.test/catalog"] }) })]
+          const activation = yield* ConfigSkillPlugin.Plugin.effect(
+            host({
+              event: {
+                subscribe: () =>
+                  Stream.unwrap(
+                    PubSub.subscribe(upstream).pipe(
+                      Effect.tap(() => Deferred.succeed(upstreamSubscribed, undefined)),
+                      Effect.map(Stream.fromSubscription),
+                    ),
+                  ),
+              },
+              skill: {
+                list: () => skill.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
+                transform: skill.transform,
+                reload: skill.reload,
+              },
+            }),
+          ).pipe(
+            Effect.provideService(SkillDiscovery.Service, discovery),
+            Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: tmp.path })),
+            Effect.provide(locationLayer),
+            Effect.provide(Watcher.testLayer),
+            Effect.provide(Config.testLayer(entries)),
+            Effect.provideService(ConfigSkillReload.Test.admissionHook, () =>
+              Deferred.succeed(initialAdmissionReady, undefined).pipe(Effect.andThen(Deferred.await(releaseInitialAdmission))),
+            ),
+            Effect.forkScoped,
+          )
+          yield* Deferred.await(initialAdmissionReady).pipe(Effect.timeout("1 second"))
+          yield* Deferred.await(upstreamSubscribed).pipe(Effect.timeout("1 second"))
+          yield* PubSub.publish(upstream, { type: "config.updated" } as PluginEvent)
+          yield* Deferred.succeed(releaseInitialAdmission, undefined)
+          yield* Deferred.await(initialStarted).pipe(Effect.timeout("1 second"))
+          yield* PubSub.publish(upstream, { type: "config.updated" } as PluginEvent)
+          yield* Deferred.succeed(releaseInitial, undefined)
+          yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
+          expect(scans).toBe(2)
+          yield* Fiber.join(activation)
         }),
       ),
     ),

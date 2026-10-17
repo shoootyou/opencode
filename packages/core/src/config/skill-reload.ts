@@ -1,7 +1,7 @@
 export * as ConfigSkillReload from "./skill-reload.js"
 
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { Cause, Context, Deferred, Effect, Exit, Layer, Ref, Schema, Scope, Semaphore } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Layer, Ref, Scheduler, Schema, Scope, Semaphore } from "effect"
 
 export class ReloadUnavailable extends Schema.TaggedError<ReloadUnavailable>()("ConfigSkillReload.ReloadUnavailable", {}) {}
 
@@ -33,6 +33,7 @@ type Registration = {
 type Installation = {
   readonly scanner: Scanner
   readonly context: Context.Context<never>
+  readonly scheduler: Scheduler.Scheduler
 }
 type Internal = Interface & {
   readonly install: (
@@ -104,8 +105,12 @@ const make = Effect.gen(function* () {
         const current = yield* Ref.get(state)
         if (current._tag !== "Scheduled" || current.token !== token || current.batch.id !== batch.id) return
         yield* Ref.set(state, { _tag: "Running", token, scope: workerScope, batch })
+        const installation = (yield* Ref.get(scanners)).get(token)
+        if (!installation) return yield* Effect.die("ConfigSkillReload installation disappeared while starting a worker")
         const work = Effect.suspend(() => scannerFor(token)(batch.mode)).pipe(Effect.onExit((exit) => settle(token, batch, exit)))
-        yield* Effect.forkIn(work, workerScope)
+        // `forkIn` dispatches before `work` starts, so provide the installation scheduler here rather
+        // than only replacing the scanner's context inside the worker.
+        yield* Effect.forkIn(work, workerScope).pipe(Effect.provideService(Scheduler.Scheduler, installation.scheduler))
       }),
     )
 
@@ -181,12 +186,13 @@ const make = Effect.gen(function* () {
         const token = Symbol("ConfigSkillReload")
         const workerScope = yield* Scope.make()
         const context = yield* Effect.context()
+        const scheduler = yield* Scheduler.Scheduler
         const admissionHook = yield* Test.admissionHook
         yield* gate.withPermit(
           Effect.gen(function* () {
             const current = yield* Ref.get(state)
             if (current._tag !== "Unavailable") return yield* Effect.die("ConfigSkillReload is already installed")
-            yield* Ref.update(scanners, (all) => (all.set(token, { scanner, context }), all))
+            yield* Ref.update(scanners, (all) => (all.set(token, { scanner, context, scheduler }), all))
             yield* Ref.update(admissionHooks, (all) => (all.set(token, admissionHook), all))
             yield* Ref.set(state, { _tag: "Idle", token, scope: workerScope })
           }),
