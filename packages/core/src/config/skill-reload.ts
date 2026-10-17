@@ -116,7 +116,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(Ref.get(scanners), (all) => {
       const installation = all.get(token)
       if (!installation) return Effect.fail(new ReloadUnavailable())
-      return installation.scanner(mode).pipe(Effect.provide(installation.context))
+      return installation.scanner(mode).pipe(Effect.updateContext<never, never>(() => installation.context))
     })
 
   const admit = (mode: Batch["mode"]) =>
@@ -192,9 +192,9 @@ const make = Effect.gen(function* () {
           }),
         )
         yield* Effect.addFinalizer(() => teardown(token, workerScope, options?.release ?? (() => Effect.void)))
-        const initial = options?.initial ? yield* admit("initial").pipe(Effect.orDie) : undefined
+        const initial = options?.initial ? Effect.flatMap(admit("initial"), awaitBatch) : undefined
         return {
-          initial: initial ? awaitBatch(initial) : Effect.fail(new ReloadUnavailable()),
+          initial: initial ?? Effect.fail(new ReloadUnavailable()),
           // Invalidation only performs the short, masked admission transition. `start()` owns the
           // scanner worker, so this never waits for scan completion or creates an admission fiber.
           invalidate: () =>

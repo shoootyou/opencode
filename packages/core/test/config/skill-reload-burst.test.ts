@@ -7,6 +7,7 @@
  *   - A burst during that follow-up schedules exactly one further scan.
  *   - A required-source failure preserves the committed catalogue and reports ReloadFailed.
  *   - config.updated is level-triggered: while a scan is blocked, a burst of 1,000 updates has at most one outstanding signal and one admission fiber.
+ *   - A config.updated event emitted synchronously when the host stream subscribes during activation causes exactly one follow-up scan.
  * @edge-cases
  *   - Watcher and config events admit work without waiting for the active scan.
  * @see ../../src/config/plugin/skill.ts
@@ -379,6 +380,60 @@ describe("ConfigSkillPlugin reload burst", () => {
            yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
            expect(scans).toBe(2)
            yield* Deferred.succeed(release, undefined)
+        }),
+      ),
+    ),
+  )
+
+  it.live("admits a config update emitted synchronously when the host event stream subscribes during activation", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const upstream = yield* PubSub.unbounded<PluginEvent>()
+          const upstreamDelivered = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          let scans = 0
+          yield* Effect.promise(() => write(tmp.path, "startup"))
+          const discovery = SkillDiscovery.Service.of({
+            pull: () =>
+              Effect.sync(() => ++scans).pipe(
+                Effect.tap((scan) => (scan === 2 ? Deferred.succeed(secondStarted, undefined) : Effect.void)),
+                Effect.as([AbsolutePath.make(path.join(tmp.path, "remote"))]),
+              ),
+          })
+          const skill = yield* Skill.Service
+          const entries = [new Document({ type: "document", info: decode({ skills: ["https://skills.example.test/catalog"] }) })]
+          yield* ConfigSkillPlugin.Plugin.effect(
+            host({
+              event: {
+                subscribe: () =>
+                  Stream.unwrap(
+                    PubSub.subscribe(upstream).pipe(
+                      Effect.tap((subscription) =>
+                        PubSub.publish(upstream, { type: "config.updated" } as PluginEvent).pipe(
+                          Effect.andThen(Deferred.succeed(upstreamDelivered, undefined)),
+                        ),
+                      ),
+                      Effect.map(Stream.fromSubscription),
+                    ),
+                  ),
+              },
+              skill: {
+                list: () => skill.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
+                transform: skill.transform,
+                reload: skill.reload,
+              },
+            }),
+          ).pipe(
+            Effect.provideService(SkillDiscovery.Service, discovery),
+            Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: tmp.path })),
+            Effect.provide(locationLayer),
+            Effect.provide(Watcher.testLayer),
+            Effect.provide(Config.testLayer(entries)),
+          )
+          yield* Deferred.await(upstreamDelivered).pipe(Effect.timeout("1 second"))
+          yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
+          expect(scans).toBe(2)
         }),
       ),
     ),

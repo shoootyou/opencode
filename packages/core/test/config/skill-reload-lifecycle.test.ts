@@ -6,7 +6,8 @@
  *   - Cancelling an initiating or pending-ticket caller interrupts only that caller, never shared installation-owned work.
  *   - A finite burst has one running scan and exactly one follow-up; a burst during that follow-up gets one further scan.
  *   - Closing an installation settles active and pending tickets with ReloadTeardown and starts no successor.
- *   - Shared scanner work always runs with the execution context captured at installation, not a triggering caller's overrides.
+ *   - Shared scanner work replaces caller context with the context captured at installation, including reference defaults absent from that context.
+ *   - Installation-provided services win over caller overrides for both active and pending workers while their tickets still settle to callers.
  *   - Installation rejects duplicates and Closing blocks reinstall until teardown completes.
  *   - Background invalidations return after admission and never await the shared scan.
  * @edge-cases
@@ -134,6 +135,53 @@ describe("ConfigSkillReload lifecycle", () => {
       expect(yield* Fiber.join(active)).toEqual({ count: 1 })
       expect(yield* Fiber.join(pending)).toEqual({ count: 2 })
       expect(observed).toEqual(["installation", "installation"])
+      yield* Scope.close(owner, Exit.void)
+    }),
+  )
+
+  it.live("replaces caller context with installation defaults and explicit services for active and pending scans", () =>
+    Effect.gen(function* () {
+      const reload = yield* ConfigSkillReload.Service
+      const DefaultOwner = Context.Reference("test/config-skill-reload/default-owner", {
+        defaultValue: () => 11,
+      })
+      const ExplicitOwner = Context.Reference("test/config-skill-reload/explicit-owner", {
+        defaultValue: () => 7,
+      })
+      const owner = yield* Scope.make()
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const observed: { defaultOwner: number; explicitOwner: number }[] = []
+      let scans = 0
+      yield* reload
+        .install(() =>
+          Effect.gen(function* () {
+            scans += 1
+            observed.push({ defaultOwner: yield* DefaultOwner, explicitOwner: yield* ExplicitOwner })
+            if (scans === 1) {
+              yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(firstRelease)
+            }
+            return { count: scans }
+          }),
+        )
+        .pipe(Scope.provide(owner), Effect.provideService(ExplicitOwner, 44))
+
+      const active = yield* reload
+        .reload()
+        .pipe(Effect.provideService(DefaultOwner, 22), Effect.provideService(ExplicitOwner, 55), Effect.forkScoped)
+      yield* Deferred.await(firstStarted).pipe(Effect.timeout("1 second"))
+      const pending = yield* reload
+        .reload()
+        .pipe(Effect.provideService(DefaultOwner, 33), Effect.provideService(ExplicitOwner, 66), Effect.forkScoped)
+      yield* Deferred.succeed(firstRelease, undefined)
+
+      expect(yield* Fiber.join(active)).toEqual({ count: 1 })
+      expect(yield* Fiber.join(pending)).toEqual({ count: 2 })
+      expect(observed).toEqual([
+        { defaultOwner: 11, explicitOwner: 44 },
+        { defaultOwner: 11, explicitOwner: 44 },
+      ])
       yield* Scope.close(owner, Exit.void)
     }),
   )

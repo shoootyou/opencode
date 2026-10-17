@@ -235,6 +235,13 @@ export const Plugin = define({
       Stream.fromSubscription(updates).pipe(Stream.debounce("100 millis"), Stream.runForEach(() => registration.invalidate())),
       { onlyIfMissing: true, startImmediately: true },
     )
+    const configSignals = yield* PubSub.subscribe(configUpdates)
+    yield* FiberMap.run(
+      configConsumers,
+      "config-signals",
+      Stream.fromSubscription(configSignals).pipe(Stream.runForEach(() => registration.invalidate())),
+      { onlyIfMissing: true, startImmediately: true },
+    )
     yield* registration.initial.pipe(
       Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
       Effect.asVoid,
@@ -243,13 +250,6 @@ export const Plugin = define({
       Stream.filter((event) => event.type === "config.updated"),
       Stream.runForEach(() => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
-    )
-    const configSignals = yield* PubSub.subscribe(configUpdates)
-    yield* FiberMap.run(
-      configConsumers,
-      "config-signals",
-      Stream.fromSubscription(configSignals).pipe(Stream.runForEach(() => registration.invalidate())),
-      { onlyIfMissing: true, startImmediately: true },
     )
   }),
 })
