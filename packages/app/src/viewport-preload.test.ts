@@ -1,5 +1,14 @@
 /**
  * @spec-handoff
+ * @interface vite.js default export preload plugins: transformIndexHtml(html: string): string
+ * @behavior
+ *   - The real theme and viewport Vite preload plugins inline their respective public-script bodies
+ *     for root-relative and relative `<script src>` forms, leaving no `src` attribute.
+ *   - The inlined theme script remains before the viewport script; unrelated scripts are unchanged.
+ * @edge-cases
+ *   - The two preload transforms must work when the input uses `/<file>.js` or `./<file>.js`.
+ * @see ../vite.js
+ *
  * @interface packages/app/public/oc-viewport-preload.js (IIFE, no exports)
  *   Runs at first paint (synchronous `<script>` in `<head>`, right after the
  *   theme-preload script, no `defer`/`async`/`type="module"`). Sets the CSS
@@ -40,12 +49,55 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import type { Plugin } from "vite"
+
+const { default: vitePlugins }: { default: Plugin[] } = await import(new URL("../vite.js", import.meta.url).href)
 
 const PROPERTY = "--app-viewport-height"
 
 const src = await Bun.file(new URL("../public/oc-viewport-preload.js", import.meta.url)).text()
 
 const run = () => Function(src)()
+
+const themePreloadSource = await Bun.file(new URL("../public/oc-theme-preload.js", import.meta.url)).text()
+
+function applyPreloadPlugins(html: string) {
+  return vitePlugins
+    .filter(
+      (plugin): plugin is Plugin & { transformIndexHtml: { handler: (html: string) => string } } =>
+        (plugin.name === "opencode-desktop:theme-preload" || plugin.name === "opencode-desktop:viewport-preload") &&
+        typeof plugin.transformIndexHtml === "object" &&
+        plugin.transformIndexHtml !== null &&
+        "handler" in plugin.transformIndexHtml,
+    )
+    .reduce((result, plugin) => {
+      expect(plugin.transformIndexHtml.handler).toBeFunction()
+      return plugin.transformIndexHtml.handler(result)
+    }, html)
+}
+
+describe("Vite preload inlining", () => {
+  for (const sourcePrefix of ["/", "./"]) {
+    test(`inlines theme and viewport public scripts from ${sourcePrefix === "/" ? "root-relative" : "relative"} sources`, () => {
+      const unrelated = '<script id="unrelated-script" src="/unrelated.js"></script>'
+      const html = [
+        '<script id="oc-theme-preload-script" src="' + sourcePrefix + 'oc-theme-preload.js"></script>',
+        '<script id="oc-viewport-preload-script" src="' + sourcePrefix + 'oc-viewport-preload.js"></script>',
+        unrelated,
+      ].join("\n")
+
+      const transformed = applyPreloadPlugins(html)
+
+      expect(transformed).toContain(`<script id="oc-theme-preload-script">${themePreloadSource}</script>`)
+      expect(transformed).toContain(`<script id="oc-viewport-preload-script">${src}</script>`)
+      expect(transformed).not.toMatch(/id="oc-(?:theme|viewport)-preload-script" src=/)
+      expect(transformed.indexOf('id="oc-theme-preload-script"')).toBeLessThan(
+        transformed.indexOf('id="oc-viewport-preload-script"'),
+      )
+      expect(transformed).toContain(unrelated)
+    })
+  }
+})
 
 function propertyValue() {
   return document.documentElement.style.getPropertyValue(PROPERTY)
@@ -112,12 +164,20 @@ describe("viewport preload", () => {
   test("does not attach a resize listener when not standalone", () => {
     mockMatchMedia(false)
     mockInnerHeight(812)
+    const originalAddEventListener = window.addEventListener
+    const listeners: string[] = []
+    window.addEventListener = ((type: string) => {
+      listeners.push(type)
+    }) as typeof window.addEventListener
 
-    run()
-    mockInnerHeight(1000)
-    window.dispatchEvent(new Event("resize"))
+    try {
+      run()
+    } finally {
+      window.addEventListener = originalAddEventListener
+    }
 
     expect(propertyValue()).toBe("")
+    expect(listeners).not.toContain("resize")
   })
 
   test("sets the property synchronously from visualViewport.height when standalone", () => {

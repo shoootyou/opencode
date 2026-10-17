@@ -1,55 +1,54 @@
-export * as SkillDiscovery from "./discovery"
+export * as SkillDiscovery from "./discovery.js"
 
 import path from "path"
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { FSUtil } from "../fs-util"
-import { Global } from "../global"
-import { makeGlobalNode } from "../effect/app-node"
-import { httpClient } from "../effect/app-node-platform"
-import { AbsolutePath } from "../schema"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
+import { FSUtil } from "@opencode/util/fs-util"
+import { Global } from "@opencode/util/global"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
+import { httpClient } from "@opencode/util/effect/app-node-platform"
+import { AbsolutePath } from "../schema.js"
+import { Hash } from "@opencode/util/hash"
 
 const skillConcurrency = 4
 const fileConcurrency = 8
 
-function isSafeSegment(value: string) {
-  return (
-    value.length > 0 &&
-    value !== "." &&
-    value !== ".." &&
-    !value.includes("/") &&
-    !value.includes("\\") &&
-    !value.includes("\0")
-  )
+function isSafeComponent(value: string) {
+  try {
+    const decoded = decodeURIComponent(value)
+    return (
+      value.length > 0 &&
+      decoded.length > 0 &&
+      decoded !== "." &&
+      decoded !== ".." &&
+      !decoded.includes("/") &&
+      !decoded.includes("\\") &&
+      !/[\u0000-\u001f\u007f]/.test(decoded) &&
+      !decoded.includes("?") &&
+      !decoded.includes("#") &&
+      !URL.canParse(decoded) &&
+      !path.posix.isAbsolute(decoded) &&
+      !path.win32.isAbsolute(decoded)
+    )
+  } catch {
+    return false
+  }
 }
 
 function isSafeRelativePath(value: string) {
-  const segments = value.split("/")
   return (
     value.length > 0 &&
-    !value.includes("\\") &&
-    !value.includes("\0") &&
-    !value.includes("?") &&
-    !value.includes("#") &&
-    !URL.canParse(value) &&
     !path.posix.isAbsolute(value) &&
     !path.win32.isAbsolute(value) &&
-    segments.every((segment) => {
-      try {
-        const decoded = decodeURIComponent(segment)
-        return (
-          decoded.length > 0 &&
-          decoded !== "." &&
-          decoded !== ".." &&
-          !decoded.includes("/") &&
-          !decoded.includes("\\") &&
-          !decoded.includes("\0")
-        )
-      } catch {
-        return false
-      }
-    })
+    value.split("/").every(isSafeComponent)
   )
+}
+
+function encodePath(value: string) {
+  return value
+    .split("/")
+    .map((component) => encodeURIComponent(decodeURIComponent(component)))
+    .join("/")
 }
 
 class IndexSkill extends Schema.Class<IndexSkill>("SkillDiscovery.IndexSkill")({
@@ -63,10 +62,10 @@ class Index extends Schema.Class<Index>("SkillDiscovery.Index")({
 }) {}
 
 export interface Interface {
-  readonly pull: (url: string) => Effect.Effect<AbsolutePath[]>
+  readonly pull: (url: string) => Effect.Effect<AbsolutePath[], unknown>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SkillDiscovery") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/SkillDiscovery") {}
 
 const layer = Layer.effect(
   Service,
@@ -105,15 +104,14 @@ const layer = Layer.effect(
           http.execute,
           Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
           Effect.catch((error) =>
-            Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.as(undefined)),
+            Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.andThen(Effect.die(error))),
           ),
         )
-        if (!data) return []
 
-        const sourceRoot = path.resolve(global.cache, "skills", Bun.hash(base).toString(16))
+        const sourceRoot = path.resolve(global.cache, "skills", Hash.fast(base))
         return yield* Effect.forEach(
           data.skills.flatMap((skill) => {
-            if (!isSafeSegment(skill.name)) {
+            if (!isSafeComponent(skill.name)) {
               return []
             }
             if (!skill.files.includes("SKILL.md") && !skill.files.includes(`${skill.name}.md`)) {
@@ -125,17 +123,23 @@ const layer = Layer.effect(
               return []
             }
 
-            const skillUrl = new URL(`${encodeURIComponent(skill.name)}/`, source)
+            const skillUrl = new URL(`${encodePath(skill.name)}/`, source)
             const versionFile = path.join(root, ".opencode-version")
             const files = skill.files.map((file) => {
               if (!isSafeRelativePath(file)) return undefined
               let resource: URL
               try {
-                resource = new URL(file, skillUrl)
+                resource = new URL(encodePath(file), skillUrl)
               } catch {
                 return undefined
               }
-              if (resource.origin !== source.origin) return undefined
+              if (
+                resource.origin !== source.origin ||
+                resource.search ||
+                resource.hash ||
+                !resource.pathname.startsWith(skillUrl.pathname)
+              )
+                return undefined
 
               const destination = path.resolve(root, file)
               if (!FSUtil.contains(root, destination) || destination === root) return undefined
@@ -145,10 +149,9 @@ const layer = Layer.effect(
                 file,
               }
             })
-            if (files.some((file) => file === undefined)) {
+            if (!files.every((file): file is { url: string; destination: string; file: string } => file !== undefined))
               return []
-            }
-            return [{ skill, root, versionFile, files: files as { url: string; destination: string; file: string }[] }]
+            return [{ skill, root, versionFile, files }]
           }),
           ({ skill, root, versionFile, files }) =>
             Effect.gen(function* () {
@@ -156,7 +159,7 @@ const layer = Layer.effect(
               const current =
                 version === undefined
                   ? undefined
-                  : yield* fs.readFileStringSafe(versionFile).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                  : yield* fs.readFileStringSafe(versionFile).pipe(Effect.orElseSucceed(() => undefined))
               if (version === undefined || current === version) {
                 yield* Effect.forEach(files, (file) => download(file.url, file.destination), {
                   concurrency: fileConcurrency,
@@ -193,10 +196,7 @@ const layer = Layer.effect(
                       if (cached) yield* fs.remove(backup, { recursive: true, force: true }).pipe(Effect.ignore)
                     }),
                   )
-                }).pipe(
-                  Effect.catch((error) => Effect.logError("failed to refresh skill", { skill: skill.name, error })),
-                  Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)),
-                )
+                }).pipe(Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)))
               }
               const exists =
                 (yield* fs.exists(path.join(root, "SKILL.md")).pipe(Effect.orDie)) ||

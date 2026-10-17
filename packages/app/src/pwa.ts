@@ -4,28 +4,23 @@
 // fallback (`/index.html`) when an active service worker controls the client.
 // All other paths (API, events, etc.) pass through to the network.
 //
-// This constant is the single source of truth: `vite.config.ts` imports it
+// This constant is the single source of truth: `vite.pwa.ts` imports it
 // into the `VitePWA({ workbox: { navigateFallbackAllowlist } })` option so the
 // allowlist is assertable in tests without evaluating the full Vite config.
 //
-// SPA routes (from app.tsx / entry.tsx Route definitions):
+// SPA routes (from shell/routes/routes.tsx):
 //   - `/`                       (root)
-//   - `/:dir/session/:id?`      (session view)
-//   - `/login`                  (custom login page rendered by entry.tsx)
+//   - `/server/:key/session/:id` (session view)
+//   - `/login`                  (custom login page)
+//   - `/settings`               (settings)
 //   - `/new-session`            (draft route)
-//   - `/:dir`                   (bare directory; `:dir` is a URL-safe base64 slug,
-//                                a single `[A-Za-z0-9_-]+` segment — see
-//                                packages/core/src/util/encode.ts). The negative
-//                                lookahead excludes `/doc`, the one auth-protected
-//                                single-segment server route reachable by top-level
-//                                navigation (server.ts docRoute). Other API
-//                                single-segment paths are SSE/fetch/WS, never
-//                                navigation requests, so the SW fallback never fires.
+//   - `/:slug`                  (ordinary single-segment SPA navigation)
 export const navigateFallbackAllowlist = [
   /^\/$/,
-  /^\/[^/]+\/session(\/[^/]+)?$/,
   /^\/login$/,
+  /^\/settings$/,
   /^\/new-session$/,
+  /^\/server\/[^/]+\/session\/[^/]+$/,
   /^\/(?!doc$)[A-Za-z0-9_-]+$/,
 ]
 
@@ -43,5 +38,11 @@ export const navigateFallbackAllowlist = [
 // query (`/cdn-cgi/`, `/cdn-cgi/access/login`, `/cdn-cgi?x=1`) by anchoring on a
 // boundary — `[/?]` or end of string — so a lookalike SPA slug like
 // `/cdn-cgi-console` is NOT denied. This is the single source of truth:
-// `vite.config.ts` imports it into `VitePWA({ workbox: { navigateFallbackDenylist } })`.
-export const navigateFallbackDenylist = [/^\/cdn-cgi(?:[/?]|$)/]
+// `vite.pwa.ts` imports it into `VitePWA({ workbox: { navigateFallbackDenylist } })`.
+export const navigateFallbackDenylist = [
+  /^\/api(?:[/?]|$)/,
+  /^\/auth(?:[/?]|$)/,
+  /^\/cdn-cgi(?:[/?]|$)/,
+  /^\/doc(?:[/?]|$)/,
+  /^\/openapi\.json(?:[?]|$)/,
+]

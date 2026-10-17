@@ -1,7 +1,18 @@
+/**
+ * @spec-handoff
+ * @interface SessionsQuery { archived?: boolean }
+ * @behavior
+ *   - Session-list requests accept an explicit archived=true inclusion flag.
+ *   - Omitting archived preserves the active-only server default.
+ * @edge-cases
+ *   - The flag composes with cursor, roots, and limit rather than replacing them.
+ * @see ../src/groups/session.ts
+ */
 import { describe, expect, test } from "bun:test"
-import { Effect, Schema } from "effect"
-import { SessionHistoryQuery, SessionsCursor } from "../src/groups/session"
-import { Session } from "@opencode-ai/schema/session"
+import { Effect } from "effect"
+import { Schema } from "effect"
+import { SessionsCursor, SessionsQuery } from "../src/groups/session.js"
+import { Session } from "@opencode/schema/session"
 
 describe("SessionsCursor", () => {
   test("round trips without Node globals", async () => {
@@ -17,10 +28,11 @@ describe("SessionsCursor", () => {
   })
 })
 
-describe("SessionHistoryQuery", () => {
-  test("decodes numeric paging inputs", async () => {
-    const query = await Effect.runPromise(Schema.decodeUnknownEffect(SessionHistoryQuery)({ after: "3", limit: "10" }))
-
-    expect(query).toEqual({ after: 3, limit: 10 })
-  })
+test("accepts explicit archived inclusion alongside the root-only query", () => {
+  expect(
+    Schema.decodeUnknownSync(SessionsQuery)({
+      archived: "true",
+      parentID: "null",
+    }),
+  ).toMatchObject({ archived: true, parentID: null })
 })

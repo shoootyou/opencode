@@ -1,19 +1,23 @@
 import { ServerAuth } from "../auth"
-import { UnauthorizedError } from "@opencode-ai/protocol/errors"
-import { Authorization } from "@opencode-ai/protocol/middleware/authorization"
-export { Authorization } from "@opencode-ai/protocol/middleware/authorization"
-import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
-import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpServerRequest } from "effect/unstable/http"
+import { UnauthorizedError } from "@opencode/protocol/errors"
+import { Authorization } from "@opencode/protocol/middleware/authorization"
+export { Authorization } from "@opencode/protocol/middleware/authorization"
+import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
+import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/persistent-pty"
+import { isPairingConnectURL } from "@opencode/protocol/groups/server"
+import { Effect, Layer, Redacted } from "effect"
+import { Base64 } from "effect/encoding"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
 
 const AUTH_TOKEN_QUERY = "auth_token"
+const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 
 function emptyCredential() {
   return { username: "", password: Redacted.make("") }
 }
 
 function decodeCredential(input: string) {
-  return Effect.fromResult(Encoding.decodeBase64String(input)).pipe(
+  return Effect.fromResult(Base64.decodeString(input)).pipe(
     Effect.match({
       onFailure: emptyCredential,
       onSuccess: (header) => {
@@ -34,12 +38,38 @@ function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
   return Effect.succeed(emptyCredential())
 }
 
-// Reduced to: authorized passthrough → bare 401. The static frontend is served
-// publicly; this API-only middleware no longer issues a 302 redirect or a
-// www-authenticate header. We drop ONLY the header — the bodyful, SDK-visible
-// UnauthorizedError (the typed contract declared above) is preserved so clients
-// still receive a structured 401, parity with opencode's HttpApiError.Unauthorized.
-// The frontend detects the 401 status and drives login.
+const UNAUTHORIZED_MESSAGE = "Authentication required"
+
+// Browsers show a native credentials prompt for a Basic challenge even on fetch, which would stall the web app
+// before it can show its own sign-in screen. Only non-browser clients and page navigations get the challenge.
+function challengeRequest(request: HttpServerRequest.HttpServerRequest) {
+  const mode = request.headers["sec-fetch-mode"]
+  return mode === undefined || mode === "navigate"
+}
+
+// Matches what the Authorization middleware encodes, for requests rejected before the HttpApi runs.
+export function unauthorizedResponse(request: HttpServerRequest.HttpServerRequest) {
+  return HttpServerResponse.jsonUnsafe(
+    { _tag: "UnauthorizedError", message: UNAUTHORIZED_MESSAGE },
+    { status: 401, headers: challengeRequest(request) ? { "www-authenticate": WWW_AUTHENTICATE } : undefined },
+  )
+}
+
+export function authorizedRequest(request: HttpServerRequest.HttpServerRequest, config: ServerAuth.Info) {
+  return credentialFromRequest(request).pipe(
+    Effect.map((credential) => ServerAuth.authorized(credential, config) || authorizedSessionCookie(request, config)),
+  )
+}
+
+function authorizedSessionCookie(request: HttpServerRequest.HttpServerRequest, config: ServerAuth.Info) {
+  const token = request.cookies[ServerAuth.sessionCookieName(request.headers.host)]
+  if (!token) return false
+  // Same-site pages on other ports still send this cookie, so only same-origin requests may use it.
+  const origin = request.headers.origin
+  if (origin !== undefined && URL.parse(origin)?.host !== request.headers.host) return false
+  return ServerAuth.verifySession(token, config)
+}
+
 export const authorizationLayer = Layer.effect(
   Authorization,
   Effect.gen(function* () {
@@ -48,12 +78,17 @@ export const authorizationLayer = Layer.effect(
     return Authorization.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
-        // credential checks here; the connect handler consumes and validates the ticket.
-        if (hasPtyConnectTicketURL(new URL(request.url, "http://localhost"))) return yield* effect
-        const credential = yield* credentialFromRequest(request)
-        if (ServerAuth.authorized(credential, config)) return yield* effect
-        return yield* new UnauthorizedError({ message: "Authentication required" })
+        // Ticketed PTY connects (browsers cannot set headers on WebSocket upgrades) and pairing links
+        // skip credential checks here; their handlers consume and validate the ticket or code.
+        const url = new URL(request.url, "http://localhost")
+        if (hasPtyConnectTicketURL(url) || hasPersistentPtyConnectTicketURL(url) || isPairingConnectURL(url))
+          return yield* effect
+        if (yield* authorizedRequest(request, config)) return yield* effect
+        if (challengeRequest(request))
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
+          )
+        return yield* new UnauthorizedError({ message: UNAUTHORIZED_MESSAGE })
       }),
     )
   }),
