@@ -128,3 +128,107 @@ test("scopes sessions to the active session location", async () => {
     await temporary[Symbol.asyncDispose]()
   }
 })
+
+test("renders configured archive actions without reporting a TextBuffer failure", async () => {
+  const events = createEventStream()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/location") {
+      const directory = url.searchParams.get("location[directory]") ?? process.cwd()
+      return json({ directory, project: { id: "proj_fixture", directory, canonical: directory } })
+    }
+    if (url.pathname !== "/api/session") return undefined
+    return json({
+      data: [
+        {
+          id: "ses_active",
+          projectID: "proj_fixture",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 2 },
+          title: "Active session",
+          location: { directory: process.cwd() },
+        },
+      ],
+      cursor: {},
+    })
+  }, events)
+  const temporary = await tmpdir()
+  let storage!: ReturnType<typeof useStorage>
+
+  function Probe() {
+    const dialog = useDialog()
+    storage = useStorage()
+    onMount(() => dialog.replace(() => <DialogSessionList />))
+    return null
+  }
+
+  const app = await testRender(
+    () => (
+      <TestTuiContexts paths={{ state: temporary.path }}>
+        <TuiAppProvider value={{ name: "test", version: "test", channel: "test" }}>
+          <StorageProvider>
+            <ArgsProvider>
+              <ConfigProvider
+                config={createTuiResolvedConfig({
+                  keybinds: {
+                    "session.archive.toggle": "ctrl+a",
+                    "session.archived.toggle_visibility": "ctrl+v",
+                  },
+                })}
+              >
+                <Keymap.Provider>
+                  <ToastProvider>
+                    <RouteProvider>
+                      <ClientProvider api={createApi(calls.fetch)}>
+                        <PermissionProvider>
+                          <DataProvider directory={process.cwd()}>
+                            <LocationProvider>
+                              <SessionTabsProvider>
+                                <ThemeProvider mode="dark" source={emptyThemeSource}>
+                                  <LocalProvider>
+                                    <DialogProvider>
+                                      <Probe />
+                                    </DialogProvider>
+                                  </LocalProvider>
+                                </ThemeProvider>
+                              </SessionTabsProvider>
+                            </LocationProvider>
+                          </DataProvider>
+                        </PermissionProvider>
+                      </ClientProvider>
+                    </RouteProvider>
+                  </ToastProvider>
+                </Keymap.Provider>
+              </ConfigProvider>
+            </ArgsProvider>
+          </StorageProvider>
+        </TuiAppProvider>
+      </TestTuiContexts>
+    ),
+    { width: 100, height: 30, kittyKeyboard: true },
+  )
+  const errors: unknown[] = []
+  const renderer = app.renderer as unknown as { handleError(error: unknown): void }
+  const reportError = renderer.handleError.bind(renderer)
+  renderer.handleError = (error: unknown) => {
+    errors.push(error)
+    reportError(error)
+  }
+  app.renderer.start()
+
+  try {
+    const frame = await app.waitForFrame(
+      (value) =>
+        value.includes("archive/unarchive") &&
+        value.includes("ctrl+a") &&
+        value.includes("show archived") &&
+        value.includes("ctrl+v"),
+    )
+    expect(frame).not.toContain("Failed to create TextBuffer")
+    expect(errors.map(String).join("\n")).not.toContain("Failed to create TextBuffer")
+  } finally {
+    app.renderer.destroy()
+    await storage.flush()
+    await temporary[Symbol.asyncDispose]()
+  }
+})

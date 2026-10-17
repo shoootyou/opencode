@@ -24,6 +24,53 @@ import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
 import { projectName } from "../util/project"
 import { useLocation } from "../context/location"
 
+type SessionListItem = {
+  parentID?: string
+  time: { archived?: number }
+}
+
+export type SessionListModelInput<Location = string> = {
+  query: string
+  allProjects: boolean
+  location: Location
+  showArchived: boolean
+}
+
+type SessionListResult<T extends SessionListItem, Location> = {
+  identity: SessionListModelInput<Location>
+  sessions: T[]
+  error?: unknown
+}
+
+export function createSessionListModel<Location>(input: SessionListModelInput<Location>) {
+  const identity = { ...input }
+  const request = identity.showArchived ? { archived: true as const } : {}
+  const matches = <T extends SessionListItem>(session: T) =>
+    !session.parentID && (identity.showArchived ? typeof session.time.archived === "number" : session.time.archived === undefined)
+  const sameIdentity = (result: SessionListResult<SessionListItem, Location> | undefined) =>
+    result?.identity !== undefined &&
+    result.identity.query === identity.query &&
+    result.identity.allProjects === identity.allProjects &&
+    JSON.stringify(result.identity.location) === JSON.stringify(identity.location) &&
+    result.identity.showArchived === identity.showArchived
+
+  return {
+    identity,
+    request,
+    visible<T extends SessionListItem>(input: {
+      local: T[]
+      latest?: SessionListResult<T, Location>
+      result?: SessionListResult<T, Location>
+      loading: boolean
+    }) {
+      const local = input.local.filter(matches)
+      if (input.loading && sameIdentity(input.latest)) return input.latest!.sessions.filter(matches)
+      if (sameIdentity(input.result) && !input.result!.error) return input.result!.sessions.filter(matches)
+      return local
+    },
+  }
+}
+
 export function DialogSessionList() {
   const dialog = useDialog()
   const route = useRoute()
@@ -33,11 +80,14 @@ export function DialogSessionList() {
   const local = useLocal()
   const sessionTabs = useSessionTabs()
   const config = useConfig().data
+  const archiveToggleBound = config.keybinds.get("session.archive.toggle").length > 0
   const toast = useToast()
   const activeLocation = useLocation()
   const [filter, setFilter] = createSignal("")
   const shortcuts = Keymap.useShortcuts()
   const [search, setSearch] = createDebouncedSignal("", 150)
+  const [showArchived, setShowArchived] = createSignal(false)
+  const [archivePending, setArchivePending] = createSignal(false)
   const [toDelete, setToDelete] = createSignal<string>()
   const [prefs, updatePrefs] = useStorage().store("session-list", {
     initial: { allProjects: config.tabs?.scope !== "cwd" },
@@ -48,13 +98,14 @@ export function DialogSessionList() {
     activeLocation.ref ??
     data.location.default()
 
-  const [searchResults, { mutate: setSearchResults }] = createResource(
+  const [searchResults, { mutate: setSearchResults, refetch: refetchSearchResults }] = createResource(
     () => ({
       query: search().trim(),
       allProjects: allProjects(),
       location: pickerLocation(),
+      showArchived: showArchived(),
     }),
-    async ({ query, allProjects, location }) => {
+    async ({ query, allProjects, location, showArchived }) => {
       try {
         if (!data.location.info(location)) await data.location.sync(location)
         const current = data.location.info(location)
@@ -69,15 +120,24 @@ export function DialogSessionList() {
                   subpath: path.relative(current.project.directory, current.directory).replaceAll("\\", "/"),
                 }),
           ...(query ? { search: query } : {}),
+          ...(showArchived ? { archived: true } : {}),
           limit: 50,
           order: "desc",
           parentID: null,
         })
-        return { query, allProjects, sessions: response.data, error: undefined }
+        return {
+          identity: { query, allProjects, location, showArchived },
+          sessions: response.data,
+          error: undefined,
+        }
       } catch (error) {
         // A transient transport failure must degrade search, not crash the TUI
         // through the root ErrorBoundary when the errored resource is read.
-        return { query, allProjects, sessions: [] as SessionInfo[], error }
+        return {
+          identity: { query, allProjects, location, showArchived },
+          sessions: [] as SessionInfo[],
+          error,
+        }
       }
     },
   )
@@ -99,20 +159,30 @@ export function DialogSessionList() {
     )
   })
   const sessions = createMemo(() => {
-    const query = filter().trim()
-    const local = localSessions()
-    if (query !== search().trim()) return searchResults.latest?.sessions ?? local
-    if (searchResults.loading) return searchResults.latest?.sessions ?? []
-    const result = searchResults()
-    if (result?.query !== query || result.allProjects !== allProjects() || result.error) return local
-    return result.sessions
+    return createSessionListModel({
+      query: filter().trim(),
+      allProjects: allProjects(),
+      location: pickerLocation(),
+      showArchived: showArchived(),
+    }).visible({
+      local: localSessions(),
+      latest: searchResults.latest,
+      result: searchResults(),
+      loading: searchResults.loading,
+    })
   })
   const searchState = createMemo(() => {
     const query = filter().trim()
     if (query !== search().trim() || searchResults.loading)
       return { message: query ? "Searching sessions…" : "Loading sessions…", error: false }
     const result = searchResults()
-    if (result?.query === query && result.error)
+    if (
+      result?.identity.query === query &&
+      result.identity.allProjects === allProjects() &&
+      JSON.stringify(result.identity.location) === JSON.stringify(pickerLocation()) &&
+      result.identity.showArchived === showArchived() &&
+      result.error
+    )
       return {
         message: query ? "Could not search sessions. Change the search to try again." : "Could not load sessions.",
         error: true,
@@ -164,7 +234,7 @@ export function DialogSessionList() {
       return {
         title: deleting
           ? `Press ${shortcuts.get("session.delete")} again to confirm`
-          : withTimestampedFallback(session),
+          : `${withTimestampedFallback(session)}${typeof session.time.archived === "number" ? " [archived]" : ""}`,
         value: session.id,
         category,
         footer,
@@ -213,18 +283,22 @@ export function DialogSessionList() {
         setFilter(query)
         setSearch(query)
       }}
-      bindings={[
-        {
-          bind: "ctrl+a",
-          title: allProjects() ? "Show current directory sessions" : "Show all project sessions",
-          group: "Dialog",
-          run: () => {
-            void updatePrefs((draft) => {
-              draft.allProjects = !draft.allProjects
-            }).catch(() => {})
-          },
-        },
-      ]}
+      bindings={
+        archiveToggleBound
+          ? []
+          : [
+              {
+                bind: "ctrl+a",
+                title: allProjects() ? "Show current directory sessions" : "Show all project sessions",
+                group: "Dialog",
+                run: () => {
+                  void updatePrefs((draft) => {
+                    draft.allProjects = !draft.allProjects
+                  }).catch(() => {})
+                },
+              },
+            ]
+      }
       emptyView={
         <box paddingLeft={4} paddingRight={4}>
           <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
@@ -284,10 +358,54 @@ export function DialogSessionList() {
           onTrigger: (option: { value: string; title: string }) =>
             DialogSessionRename.show(dialog, option.value, option.title),
         },
+        {
+          command: "session.archive.toggle",
+          title: "archive/unarchive",
+          disabled: archivePending(),
+          onTrigger: (option: { value: string }) => {
+            if (archivePending()) return
+            const session = sessions().find((session) => session.id === option.value)
+            if (!session) return
+            setArchivePending(true)
+            void (async () => {
+              try {
+                await client.api.session.update({
+                  sessionID: session.id,
+                  archive: typeof session.time.archived === "number" ? null : Date.now(),
+                })
+                data.session.invalidate(session.id)
+                void data.session.sync(session.id).catch((error) => {
+                  toast.show({
+                    message: `Session updated, but refresh failed: ${errorMessage(error)}`,
+                    variant: "error",
+                    duration: 5000,
+                  })
+                })
+                await refetchSearchResults()
+              } catch (error) {
+                toast.show({
+                  message: `Failed to update session archive: ${errorMessage(error)}`,
+                  variant: "error",
+                  duration: 5000,
+                })
+              } finally {
+                setArchivePending(false)
+              }
+            })()
+          },
+        },
+        {
+          command: "session.archived.toggle_visibility",
+          title: showArchived() ? "hide archived" : "show archived",
+          selection: "none",
+          onTrigger: () => setShowArchived((value) => !value),
+        },
       ]}
       footerHints={[
         ...quickSwitchFooterHints(),
-        { title: allProjects() ? "current directory" : "all projects", label: "ctrl+a", side: "right" },
+        ...(archiveToggleBound
+          ? []
+          : [{ title: allProjects() ? "current directory" : "all projects", label: "ctrl+a", side: "right" as const }]),
       ]}
     />
   )

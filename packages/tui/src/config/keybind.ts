@@ -121,6 +121,8 @@ export const Definitions = {
   "session.fork": keybind("none", "Fork session from message"),
   "session.rename": keybind("ctrl+r", "Rename session"),
   "session.delete": keybind("ctrl+d", "Delete session"),
+  "session.archive.toggle": keybind("none", "Archive or unarchive the selected session"),
+  "session.archived.toggle_visibility": keybind("none", "Show or hide archived sessions"),
   "session.share": keybind("none", "Share current session"),
   "session.unshare": keybind("none", "Unshare current session"),
   "session.interrupt": keybind("escape", "Interrupt current session"),
