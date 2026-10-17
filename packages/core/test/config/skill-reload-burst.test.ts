@@ -28,6 +28,7 @@ import { ForkCapabilities } from "@opencode/core/fork/capabilities/service"
 import { ReloadCommand } from "@opencode/core/fork/plugin/reload-command"
 import { Location } from "@opencode/core/location"
 import { AbsolutePath } from "@opencode/core/schema"
+import { SessionEvent } from "@opencode/core/session/event"
 import { Skill } from "@opencode/core/skill"
 import { SkillDiscovery } from "@opencode/core/skill/discovery"
 import { SkillTool } from "@opencode/core/tool/plugin/skill"
@@ -35,6 +36,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Document, Info } from "@opencode/schema/config"
+import { DISPLAY_ONLY_MARKER } from "@opencode/schema/fork-command-feedback"
 import { Session } from "@opencode/schema/session"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
@@ -144,22 +146,19 @@ describe("ConfigSkillPlugin reload burst", () => {
           const publicWaiter = yield* reload.reload().pipe(Effect.forkScoped)
           yield* Deferred.await(started[0]).pipe(Effect.timeout("1 second"))
 
-          const command = yield* Command.Service
-          const commandResults: string[] = []
-          yield* ReloadCommand.Plugin.effect(
-            host({
+           const command = yield* Command.Service
+           const commandFeedback: unknown[] = []
+           yield* (yield* Bus.Service).project(SessionEvent.Synthetic, (event) =>
+             Effect.sync(() => commandFeedback.push(event.data)),
+           )
+           yield* ReloadCommand.Plugin.effect(
+             host({
               command: {
                 list: () => command.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
                 transform: command.transform,
                 reload: command.reload,
               },
-              session: {
-                synthetic: (input) =>
-                  Effect.sync(() => {
-                    commandResults.push(input.text)
-                  }) as never,
-              },
-            }),
+             }),
           ).pipe(Effect.provideService(ForkCapabilities.Service, capabilities(reload.reload)))
           let toolReload: (() => Effect.Effect<unknown, unknown>) | undefined
           yield* SkillTool.Plugin.effect(
@@ -220,7 +219,17 @@ describe("ConfigSkillPlugin reload burst", () => {
           expect(yield* Fiber.join(publicWaiter)).toEqual({ count: 1 })
           yield* Fiber.join(commandWaiter)
           expect(yield* Fiber.join(toolWaiter)).toMatchObject({ output: { count: 2 } })
-          expect(commandResults).toEqual(["Reloaded 2 skills."])
+           expect(commandFeedback).toEqual([
+             expect.objectContaining({
+               text: "Reloaded 2 skills.",
+               description: "Reloaded 2 skills.",
+               metadata: expect.objectContaining({
+                 [DISPLAY_ONLY_MARKER]: true,
+                 command: "reload",
+                 outcome: "success",
+               }),
+             }),
+           ])
           expect(yield* Fiber.join(newerBurst)).toEqual({ count: 2 })
           expect(scans).toBe(4)
         }),

@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gte, or, sql } from "drizzle-orm"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import { Effect, Schema } from "effect"
 import { Database } from "../database/database.js"
 import { MessageDecodeError } from "./error.js"
@@ -103,7 +104,9 @@ const messageEntries = Effect.fnUntraced(function* (
   // Skipped native checkpoints are not textual summaries. Their original transcript remains available.
   return entries.filter(
     (entry) =>
-      !(entry.message.type === "system" && native && entry.seq < native.seq) && replayable(entry.message, boundary),
+      !(entry.message.type === "system" && native && entry.seq < native.seq) &&
+      !isDisplayOnly(entry.message) &&
+      replayable(entry.message, boundary),
   )
 })
 

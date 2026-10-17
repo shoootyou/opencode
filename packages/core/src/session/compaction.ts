@@ -14,6 +14,7 @@ import {
   UnknownProviderError,
   type Usage,
 } from "@opencode/ai"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import type { StreamOptions } from "@opencode/ai/route"
 import type { SessionCompactionResult } from "@opencode/plugin/effect/session"
 import type { SessionError } from "@opencode/schema/session-error"
@@ -790,6 +791,7 @@ const messageToText = (message: SessionMessage.Info): string => {
         .join("\n")
 
     case "synthetic":
+      if (isDisplayOnly(message)) return ""
       return `[Synthetic context]: ${message.text}`
 
     case "skill":

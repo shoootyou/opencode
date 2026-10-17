@@ -1,4 +1,5 @@
 import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode/client/promise"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import { shellResultFailed } from "../message/current-tool-state"
 
 export const timelineCategories = ["shell", "edit", "thinking", "subagents", "notices", "tools"] as const
@@ -112,6 +113,7 @@ export function timelineNoticeRequired(message: SessionMessageInfo) {
   if (message.type === "compaction") return message.status !== "completed"
 
   if (message.type !== "synthetic") return false
+  if (isDisplayOnly(message)) return true
   const metadata = message.metadata
 
   return (

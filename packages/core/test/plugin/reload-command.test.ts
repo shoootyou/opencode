@@ -22,7 +22,9 @@ import { Mcp } from "@opencode/core/mcp/index"
 import { ReloadCommand } from "@opencode/core/fork/plugin/reload-command"
 import { ForkCapabilities } from "@opencode/core/fork/capabilities/service"
 import { AbsolutePath } from "@opencode/core/schema"
+import { SessionEvent } from "@opencode/core/session/event"
 import { Session } from "@opencode/schema/session"
+import { DISPLAY_ONLY_MARKER } from "@opencode/schema/fork-command-feedback"
 import { SessionInbox } from "@opencode/schema/session-inbox"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -60,7 +62,9 @@ describe("ReloadCommand.Plugin /reload", () => {
   it.effect("formats zero and many reload counts without a model prompt", () =>
     Effect.gen(function* () {
       const command = yield* Command.Service
-      const synthetic: string[] = []
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       for (const count of [0, 3]) {
         yield* ReloadCommand.Plugin.effect(
           host({
@@ -69,20 +73,6 @@ describe("ReloadCommand.Plugin /reload", () => {
               transform: command.transform,
               reload: command.reload,
             },
-            session: {
-              synthetic: (input) =>
-                Effect.sync(() => {
-                  synthetic.push(input.text)
-                  return SessionInbox.Synthetic.make({
-                    id: SessionMessage.ID.create(),
-                    sessionID: input.sessionID,
-                    time: { created: DateTime.makeUnsafe(0) },
-                    type: "synthetic",
-                    payload: { text: input.text },
-                    delivery: "steer",
-                  })
-                }),
-            },
           }),
         ).pipe(
           Effect.provideService(ForkCapabilities.Service, capturedCapabilities(() => Effect.succeed({ count }))),
@@ -90,14 +80,19 @@ describe("ReloadCommand.Plugin /reload", () => {
         )
         yield* command.execute({ name: "reload", invocation })
       }
-      expect(synthetic).toEqual(["Reloaded 0 skills.", "Reloaded 3 skills."])
+      expect(feedback).toEqual([
+        expect.objectContaining({ description: "Reloaded 0 skills.", metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }) }),
+        expect.objectContaining({ description: "Reloaded 3 skills.", metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }) }),
+      ])
     }),
   )
 
   it.effect("maps unavailable but propagates interruption and defects without synthetic admission", () =>
     Effect.gen(function* () {
       const command = yield* Command.Service
-      const synthetic: string[] = []
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       const run = (reload: ForkCapabilities.Interface["reload"]) =>
         ReloadCommand.Plugin.effect(
           host({
@@ -106,20 +101,6 @@ describe("ReloadCommand.Plugin /reload", () => {
               transform: command.transform,
               reload: command.reload,
             },
-            session: {
-              synthetic: (input) =>
-                Effect.sync(() => {
-                  synthetic.push(input.text)
-                  return SessionInbox.Synthetic.make({
-                    id: SessionMessage.ID.create(),
-                    sessionID: input.sessionID,
-                    time: { created: DateTime.makeUnsafe(0) },
-                    type: "synthetic",
-                    payload: { text: input.text },
-                    delivery: "steer",
-                  })
-                }),
-            },
           }),
         ).pipe(Effect.provideService(ForkCapabilities.Service, capturedCapabilities(reload)), Effect.provide(locationLayer))
 
@@ -127,6 +108,13 @@ describe("ReloadCommand.Plugin /reload", () => {
       expect(yield* command.execute({ name: "reload", invocation }).pipe(Effect.flip)).toMatchObject({
         message: "Skill reload is unavailable for this location.",
       })
+      expect(feedback).toEqual([
+        expect.objectContaining({
+          description: "Skill reload is unavailable for this location.",
+          metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }),
+        }),
+      ])
+      feedback.length = 0
 
       yield* run(() => Effect.never)
       const interrupted = yield* command.execute({ name: "reload", invocation }).pipe(Effect.interruptible, Effect.forkScoped)
@@ -138,33 +126,21 @@ describe("ReloadCommand.Plugin /reload", () => {
       yield* run(() => Effect.die(defect))
       const exit = yield* command.execute({ name: "reload", invocation }).pipe(Effect.exit)
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
-      expect(synthetic).toEqual([])
+      expect(feedback).toEqual([])
     }),
   )
   it.effect("maps typed teardown to its exact safe message without converting interruption or admitting a synthetic result", () =>
     Effect.gen(function* () {
       const command = yield* Command.Service
-      const synthetic: string[] = []
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       yield* ReloadCommand.Plugin.effect(
         host({
           command: {
             list: () => command.list().pipe(Effect.map((data) => ({ location: { directory }, data }))),
             transform: command.transform,
             reload: command.reload,
-          },
-          session: {
-            synthetic: (input) =>
-              Effect.sync(() => {
-                synthetic.push(input.text)
-                return SessionInbox.Synthetic.make({
-                  id: SessionMessage.ID.create(),
-                  sessionID: input.sessionID,
-                  time: { created: DateTime.makeUnsafe(0) },
-                  type: "synthetic",
-                  payload: { text: input.text },
-                  delivery: "steer",
-                })
-              }),
           },
         }),
       ).pipe(
@@ -176,14 +152,21 @@ describe("ReloadCommand.Plugin /reload", () => {
       )
       const failure = yield* command.execute({ name: "reload", invocation }).pipe(Effect.flip)
       expect(failure).toMatchObject({ message: "Skill reload was interrupted because this location closed." })
-      expect(synthetic).toEqual([])
+      expect(feedback).toEqual([
+        expect.objectContaining({
+          description: "Skill reload was interrupted because this location closed.",
+          metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }),
+        }),
+      ])
     }),
   )
   it.effect("lists reload and records its reload count without sending a model prompt", () =>
     Effect.gen(function* () {
       const command = yield* Command.Service
       const reload = yield* ConfigSkillReload.Service
-      const synthetic: { text: string; resume?: boolean }[] = []
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       let prompts = 0
       let calls = 0
       yield* reload.install(() => Effect.sync(() => ({ count: ++calls })))
@@ -207,18 +190,6 @@ describe("ReloadCommand.Plugin /reload", () => {
                   delivery: "steer",
                 })
               }),
-            synthetic: (input) =>
-              Effect.sync(() => {
-                synthetic.push({ text: input.text, resume: input.resume })
-                return SessionInbox.Synthetic.make({
-                  id: SessionMessage.ID.make("msg_reload_result"),
-                  sessionID: input.sessionID,
-                  time: { created: DateTime.makeUnsafe(0) },
-                  type: "synthetic",
-                  payload: { text: input.text },
-                  delivery: "steer",
-                })
-              }),
           },
         }),
       ).pipe(
@@ -232,7 +203,12 @@ describe("ReloadCommand.Plugin /reload", () => {
       yield* command.execute({ name: "reload", invocation })
       expect(calls).toBe(1)
       expect(prompts).toBe(0)
-      expect(synthetic).toEqual([{ text: "Reloaded 1 skill.", resume: false }])
+      expect(feedback).toEqual([
+        expect.objectContaining({
+          description: "Reloaded 1 skill.",
+          metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }),
+        }),
+      ])
     }),
   )
 
@@ -240,6 +216,9 @@ describe("ReloadCommand.Plugin /reload", () => {
     Effect.gen(function* () {
       const command = yield* Command.Service
       const reload = yield* ConfigSkillReload.Service
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       let prompts = 0
       yield* reload.install(() => Effect.fail(new Error("sentinel reload cause")))
       yield* ReloadCommand.Plugin.effect(
@@ -275,6 +254,12 @@ describe("ReloadCommand.Plugin /reload", () => {
         message: "Unable to reload skills for this location.",
       })
       expect(prompts).toBe(0)
+      expect(feedback).toEqual([
+        expect.objectContaining({
+          description: "Unable to reload skills for this location.",
+          metadata: expect.objectContaining({ [DISPLAY_ONLY_MARKER]: true }),
+        }),
+      ])
     }),
   )
 
@@ -282,6 +267,10 @@ describe("ReloadCommand.Plugin /reload", () => {
     Effect.gen(function* () {
       const command = yield* Command.Service
       const reload = yield* ConfigSkillReload.Service
+      const bus = yield* Bus.Service
+      const feedback: unknown[] = []
+      let userCalls = 0
+      yield* bus.project(SessionEvent.Synthetic, (event) => Effect.sync(() => feedback.push(event.data)))
       yield* ReloadCommand.Plugin.effect(
         host({
           command: {
@@ -294,9 +283,14 @@ describe("ReloadCommand.Plugin /reload", () => {
         Effect.provideService(ForkCapabilities.Service, capturedCapabilities(reload.reload)),
         Effect.provide(locationLayer),
       )
-      yield* command.transform((editor) => editor.add({ name: "reload", description: "User reload", execute: () => Effect.void }))
+      yield* command.transform((editor) =>
+        editor.add({ name: "reload", description: "User reload", execute: () => Effect.sync(() => void userCalls++) }),
+      )
 
       expect(yield* command.get("reload")).toEqual(Command.Info.make({ name: "reload", description: "User reload" }))
+      yield* command.execute({ name: "reload", invocation })
+      expect(userCalls).toBe(1)
+      expect(feedback).toEqual([])
     }),
   )
 })

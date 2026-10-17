@@ -7,6 +7,7 @@ import type {
   SessionMessageUser,
   SessionStatus,
 } from "@opencode/client/promise"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { createMemo, mapArray, type Accessor } from "solid-js"
 import {
@@ -412,7 +413,8 @@ export namespace Timeline {
               messages.flatMap((message) =>
                 message.type === "compaction" ||
                 message.type === "model-switched" ||
-                message.type === "location-switched"
+                message.type === "location-switched" ||
+                isDisplayOnly(message)
                   ? [message.id]
                   : [],
               ),

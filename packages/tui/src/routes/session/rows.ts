@@ -1,4 +1,5 @@
 import type { SessionInboxEnqueued, SessionMessageAssistant, SessionMessageInfo } from "@opencode/client"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import { createEffect, on, onCleanup, type Accessor } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useConfig } from "../../config"
@@ -61,9 +62,8 @@ export function createSessionRows(sessionID: Accessor<string>, onSynced?: (sessi
       pending.flatMap((item) => (item.type === "user" && item.delivery === "queue" ? [item.id] : [])),
     )
     const visible = queued.size === 0 ? messages : messages.filter((message) => !queued.has(message.id))
-    const boundary = revertBoundary()
     const rows = reduceSessionRows(
-      boundary ? visible.filter((message) => message.id < boundary) : visible,
+      filterStagedRevert(visible, revertBoundary()),
       inputs,
       turnTokens(),
       verbosity(),
@@ -320,6 +320,11 @@ export function createSessionRows(sessionID: Accessor<string>, onSynced?: (sessi
   onCleanup(() => subscriptions.forEach((unsubscribe) => unsubscribe()))
 
   return rows
+}
+
+export function filterStagedRevert(messages: SessionMessageInfo[], revertMessageID?: string) {
+  if (!revertMessageID) return messages
+  return messages.filter((message) => message.id < revertMessageID || isDisplayOnly(message))
 }
 
 function rowKey(row: SessionRow) {

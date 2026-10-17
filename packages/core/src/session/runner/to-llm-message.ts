@@ -7,6 +7,7 @@ import {
   type ContentPart,
   type ProviderMetadata,
 } from "@opencode/ai"
+import { isDisplayOnly } from "@opencode/schema/fork-command-feedback"
 import type { Model } from "@opencode/schema/model"
 import { Option, Schema } from "effect"
 import { fileURLToPath } from "url"
@@ -285,6 +286,7 @@ function toLLMMessage(message: SessionMessage.Info, model: Model.Ref, providerMe
         }),
       ]
     case "synthetic":
+      if (isDisplayOnly(message)) return []
       return [Message.make({ id: message.id, role: "user", content: message.text })]
     case "skill":
       return [Message.make({ id: message.id, role: "user", content: message.text, metadata: message.metadata })]
