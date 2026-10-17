@@ -143,7 +143,13 @@ export const Plugin = define({
     const sameSources = (left: Entry[], right: Entry[]) => {
       const previous = sources(left)
       const current = sources(right)
-      return previous.length === current.length && previous.every((source) => current.some((item) => Skill.Source.equals(item, source)))
+      return previous.length === current.length && previous.every((source, index) => sameSource(source, current[index]))
+    }
+    const sameSource = (left: Source, right: Source) => {
+      if (left.type !== right.type) return false
+      if (left.type === "directory" && right.type === "directory") return left.path === right.path
+      if (left.type === "url" && right.type === "url") return new URL(left.url).href === new URL(right.url).href
+      return false
     }
 
     const load = Effect.fn("ConfigSkillPlugin.load")(function* (watches: FiberMap.FiberMap<string>, source: Source) {
@@ -190,7 +196,10 @@ export const Plugin = define({
     yield* ctx.skill.transform((editor) => {
       for (const skill of loaded.skills) editor.add(skill)
     })
-    const refresh = Effect.fn("ConfigSkillPlugin.refresh")(function* (mode: "initial" | "reload") {
+    const refresh = Effect.fn("ConfigSkillPlugin.refresh")(function* (
+      mode: "initial" | "reload",
+      captureEntries: (entries: Entry[]) => Effect.Effect<void>,
+    ) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
           let transferred = false
@@ -199,6 +208,7 @@ export const Plugin = define({
           )
           const candidateWatches = yield* FiberMap.make<string>().pipe(Scope.provide(candidateScope))
           const entries = yield* config.entries()
+          yield* captureEntries(entries)
           const skills = new Map<Skill.ID, Skill.Info>()
           const current = sources(entries)
           const scan = Effect.forEach(current, (source) =>
@@ -230,17 +240,22 @@ export const Plugin = define({
         }),
       )
     })
-    let reconcile = () => Effect.void
+    let reconcile = (_entries: Entry[]) => Effect.void
     const installationScope = yield* Scope.make()
     const registration = yield* skillReload.install(
-      (mode) => refresh(mode).pipe(Effect.tap(() => reconcile())),
+      (mode) => {
+        let scanned: Entry[] | undefined
+        return refresh(mode, (entries) => Effect.sync(() => (scanned = entries))).pipe(
+          Effect.ensuring(Effect.suspend(() => (scanned ? reconcile(scanned) : Effect.void))),
+        )
+      },
       { initial: true, release: () => Scope.close(watchScope, Exit.void) },
     ).pipe(Scope.provide(installationScope))
     yield* Effect.addFinalizer(() => Scope.close(installationScope, Exit.void))
-    reconcile = () =>
+    reconcile = (scanned) =>
       Effect.gen(function* () {
         const entries = yield* config.entries()
-        if (sameSources(loaded.entries, entries)) return
+        if (sameSources(scanned, entries)) return
         yield* registration.invalidate()
       })
 
