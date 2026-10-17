@@ -5,7 +5,7 @@ import type { Entry } from "@opencode/schema/config"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import path from "path"
-import { Cause, Context, Deferred, Effect, Exit, FiberMap, PubSub, Scope, Stream } from "effect"
+import { Cause, Context, Effect, Exit, FiberMap, PubSub, Scope, Stream } from "effect"
 import { Config } from "../../config.js"
 import { ConfigSkillReload } from "../skill-reload.js"
 import { Watcher } from "../../filesystem/watcher.js"
@@ -140,6 +140,11 @@ export const Plugin = define({
       }
       return result
     }
+    const sameSources = (left: Entry[], right: Entry[]) => {
+      const previous = sources(left)
+      const current = sources(right)
+      return previous.length === current.length && previous.every((source) => current.some((item) => Skill.Source.equals(item, source)))
+    }
 
     const load = Effect.fn("ConfigSkillPlugin.load")(function* (watches: FiberMap.FiberMap<string>, source: Source) {
       const directories =
@@ -225,12 +230,19 @@ export const Plugin = define({
         }),
       )
     })
+    let reconcile = () => Effect.void
     const installationScope = yield* Scope.make()
     const registration = yield* skillReload.install(
-      (mode) => refresh(mode),
+      (mode) => refresh(mode).pipe(Effect.tap(() => reconcile())),
       { initial: true, release: () => Scope.close(watchScope, Exit.void) },
     ).pipe(Scope.provide(installationScope))
     yield* Effect.addFinalizer(() => Scope.close(installationScope, Exit.void))
+    reconcile = () =>
+      Effect.gen(function* () {
+        const entries = yield* config.entries()
+        if (sameSources(loaded.entries, entries)) return
+        yield* registration.invalidate()
+      })
 
     // Editor saves arrive as bursts of watcher events; settle before one non-waiting admission.
     const updates = yield* PubSub.subscribe(changes)
@@ -242,8 +254,6 @@ export const Plugin = define({
     )
     const configSignals = yield* PubSub.subscribe(configUpdates)
     const startupHook = yield* Test.startupHooks
-    const configConsumerReady = yield* Deferred.make<void>()
-    const upstreamReady = yield* Deferred.make<void>()
     yield* startupHook({ publishInternalConfigUpdate: () => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid) })
     yield* FiberMap.run(
       configConsumers,
@@ -251,17 +261,11 @@ export const Plugin = define({
       Stream.fromSubscription(configSignals).pipe(Stream.runForEach(() => registration.invalidate())),
       { onlyIfMissing: true, startImmediately: true },
     )
-    yield* Deferred.succeed(configConsumerReady, undefined)
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),
       Stream.runForEach(() => PubSub.publish(configUpdates, undefined).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
     )
-    yield* Deferred.succeed(upstreamReady, undefined)
-    // Both streams are started before the initial batch. The waits stay interruptible so scope
-    // shutdown cannot leave activation waiting on a readiness signal.
-    yield* Deferred.await(configConsumerReady)
-    yield* Deferred.await(upstreamReady)
     yield* registration.initial.pipe(
       Effect.catch((error) => Effect.logWarning("failed to activate skill source", { error })),
       Effect.asVoid,
