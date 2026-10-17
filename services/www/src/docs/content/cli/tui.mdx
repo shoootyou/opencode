@@ -72,6 +72,21 @@ Press **Ctrl+X**, then **N** to start a new session. Press **Ctrl+X**, then **L*
 
 Tabs are enabled by default. Use **Ctrl+Tab** and **Ctrl+Shift+Tab** to move between them, **Ctrl+X** then **W** to close one, and **Ctrl+Shift+T** to reopen the last closed tab.
 
+In `/sessions`, archive or restore the selected session, and show or hide
+archived sessions. Both actions have no default shortcut. Assign bindings in
+`cli.json` when you want to use them from the keyboard:
+
+```json title="cli.json"
+{
+  "keybinds": {
+    "session.archive.toggle": "ctrl+a",
+    "session.archived.toggle_visibility": "ctrl+h"
+  }
+}
+```
+
+See [Keybinds](/cli/keybinds#sessions) for the command IDs and defaults.
+
 ## History
 
 Press **Ctrl+X**, then **U**, or run `/undo`, to revert the latest user message and the work that followed it. The reverted prompt returns to the composer so you can edit it.
