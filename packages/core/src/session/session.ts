@@ -13,6 +13,7 @@ import { ShellResult } from "../shell/result.js"
 import type { Skill } from "../skill.js"
 import {
   BusyError,
+  ArchiveConflictError,
   CompactionConflictError,
   InboxConflictError,
   NotFoundError,
@@ -34,6 +35,8 @@ type PromptRequest = SessionPrompt.Input & {
   id?: SessionMessage.ID
   resume?: boolean
 }
+
+class StaleArchiveObservation extends Error {}
 
 /**
  * Build once in the host Scope: `const sessions = yield* Session.make()`.
@@ -85,6 +88,33 @@ export const make = Effect.fn("Session.make")(function* () {
   ) {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.Permissions, { sessionID, permissions: input.permissions })
+  })
+  const setArchive = Effect.fn("Session.setArchive")(function* (
+    sessionID: SessionSchema.ID,
+    input: { archived: number | null },
+  ) {
+    const attempt = (remaining: number): Effect.Effect<void, NotFoundError | ArchiveConflictError> =>
+      Effect.gen(function* () {
+        const observed = yield* Bus.latestSequence(database.db, sessionID)
+        const session = yield* get(sessionID)
+        if ((session.time.archived !== undefined) === (input.archived !== null)) return
+        yield* bus.publish(SessionEvent.ArchiveChanged, { sessionID, archived: input.archived }, {
+          commit: (seq) =>
+            Effect.gen(function* () {
+              if (seq !== observed + 1) return yield* Effect.die(new StaleArchiveObservation())
+              if (!(yield* store.get(sessionID))) return yield* Effect.die(new StaleArchiveObservation())
+            }),
+        })
+      }).pipe(
+        Effect.catchDefect((defect) =>
+          defect instanceof StaleArchiveObservation
+            ? remaining === 0
+              ? new ArchiveConflictError({ sessionID })
+              : attempt(remaining - 1)
+            : Effect.die(defect),
+        ),
+      )
+    return yield* attempt(8)
   })
   const switchAgent = Effect.fn("Session.switchAgent")(function* (
     sessionID: SessionSchema.ID,
@@ -350,6 +380,7 @@ export const make = Effect.fn("Session.make")(function* () {
     rename,
     setMetadata,
     setPermissions,
+    setArchive,
     switchAgent,
     switchModel,
     inbox,
@@ -374,6 +405,7 @@ export const make = Effect.fn("Session.make")(function* () {
     const rename = operations.rename.bind(undefined, sessionID)
     const setMetadata = operations.setMetadata.bind(undefined, sessionID)
     const setPermissions = operations.setPermissions.bind(undefined, sessionID)
+    const setArchive = operations.setArchive.bind(undefined, sessionID)
     const switchAgent = operations.switchAgent.bind(undefined, sessionID)
     const switchModel = operations.switchModel.bind(undefined, sessionID)
     const inbox = operations.inbox.bind(undefined, sessionID)
@@ -401,6 +433,7 @@ export const make = Effect.fn("Session.make")(function* () {
       rename,
       setMetadata,
       setPermissions,
+      setArchive,
       switchAgent,
       switchModel,
       inbox,

@@ -88,3 +88,11 @@ export class InboxConflictError extends Schema.TaggedError<InboxConflictError>()
 export class SkillNotFoundError extends Schema.TaggedError<SkillNotFoundError>()("Session.SkillNotFoundError", {
   skill: Skill.ID,
 }) {}
+
+export class ArchiveConflictError extends Schema.TaggedError<ArchiveConflictError>()("Session.ArchiveConflictError", {
+  sessionID: SessionSchema.ID,
+}) {
+  override get message() {
+    return `Archive contention exhausted: ${this.sessionID}`
+  }
+}

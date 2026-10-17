@@ -43,6 +43,7 @@ export type DurableDefinition<
   readonly durable: {
     readonly version: number
     readonly aggregate: string
+    readonly retain?: boolean
   }
   readonly data: DataSchema
 }
@@ -83,6 +84,7 @@ type Input<Type extends string, Fields extends Readonly<Record<PropertyKey, Sche
   readonly durable?: {
     readonly version: number
     readonly aggregate: string
+    readonly retain?: boolean
   }
   readonly schema: Fields
 }

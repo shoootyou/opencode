@@ -277,6 +277,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             yield* session
               .setPermissions({ sessionID: ctx.params.sessionID, permissions: ctx.payload.permissions })
               .pipe(Effect.catchTag("Session.NotFoundError", missingSession))
+          if (ctx.payload.archive !== undefined)
+            yield* session
+              .setArchive({ sessionID: ctx.params.sessionID, archived: ctx.payload.archive })
+              .pipe(
+                Effect.catchTag("Session.NotFoundError", missingSession),
+                Effect.catchTag(
+                  "Session.ArchiveConflictError",
+                  (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
+                ),
+              )
           return HttpApiSchema.NoContent.make()
         }),
       )

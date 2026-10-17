@@ -57,6 +57,13 @@ const ParentIDFilter = Schema.Union([
   description: "Filter by parent session. Use null to return only root sessions.",
 })
 
+const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((value) => value === "true"),
+    encode: SchemaGetter.transform((value): "true" | "false" => (value ? "true" : "false")),
+  }),
+)
+
 const SessionsQueryFields = {
   limit: Schema.NumberFromString.pipe(Schema.decodeTo(PositiveInt), Schema.optional).annotate({
     description: "Maximum number of sessions to return. Defaults to the newest 50 sessions.",
@@ -66,6 +73,7 @@ const SessionsQueryFields = {
   }),
   search: Schema.optional(Schema.String),
   parentID: ParentIDFilter.pipe(Schema.optional),
+  archived: BooleanFromString.pipe(Schema.optional),
 }
 
 const SessionsDirectoryQuery = Schema.Struct({
@@ -157,13 +165,6 @@ const FormCreatePayload = Schema.Struct({
   metadata: Form.Info.fields.metadata,
   fields: Form.Info.fields.fields,
 }).annotate({ identifier: "Form.CreatePayload" })
-
-const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
-  Schema.decodeTo(Schema.Boolean, {
-    decode: SchemaGetter.transform((value) => value === "true"),
-    encode: SchemaGetter.transform((value): "true" | "false" => (value ? "true" : "false")),
-  }),
-)
 
 export const SessionsQuery = Schema.Struct({
   ...SessionsQueryFields,
@@ -365,9 +366,10 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           title: Schema.String.pipe(Schema.optional),
           metadata: Session.Metadata.pipe(Schema.optional),
           permissions: Permission.Ruleset.pipe(Schema.optional),
+          archive: Schema.NullOr(Schema.Finite).pipe(Schema.optional),
         }),
         success: HttpApiSchema.NoContent,
-        error: SessionNotFoundError,
+        error: [ConflictError, SessionNotFoundError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

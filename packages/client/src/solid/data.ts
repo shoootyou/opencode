@@ -629,6 +629,10 @@ export function createData(config: CreateDataInput) {
         )
         refresh(() => result.location.vcs.sync())
         refresh(() => result.project.sync())
+        for (const sessionID of Object.keys(store.session.info)) {
+          result.session.invalidate(sessionID)
+          refresh(() => result.session.sync(sessionID))
+        }
         return
       }
       case "project.updated":
@@ -703,6 +707,11 @@ export function createData(config: CreateDataInput) {
         })
         return
       }
+      case "session.archive.changed":
+        if (!store.session.info[event.data.sessionID] && !sync.has(`session:${event.data.sessionID}`)) return
+        result.session.invalidate(event.data.sessionID)
+        refresh(() => result.session.sync(event.data.sessionID))
+        return
       case "session.permissions":
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "permissions", event.data.permissions)
@@ -1618,7 +1627,7 @@ export function createData(config: CreateDataInput) {
             api().session.get({ sessionID }),
             options?.children
               ? api()
-                  .session.list({ parentID: sessionID, order: "desc" })
+                  .session.list({ parentID: sessionID, order: "desc", archived: true })
                   .then((response) => response.data)
               : [],
           ])

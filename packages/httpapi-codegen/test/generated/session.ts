@@ -87,7 +87,9 @@ const mapEndpointListError = (error: unknown) =>
       ? error
       : new ClientError({ cause: error })
 const EndpointList = (raw: RawGroup) => (input?: EndpointListInput) =>
-  raw["list"]({ query: { archived: input?.["archived"] } }).pipe(Effect.mapError(mapEndpointListError))
+  raw["list"]({ query: { ...(input?.["archived"] === undefined ? {} : { archived: input?.["archived"] }) } }).pipe(
+    Effect.mapError(mapEndpointListError),
+  )
 
 type EndpointGetInput = { readonly sessionID: (typeof EndpointGetParams.Type)["sessionID"] }
 const EndpointGetDeclaredError = Schema.Union([EndpointGetError0])
@@ -131,7 +133,7 @@ const mapEndpointConfigureError = (error: unknown) =>
 const EndpointConfigure = (raw: RawGroup) => (input: EndpointConfigureInput) =>
   raw["configure"]({
     params: { sessionID: input["sessionID"] },
-    query: { dryRun: input["dryRun"] },
+    query: { ...(input["dryRun"] === undefined ? {} : { dryRun: input["dryRun"] }) },
     headers: { traceID: input["traceID"] },
     payload: input["payload"],
   } as EndpointConfigureRequest).pipe(Effect.mapError(mapEndpointConfigureError))

@@ -28,6 +28,7 @@ import { SessionStore } from "./session/store.js"
 import { SessionExecution } from "./session/execution.js"
 import {
   AttachmentError,
+  ArchiveConflictError,
   BusyError,
   CompactionConflictError,
   ForkEmptyError,
@@ -100,6 +101,7 @@ type ForkInput = {
 
 export {
   AttachmentError,
+  ArchiveConflictError,
   BusyError,
   CompactionConflictError,
   InboxConflictError,
@@ -182,6 +184,10 @@ export interface Interface {
     sessionID: SessionSchema.ID
     permissions: Permission.Ruleset
   }) => Effect.Effect<void, NotFoundError>
+  readonly setArchive: (input: {
+    sessionID: SessionSchema.ID
+    archived: number | null
+  }) => Effect.Effect<void, NotFoundError | ArchiveConflictError>
   readonly move: SessionMove.Interface["move"]
   readonly prompt: (
     input: Parameters<Session.Handle["prompt"]>[0] & { sessionID: SessionSchema.ID },
@@ -369,7 +375,7 @@ const layer = Layer.effect(
         yield* execution.interrupt(sessionID)
         yield* execution.awaitIdle(sessionID)
         yield* transport.close(sessionID)
-        const children = yield* result.list({ parentID: sessionID })
+        const children = yield* result.list({ parentID: sessionID, archived: true })
         yield* Effect.forEach(children.data, (child) => result.remove(child.id), { concurrency: 1, discard: true })
         yield* environments.clear(sessionID)
         yield* bus.publish(SessionEvent.Deleted, { sessionID })
@@ -435,6 +441,7 @@ const layer = Layer.effect(
       rename: (input) => sessions.forSession(input.sessionID).rename(input),
       setMetadata: (input) => sessions.forSession(input.sessionID).setMetadata(input),
       setPermissions: (input) => sessions.forSession(input.sessionID).setPermissions(input),
+      setArchive: (input) => sessions.forSession(input.sessionID).setArchive(input),
       move: moves.move,
       compact: (input) => sessions.forSession(input.sessionID).compact(input),
       wait: (sessionID) => sessions.forSession(sessionID).wait(),
