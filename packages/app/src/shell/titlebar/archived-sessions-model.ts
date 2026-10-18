@@ -28,7 +28,7 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
   const notify = () => listeners.forEach((listener) => listener())
   const state = () => value
   const load = async (cursor?: string) => {
-    if (disposed) return
+    if (disposed || restoring) return
     controller?.abort()
     const current = new AbortController()
     controller = current
@@ -50,8 +50,8 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
     state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
     load,
-    next: () => value.status === "ready" && value.page.cursor.next ? load(value.page.cursor.next) : Promise.resolve(),
-    previous: () => value.status === "ready" && value.page.cursor.previous ? load(value.page.cursor.previous) : Promise.resolve(),
+    next: () => !restoring && value.status === "ready" && value.page.cursor.next ? load(value.page.cursor.next) : Promise.resolve(),
+    previous: () => !restoring && value.status === "ready" && value.page.cursor.previous ? load(value.page.cursor.previous) : Promise.resolve(),
     search(query) { return value.status === "ready" ? value.page.sessions.filter((session) => matchesArchivedSession(session, query)) : [] },
     restoringID: () => restoring,
     async restore(sessionID) {
@@ -61,18 +61,21 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
       const version = generation
       restoring = sessionID
       notify()
-      const committed = await deps.setArchive({ server: deps.server, sessionID, archive: null })
-      if (!committed) { restoring = undefined; notify(); return false }
-      if (disposed || version !== generation) return true
-      restoring = undefined
-      value = { status: "ready", page: { ...value.page, sessions: value.page.sessions.filter((item) => item.id !== sessionID) } }
-      notify()
-      deps.openProject({ server: deps.server, directory: session.location.directory })
-      deps.touchProject({ server: deps.server, directory: session.location.directory })
-      const tab = deps.addTab({ server: deps.server, sessionId: sessionID })
-      deps.selectTab(tab)
-      deps.close()
-      return true
+      try {
+        const committed = await deps.setArchive({ server: deps.server, sessionID, archive: null })
+        if (!committed) return false
+        if (disposed || version !== generation) return true
+        value = { status: "ready", page: { ...value.page, sessions: value.page.sessions.filter((item) => item.id !== sessionID) } }
+        deps.openProject({ server: deps.server, directory: session.location.directory })
+        deps.touchProject({ server: deps.server, directory: session.location.directory })
+        const tab = deps.addTab({ server: deps.server, sessionId: sessionID })
+        deps.selectTab(tab)
+        deps.close()
+        return true
+      } finally {
+        restoring = undefined
+        if (!disposed) notify()
+      }
     },
     dispose() { if (disposed) return; disposed = true; ++generation; controller?.abort(); listeners.clear() },
   }

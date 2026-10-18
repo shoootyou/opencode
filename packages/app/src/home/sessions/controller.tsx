@@ -374,7 +374,7 @@ export function createHomeSessionsController(home: HomeController) {
             archiveSession: global.sessionArchive.archiveSession,
             remove: () => ctx.data.session.evict(session.id),
             notifyTabsRemoved: (detail) => notifySessionTabsRemoved({ ...detail, server: detail.server as ServerConnection.Key, sessionIDs: [...detail.sessionIDs] }),
-            isActive: () => alive,
+            isActive: () => alive && home.server.focusedContext() === ctx,
           },
         )
       },

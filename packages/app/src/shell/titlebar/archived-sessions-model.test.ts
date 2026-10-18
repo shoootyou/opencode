@@ -67,6 +67,60 @@ test("uses each ready page cursor for Next and Previous, then Reset restores the
   ])
   expect(model.state()).toMatchObject({ status: "ready", page: { sessions: [{ id: "reset" }] } })
 })
+test("Reset requests the first page without reusing the current page cursor", async () => {
+  const requests: unknown[] = []
+  const pages = [
+    { data: [{ id: "first", location: { directory: "/one" }, time: { archived: 1 } }], cursor: { next: "next" } },
+    { data: [{ id: "later", location: { directory: "/two" }, time: { archived: 2 } }], cursor: { next: "stale-next" } },
+    { data: [{ id: "reset", location: { directory: "/three" }, time: { archived: 3 } }], cursor: {} },
+  ]
+  const model = createArchivedSessionsModel({
+    server: "s",
+    list: async (input: unknown) => {
+      requests.push(input)
+      return pages[requests.length - 1]
+    },
+    setArchive: async () => true,
+    openProject: () => {}, touchProject: () => {}, addTab: () => "tab", selectTab: () => {}, close: () => {},
+  })
+  await model.load()
+  await model.next()
+  await model.load()
+  expect(requests.at(-1)).toEqual({ archived: "only", parentID: null, order: "desc", limit: 50 })
+})
+test("holds page navigation until a committed restore finishes its landing flow and releases pending state", async () => {
+  const requests: unknown[] = []
+  const calls: string[] = []
+  const restore = Promise.withResolvers<boolean>()
+  const pages = [
+    { data: [{ id: "first", location: { directory: "/one" }, time: { archived: 1 } }], cursor: { next: "next" } },
+    { data: [{ id: "second", location: { directory: "/two" }, time: { archived: 2 } }], cursor: {} },
+  ]
+  const model = createArchivedSessionsModel({
+    server: "s",
+    list: async (input: unknown) => {
+      requests.push(input)
+      return pages[requests.length - 1]
+    },
+    setArchive: async () => restore.promise,
+    openProject: () => calls.push("open"),
+    touchProject: () => calls.push("touch"),
+    addTab: () => { calls.push("tab"); return "tab" },
+    selectTab: () => calls.push("select"),
+    close: () => calls.push("close"),
+  })
+  await model.load()
+  const pending = model.restore("first")
+  expect(model.restoringID()).toBe("first")
+  await model.next()
+  await model.load()
+  expect(requests).toHaveLength(1)
+  restore.resolve(true)
+  expect(await pending).toBe(true)
+  expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
+  expect(model.restoringID()).toBeUndefined()
+  expect(await model.restore("first")).toBe(false)
+})
 test("does not start loading or notify after disposal", async () => {
   let requests = 0
   let notifications = 0

@@ -67,6 +67,26 @@ test("removes through the real tabs adapter with automatic navigation explicitly
   effects.removeTabs({ server: "s", directory: "/d", sessionIDs: ["a"], navigate: false })
   expect(calls).toEqual([[{ server: "s", directory: "/d", sessionIDs: ["a"] }, { navigate: false }]])
 })
+test("issues no-auto tab removal in the same completion turn before an asynchronous landing", async () => {
+  const calls: string[] = []
+  const landing = Promise.withResolvers<void>()
+  const pending = runTimelineArchive(
+    { target: { server: "s", sessionID: "a" }, session: root("a"), sessions: [root("a"), root("b")] },
+    {
+      setArchive: async () => true,
+      now: () => 0,
+      isActive: () => true,
+      currentRoute: () => ({ server: "s", sessionID: "a" }),
+      removeTabs: () => calls.push("remove"),
+      navigate: async () => { calls.push("navigate"); await landing.promise },
+      toast() {},
+    },
+  )
+  await Promise.resolve()
+  expect(calls).toEqual(["remove", "navigate"])
+  landing.resolve()
+  await pending
+})
 
 async function requireArchiveModel() {
   return (await import("./archive-model")) as unknown as {

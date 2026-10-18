@@ -7,6 +7,7 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
+import { selectArchivedSessionsView } from "./archived-sessions-view"
 
 export function showArchivedSessionsDialog(dialog: Pick<ReturnType<typeof useDialog>, "show">, server: string) {
   dialog.show(() => <ArchivedSessionsDialog server={server} />)
@@ -46,6 +47,16 @@ function ArchivedSessionsDialog(props: { server: string }) {
     const current = state()
     return current.status === "ready" ? current.page : undefined
   }
+  const view = () => selectArchivedSessionsView({
+    status: state().status,
+    visibleSessionCount: model.search(filter()).length,
+    filter: filter(),
+    previousCursor: page()?.cursor.previous,
+    nextCursor: page()?.cursor.next,
+    restoringID: restoringID(),
+  })
+  const emptyMessage = () =>
+    language.t(view().message === "no-match" ? "dialog.archivedSessions.noMatches" : "dialog.archivedSessions.empty")
   return (
     <Dialog size="large">
       <DialogHeader>
@@ -56,8 +67,8 @@ function ArchivedSessionsDialog(props: { server: string }) {
           when={state().status === "ready"}
           fallback={
             <div>
-              <Show when={state().status === "loading"}>{language.t("dialog.archivedSessions.loading")}</Show>
-              <Show when={state().status === "error"}>
+              <Show when={view().message === "loading"}>{language.t("dialog.archivedSessions.loading")}</Show>
+              <Show when={view().message === "error"}>
                 <div>{language.t("dialog.archivedSessions.error")}</div>
                 <button type="button" onClick={() => void model.load()}>{language.t("common.retry")}</button>
               </Show>
@@ -69,7 +80,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
             key={(session) => session.id}
             filterKeys={["title", "location.directory"]}
             search={{ placeholder: language.t("dialog.archivedSessions.search.placeholder"), autofocus: true }}
-            emptyMessage={language.t(filter().trim() ? "dialog.archivedSessions.noMatches" : "dialog.archivedSessions.empty")}
+            emptyMessage={emptyMessage()}
             onFilter={setFilter}
             onSelect={(session) => {
               if (session) void model.restore(session.id)
@@ -78,13 +89,13 @@ function ArchivedSessionsDialog(props: { server: string }) {
             {(session) => <span aria-disabled={restoringID() === session.id}>{session.title ?? session.location.directory}</span>}
           </List>
           <div class="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" disabled={!page()?.cursor.previous} onClick={() => void model.previous()}>
+            <Button variant="ghost" disabled={!view().previousEnabled} onClick={() => { if (view().previousEnabled) void model.previous() }}>
               {language.t("dialog.archivedSessions.previousPage")}
             </Button>
-            <Button variant="ghost" disabled={!page()?.cursor.next} onClick={() => void model.next()}>
+            <Button variant="ghost" disabled={!view().nextEnabled} onClick={() => { if (view().nextEnabled) void model.next() }}>
               {language.t("dialog.archivedSessions.nextPage")}
             </Button>
-            <Button variant="ghost" onClick={() => void model.load()}>
+            <Button variant="ghost" disabled={!view().resetEnabled} onClick={() => { if (view().resetEnabled) void model.load() }}>
               {language.t("common.reset")}
             </Button>
           </div>

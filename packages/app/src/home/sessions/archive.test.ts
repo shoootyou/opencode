@@ -23,3 +23,23 @@ test("has no Home effects for false, child, archived, or disposed success", asyn
     expect(calls).toEqual([])
   }
 })
+
+test("does not evict or notify when the focused Home context changes while archive is pending", async () => {
+  const calls: string[] = []
+  const gate = Promise.withResolvers<boolean>()
+  const capturedContext = {}
+  let focusedContext = capturedContext
+  const pending = archiveHomeSession(
+    { server: "s", session: { id: "x", location: { directory: "/x" }, time: {} } },
+    {
+      archiveSession: async () => gate.promise,
+      remove: () => calls.push("evict"),
+      notifyTabsRemoved: () => calls.push("notify"),
+      isActive: () => focusedContext === capturedContext,
+    },
+  )
+  focusedContext = {}
+  gate.resolve(true)
+  expect(await pending).toBe(true)
+  expect(calls).toEqual([])
+})
