@@ -1,5 +1,18 @@
+/**
+ * @spec-handoff
+ * @interface assistantModelLabel(model: ModelLabelRef | undefined, models: readonly Readonly<{ providerID: string; id: string; name: string }>[] | undefined): string
+ * @behavior
+ *   - Resolves the exact message (providerID, id) against the TUI catalog and formats it through @opencode/util/model-label.
+ *   - Falls back independently to raw providerID/id when the catalog, provider, or model is unavailable.
+ *   - Adds a parenthesized, first-code-unit-capitalized non-default variant to the complete label.
+ * @edge-cases
+ *   - Missing or empty reference identities return an empty label.
+ *   - Catalog modelID is never a lookup key; aliases sharing an API ID retain their own display names.
+ *   - Long, Unicode, slash-containing names remain untruncated plain text for native footer wrapping.
+ * @see ../../src/util/model.ts
+ */
 import { describe, expect, test } from "bun:test"
-import { formatRef, parse, switchLabel } from "../../src/util/model"
+import { assistantModelLabel, formatRef, parse, switchLabel } from "../../src/util/model"
 
 describe("util.model", () => {
   test("splits provider from a nested model identifier", () => {
@@ -44,6 +57,57 @@ describe("util.model", () => {
     )
     expect(switchLabel({ providerID: "anthropic", id: "sonnet", variant: "high" }, undefined, previous)).toBe(
       "Switched model to anthropic/sonnet/high",
+    )
+  })
+
+  test("formats the assistant footer label with the shared formatter using the matching catalog identity", () => {
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer", variant: "thinking" },
+        [{ providerID: "team", id: "reviewer", name: "Review Model" }],
+      ),
+    ).toBe("team/Review Model (Thinking)")
+  })
+
+  test("resolves aliased assistant models by provider and catalog id rather than API modelID", () => {
+    const models = [
+      { providerID: "other", id: "reviewer", modelID: "vendor/model-v1", name: "Other Review Model" },
+      { providerID: "team", id: "writer", modelID: "vendor/model-v1", name: "Writer Model" },
+      { providerID: "team", id: "reviewer", modelID: "vendor/model-v1", name: "Review Model" },
+      { providerID: "team", id: "vendor/model-v1", modelID: "unrelated-api-id", name: "API ID Decoy" },
+    ]
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models)).toBe("team/Review Model")
+    expect(assistantModelLabel({ providerID: "team", id: "writer" }, [...models].reverse())).toBe("team/Writer Model")
+  })
+
+  test("falls back independently for unknown models, unknown providers, and an unavailable catalog", () => {
+    const models = [{ providerID: "team", id: "reviewer", name: "Review Model" }]
+
+    expect(assistantModelLabel({ providerID: "team", id: "missing" }, models)).toBe("team/missing")
+    expect(assistantModelLabel({ providerID: "unknown", id: "reviewer" }, models)).toBe("unknown/reviewer")
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, undefined)).toBe("team/reviewer")
+  })
+
+  test("keeps a non-default variant when the assistant model is absent from the catalog", () => {
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer", variant: "high" }, [])).toBe(
+      "team/reviewer (High)",
+    )
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer", variant: "default" }, [])).toBe("team/reviewer")
+  })
+
+  test("returns an empty assistant footer label for a missing or incomplete model reference", () => {
+    expect(assistantModelLabel(undefined, [])).toBe("")
+    expect(assistantModelLabel({ id: "reviewer" }, [])).toBe("")
+    expect(assistantModelLabel({ providerID: "team" }, [])).toBe("")
+    expect(assistantModelLabel({ providerID: "", id: "reviewer" }, [])).toBe("")
+    expect(assistantModelLabel({ providerID: "team", id: "" }, [])).toBe("")
+  })
+
+  test("preserves long Unicode catalog names for native footer wrapping", () => {
+    const name = "長いモデル名e\u0301/مرحبا"
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [{ providerID: "team", id: "reviewer", name }])).toBe(
+      `team/${name}`,
     )
   })
 })

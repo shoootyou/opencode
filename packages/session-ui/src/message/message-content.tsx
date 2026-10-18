@@ -29,6 +29,7 @@ import type {
 } from "@opencode/client/promise"
 import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
 import { attached, typeLabel } from "../components/message-file"
+import { assistantModelLabel } from "./model-label"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -623,7 +624,15 @@ export function AssistantTextContent(props: {
     return !!type && (type.includes("abort") || type.includes("interrupt"))
   }
 
-  const model = createMemo(() => modelLabel(data, i18n, props.message.model))
+  const model = createMemo(() =>
+    assistantModelLabel(props.message.model, data.store.provider?.all, (model, variant) =>
+      i18n.t("ui.message.modelVariant", { model, variant }),
+    ),
+  )
+  const agent = createMemo(() => {
+    const agent = props.message.agent
+    return agent ? agent[0]?.toUpperCase() + agent.slice(1) : ""
+  })
 
   const duration = createMemo(() => {
     const completed = props.message.time.completed
@@ -651,17 +660,7 @@ export function AssistantTextContent(props: {
   // Mobile omits the per-response agent and model; see CurrentUserMessageDisplay.
   const mobile = createMediaQuery("(max-width: 767px)")
 
-  const meta = createMemo(() => {
-    const agent = props.message.agent
-
-    return [
-      ...(mobile() ? [] : [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]),
-      duration(),
-      interrupted() ? i18n.t("ui.message.interrupted") : "",
-    ]
-      .filter(Boolean)
-      .join(" \u00B7 ")
-  })
+  const meta = createMemo(() => Boolean((!mobile() && (agent() || model())) || duration() || interrupted()))
 
   const [copied, setCopied] = createSignal(false)
 
@@ -688,7 +687,19 @@ export function AssistantTextContent(props: {
             />
             <Show when={meta()}>
               <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
-                {meta()}
+                <Show when={!mobile() && agent()}>{agent()}</Show>
+                <Show when={!mobile() && model()}>
+                  <Show when={agent()}>&nbsp;·&nbsp;</Show>
+                  <bdi dir="ltr">{model()}</bdi>
+                </Show>
+                <Show when={duration()}>
+                  <Show when={!mobile() && (agent() || model())}>&nbsp;·&nbsp;</Show>
+                  {duration()}
+                </Show>
+                <Show when={interrupted()}>
+                  <Show when={(!mobile() && (agent() || model())) || duration()}>&nbsp;·&nbsp;</Show>
+                  {i18n.t("ui.message.interrupted")}
+                </Show>
               </span>
             </Show>
           </div>
