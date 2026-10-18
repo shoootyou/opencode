@@ -134,4 +134,26 @@ describe("session-ui assistantModelLabel", () => {
     )
     expect(label).not.toContain("API ID Decoy")
   })
+
+  test("does not coerce dirty lookup identities and treats dirty display components as missing", () => {
+    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+    const dirtyModel = { providerID: 42, id: "reviewer", variant: true } as unknown as Parameters<
+      typeof assistantModelLabel
+    >[0]
+    const dirtyCatalog = new Map([
+      ["team", { models: { reviewer: { name: [] as unknown as string } } }],
+    ]) as unknown as Parameters<typeof assistantModelLabel>[1]
+
+    expect(assistantModelLabel(dirtyModel, providers, formatVariant)).toBe("reviewer")
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, dirtyCatalog, formatVariant)).toBe(
+      "team/reviewer",
+    )
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: {} } as unknown as Parameters<typeof assistantModelLabel>[0],
+        providers,
+        formatVariant,
+      ),
+    ).toBe("")
+  })
 })

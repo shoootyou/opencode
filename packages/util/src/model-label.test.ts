@@ -143,9 +143,92 @@ describe("formatModelLabel", () => {
 
   test("uses sanitized fallbacks and omits display parts that are empty after sanitization", () => {
     expect(formatModelLabel({ providerID: "team", id: "review\u001b" }, "\u001b\u202e")).toBe("team/review")
-    expect(formatModelLabel({ providerID: "team", id: "\u001b\u202e" }, "\u001b\u202e")).toBe("team")
+    expect(formatModelLabel({ providerID: "team", id: "\u001b\u202e", variant: "high" }, "\u001b\u202e")).toBe("")
     expect(formatModelLabel({ providerID: "\u001b\u202e", id: "model" }, "Model")).toBe("Model")
     expect(formatModelLabel({ providerID: "team", id: "model", variant: "\u001b\u202e" }, "Model")).toBe("team/Model")
+  })
+
+  const dirtyValues: Array<[string, unknown]> = [
+    ["number", 42],
+    ["null", null],
+    ["undefined", undefined],
+    ["object", {}],
+    ["array", []],
+    ["symbol", Symbol("dirty")],
+    ["bigint", 1n],
+    ["boolean", true],
+    ["function", () => {}],
+    [
+      "object with a throwing toString",
+      {
+        toString: () => {
+          throw new Error("must not coerce")
+        },
+      },
+    ],
+  ]
+
+  test.each(dirtyValues)("treats a %s provider ID as missing without coercion", (_kind, value) => {
+    expect(
+      formatModelLabel(
+        { providerID: value, id: "model" } as unknown as Parameters<typeof formatModelLabel>[0],
+        "Model",
+      ),
+    ).toBe("Model")
+  })
+
+  test.each(dirtyValues)("treats a %s fallback model ID as missing without coercion", (_kind, value) => {
+    expect(
+      formatModelLabel({ providerID: "team", id: value } as unknown as Parameters<typeof formatModelLabel>[0]),
+    ).toBe("")
+  })
+
+  test.each(dirtyValues)("treats a %s catalog name as missing without coercion", (_kind, value) => {
+    expect(formatModelLabel({ providerID: "team", id: "model" }, value as unknown as string)).toBe("team/model")
+  })
+
+  test.each(dirtyValues)("treats a %s variant as missing without coercion", (_kind, value) => {
+    expect(
+      formatModelLabel(
+        { providerID: "team", id: "model", variant: value } as unknown as Parameters<typeof formatModelLabel>[0],
+        "Model",
+      ),
+    ).toBe("team/Model")
+  })
+
+  test("caps the final capitalized variant at 64 code points before invoking the callback", () => {
+    const received: string[] = []
+    const result = formatModelLabel(
+      { providerID: "team", id: "model", variant: `ß${"x".repeat(63)}` },
+      "Model",
+      (_label, variant) => {
+        received.push(variant)
+        return variant
+      },
+    )
+
+    expect(received).toEqual([`SS${"x".repeat(61)}…`])
+    expect(Array.from(received[0]!)).toHaveLength(64)
+    expect(result).toBe(`SS${"x".repeat(61)}…`)
+  })
+
+  test.each([
+    ["U+061C", "\u061c"],
+    ["U+200E", "\u200e"],
+    ["U+200F", "\u200f"],
+    ["U+2066", "\u2066"],
+    ["U+2067", "\u2067"],
+    ["U+2068", "\u2068"],
+    ["U+2069", "\u2069"],
+    ["U+2028", "\u2028"],
+    ["U+2029", "\u2029"],
+  ])("removes %s from every display component", (codePoint, forbidden) => {
+    const label = formatModelLabel(
+      { providerID: `pro${forbidden}vider`, id: "model", variant: `thin${forbidden}king` },
+      `Mo${forbidden}del`,
+    )
+
+    expect(label, codePoint).toBe("provider/Model (Thinking)")
   })
 
   test.each([
@@ -180,6 +263,14 @@ describe("formatModelLabel", () => {
 
     expect(label).toBe(`team/${"a".repeat(62)}😀…`)
     expect(Array.from(label)).toHaveLength(5 + 64)
+  })
+
+  test("keeps a 64th astral code point instead of applying a UTF-16-unit cap", () => {
+    const name = `${"a".repeat(63)}😀`
+    const label = formatModelLabel({ providerID: "team", id: "model" }, name)
+
+    expect(label).toBe(`team/${name}`)
+    expect(Array.from(name)).toHaveLength(64)
   })
 
   test("caps a one-megabyte component in bounded time without retaining control characters", () => {

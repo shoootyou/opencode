@@ -11,16 +11,20 @@ export function formatModelLabel(
   name?: string,
   formatVariant?: FormatModelVariant,
 ): string {
-  if (!model?.providerID || !model.id) return ""
+  if (!model || !Object.hasOwn(model, "providerID") || !Object.hasOwn(model, "id")) return ""
+  if (model.providerID === "" || model.id === "") return ""
 
   const provider = sanitizeComponent(model.providerID)
-  const label = [provider, sanitizeComponent(name ?? "") || sanitizeComponent(model.id)].filter(Boolean).join("/")
+  const modelName = sanitizeComponent(name) || sanitizeComponent(model.id)
+  if (!modelName) return ""
+
+  const label = [provider, modelName].filter(Boolean).join("/")
   const variant = sanitizeComponent(model.variant ?? "")
   if (!variant || variant === "default") return label
 
   return (formatVariant ?? ((label, variant) => `${label} (${variant})`))(
     label,
-    variant[0].toUpperCase() + variant.slice(1),
+    capComponent(variant[0].toUpperCase() + variant.slice(1)),
   )
 }
 
@@ -29,7 +33,9 @@ const forbiddenDisplayCharacter =
 const whitespace = /\s/u
 const maxComponentCodePoints = 64
 
-function sanitizeComponent(value: string): string {
+function sanitizeComponent(value: unknown): string {
+  if (typeof value !== "string") return ""
+
   const result: string[] = []
   let pendingSpace = false
 
@@ -44,8 +50,14 @@ function sanitizeComponent(value: string): string {
     pendingSpace = false
     result.push(character)
 
-    if (result.length > maxComponentCodePoints) return result.slice(0, maxComponentCodePoints - 1).join("") + "…"
+    if (result.length > maxComponentCodePoints) return capComponent(result.join(""))
   }
 
   return result.join("")
+}
+
+function capComponent(value: string): string {
+  const codePoints = Array.from(value)
+  if (codePoints.length <= maxComponentCodePoints) return value
+  return codePoints.slice(0, maxComponentCodePoints - 1).join("") + "…"
 }
