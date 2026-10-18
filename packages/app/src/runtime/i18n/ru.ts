@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.ru,
+  "common.unarchive": "Разархивировать",
+  "command.session.archive": "Архивировать сеанс",
+  "command.session.archive.description": "Архивировать сеанс",
+  "command.session.unarchive": "Разархивировать сеанс",
+  "command.session.unarchive.description": "Восстановить сеанс",
+  "command.session.archivedBrowse": "Архивные сеансы",
+  "command.session.archivedBrowse.description": "Восстановить сеанс сеанс",
+  "dialog.archivedSessions.title": "Архивные сеансы",
+  "dialog.archivedSessions.description": "Восстановить сеанс сеанс",
+  "dialog.archivedSessions.empty": "Архивные сеансы",
+  "dialog.archivedSessions.noMatches": "Архивные сеансы",
+  "dialog.archivedSessions.error": "Не удалось загрузить архивные сеансы",
+  "dialog.archivedSessions.loading": "Загрузка архивных сеансов…",
+  "session.archive.refreshFailed": "Сеанс обновлён, но не удалось обновить его сведения.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Файл",
   "desktop.menu.edit": "Правка",

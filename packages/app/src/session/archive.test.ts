@@ -3,7 +3,8 @@
  * @interface createSessionArchiveActions(deps): ArchiveActions; isArchivedSession(session): boolean
  * @behavior
  *   - PATCHes a captured server/session once, then canonically hydrates it.
- *   - Is pending per server/session and reports update or refresh failures once.
+ *   - Always releases pending after request, hydration, or presentation failure so retry is possible.
+ *   - Exposes pending transitions to the reactive shell bridge.
  * @edge-cases
  *   - Epoch zero is archived; null and undefined are active.
  * @see RFC 057 Addendum A.2
@@ -28,6 +29,40 @@ test("reports update failure without sync but treats refresh failure as committe
   expect(await createSessionArchiveActions({ update: async () => { throw update }, sync: async () => {}, toast: (n) => notices.push(n.kind), now: () => 1 }).archiveSession({ server: "s", sessionID: "x" })).toBe(false)
   expect(await createSessionArchiveActions({ update: async () => {}, sync: async () => { throw refresh }, toast: (n) => notices.push(n.kind), now: () => 1 }).setSessionArchive({ server: "s", sessionID: "x", archive: null })).toBe(true)
   expect(notices).toEqual(["update", "refresh"])
+})
+test("releases pending after a failed PATCH so the same target can retry", async () => {
+  const pending: boolean[] = []
+  let attempts = 0
+  const actions = createSessionArchiveActions({
+    update: async () => {
+      attempts++
+      if (attempts === 1) throw new Error("offline")
+    },
+    sync: async () => {},
+    toast: () => {},
+    now: () => 0,
+    onPendingChange: () => pending.push(actions.isPending({ server: "s", sessionID: "x" })),
+  })
+  expect(await actions.archiveSession({ server: "s", sessionID: "x" })).toBe(false)
+  expect(actions.isPending({ server: "s", sessionID: "x" })).toBe(false)
+  expect(await actions.archiveSession({ server: "s", sessionID: "x" })).toBe(true)
+  expect(attempts).toBe(2)
+  expect(pending).toEqual([true, false, true, false])
+})
+test("coalesces reconnect refreshes, runs one trailing refresh, and is inert after disposal", async () => {
+  const module = await import("./archive") as unknown as {
+    createArchiveIndexRefresh: (deps: { refresh: () => Promise<void>; onError: (error: unknown) => void; now: () => number; schedule: (run: () => void, delayMs: number) => () => void }) => { request: () => void; dispose: () => void }
+  }
+  let now = 0
+  let scheduled: (() => void) | undefined
+  let refreshes = 0
+  const refresh = module.createArchiveIndexRefresh({ refresh: async () => { refreshes++ }, onError: () => {}, now: () => now, schedule: (run) => { scheduled = run; return () => { scheduled = undefined } } })
+  refresh.request(); refresh.request()
+  expect(refreshes).toBe(1)
+  now = 1_000; scheduled?.()
+  expect(refreshes).toBe(2)
+  refresh.dispose(); refresh.request(); scheduled?.()
+  expect(refreshes).toBe(2)
 })
 test("uses numeric archive presence, including epoch zero", () => {
   expect(isArchivedSession(session(0))).toBe(true); expect(isArchivedSession(session(null))).toBe(false); expect(isArchivedSession(session())).toBe(false)

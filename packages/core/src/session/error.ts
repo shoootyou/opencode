@@ -96,3 +96,9 @@ export class ArchiveConflictError extends Schema.TaggedError<ArchiveConflictErro
     return `Archive contention exhausted: ${this.sessionID}`
   }
 }
+
+export class ArchiveLimitError extends Schema.TaggedError<ArchiveLimitError>()("Session.ArchiveLimitError", {
+  sessionID: SessionSchema.ID,
+  kind: Schema.Literals(["rate", "retention"]),
+  retryAfterMillis: Schema.optional(Schema.Number),
+}) {}

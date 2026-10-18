@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, onMount, Show, type JSX } from "solid-js"
+import { createMemo, createResource, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js"
 import path from "path"
 import type { SessionInfo } from "@opencode/client"
 import { Project } from "@opencode/schema/project"
@@ -23,6 +23,7 @@ import { useConfig } from "../config"
 import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
 import { projectName } from "../util/project"
 import { useLocation } from "../context/location"
+import { shouldKeepSessionScopeBinding } from "./session-list-model"
 
 type SessionListItem = {
   parentID?: string
@@ -80,7 +81,15 @@ export function DialogSessionList() {
   const local = useLocal()
   const sessionTabs = useSessionTabs()
   const config = useConfig().data
-  const archiveToggleBound = config.keybinds.get("session.archive.toggle").length > 0
+  const archiveToggleBound = createMemo(() =>
+    !shouldKeepSessionScopeBinding({
+      archiveBindings: () => [
+        ...config.keybinds.get("session.archive.toggle"),
+        ...config.keybinds.get("session.archived.toggle_visibility"),
+      ],
+      matchesCtrlA: (binding) => binding === "ctrl+a",
+    }),
+  )
   const toast = useToast()
   const activeLocation = useLocation()
   const [filter, setFilter] = createSignal("")
@@ -88,6 +97,15 @@ export function DialogSessionList() {
   const [search, setSearch] = createDebouncedSignal("", 150)
   const [showArchived, setShowArchived] = createSignal(false)
   const [archivePending, setArchivePending] = createSignal(false)
+  let archivePendingSessionID: string | undefined
+  let disposed = false
+  const ownerController = new AbortController()
+  let archiveController: AbortController | undefined
+  onCleanup(() => {
+    disposed = true
+    ownerController.abort()
+    archiveController?.abort()
+  })
   const [toDelete, setToDelete] = createSignal<string>()
   const [prefs, updatePrefs] = useStorage().store("session-list", {
     initial: { allProjects: config.tabs?.scope !== "cwd" },
@@ -106,8 +124,10 @@ export function DialogSessionList() {
       showArchived: showArchived(),
     }),
     async ({ query, allProjects, location, showArchived }) => {
+      if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
       try {
         if (!data.location.info(location)) await data.location.sync(location)
+        if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         const current = data.location.info(location)
         if (!current) throw new Error("Location unavailable")
         const response = await client.api.session.list({
@@ -124,13 +144,29 @@ export function DialogSessionList() {
           limit: 50,
           order: "desc",
           parentID: null,
-        })
+        }, { signal: ownerController.signal })
+        if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
+        const sessions = [...response.data]
+        const seen = new Set(sessions.map((session) => session.id))
+        let cursor = response.cursor.next
+        while (showArchived && cursor && sessions.filter((session) => !session.parentID && typeof session.time.archived === "number").length < 50) {
+          const next = await client.api.session.list({ cursor, archived: true, parentID: null, order: "desc", limit: 50 }, { signal: ownerController.signal })
+          if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
+          if (next.cursor.next === cursor) throw new Error("Repeated session cursor")
+          next.data.forEach((session) => {
+            if (seen.has(session.id)) return
+            seen.add(session.id)
+            sessions.push(session)
+          })
+          cursor = next.cursor.next
+        }
         return {
           identity: { query, allProjects, location, showArchived },
-          sessions: response.data,
+          sessions,
           error: undefined,
         }
       } catch (error) {
+        if (disposed || ownerController.signal.aborted) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         // A transient transport failure must degrade search, not crash the TUI
         // through the root ErrorBoundary when the errored resource is read.
         return {
@@ -284,7 +320,7 @@ export function DialogSessionList() {
         setSearch(query)
       }}
       bindings={
-        archiveToggleBound
+        archiveToggleBound()
           ? []
           : [
               {
@@ -360,36 +396,48 @@ export function DialogSessionList() {
         },
         {
           command: "session.archive.toggle",
-          title: "archive/unarchive",
+          title: "archive",
+          showWhenUnbound: true,
           disabled: archivePending(),
           onTrigger: (option: { value: string }) => {
-            if (archivePending()) return
+            if (archivePendingSessionID === option.value) return
             const session = sessions().find((session) => session.id === option.value)
             if (!session) return
+            archivePendingSessionID = session.id
             setArchivePending(true)
+            const controller = new AbortController()
+            archiveController = controller
             void (async () => {
               try {
                 await client.api.session.update({
                   sessionID: session.id,
                   archive: typeof session.time.archived === "number" ? null : Date.now(),
-                })
+                }, { signal: controller.signal })
+                if (disposed || controller.signal.aborted) return
                 data.session.invalidate(session.id)
-                void data.session.sync(session.id).catch((error) => {
+                await data.session.sync(session.id).catch((error) => {
+                  if (disposed || controller.signal.aborted) return
                   toast.show({
                     message: `Session updated, but refresh failed: ${errorMessage(error)}`,
                     variant: "error",
                     duration: 5000,
                   })
                 })
+                if (disposed || controller.signal.aborted) return
                 await refetchSearchResults()
+                if (disposed || controller.signal.aborted) return
               } catch (error) {
+                if (disposed || controller.signal.aborted) return
                 toast.show({
                   message: `Failed to update session archive: ${errorMessage(error)}`,
                   variant: "error",
                   duration: 5000,
                 })
               } finally {
-                setArchivePending(false)
+                if (!disposed && archiveController === controller) {
+                  archivePendingSessionID = undefined
+                  setArchivePending(false)
+                }
               }
             })()
           },
@@ -397,13 +445,14 @@ export function DialogSessionList() {
         {
           command: "session.archived.toggle_visibility",
           title: showArchived() ? "hide archived" : "show archived",
+          showWhenUnbound: true,
           selection: "none",
           onTrigger: () => setShowArchived((value) => !value),
         },
       ]}
       footerHints={[
         ...quickSwitchFooterHints(),
-        ...(archiveToggleBound
+        ...(archiveToggleBound()
           ? []
           : [{ title: allProjects() ? "current directory" : "all projects", label: "ctrl+a", side: "right" as const }]),
       ]}

@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.tk,
+  "common.unarchive": "Arhiwden dikelt",
+  "command.session.archive": "Arhiwle sessiýany",
+  "command.session.archive.description": "Arhiwle sessiýany",
+  "command.session.unarchive": "Arhiwden dikelt sessiýany",
+  "command.session.unarchive.description": "Sessiýany dikelt",
+  "command.session.archivedBrowse": "Arhiwlenen sessiýalar",
+  "command.session.archivedBrowse.description": "Sessiýany dikelt sessiýany",
+  "dialog.archivedSessions.title": "Arhiwlenen sessiýalar",
+  "dialog.archivedSessions.description": "Sessiýany dikelt sessiýany",
+  "dialog.archivedSessions.empty": "Arhiwlenen sessiýalar",
+  "dialog.archivedSessions.noMatches": "Arhiwlenen sessiýalar",
+  "dialog.archivedSessions.error": "Arhiwlenen sessiýalary ýüklemek bolmady",
+  "dialog.archivedSessions.loading": "Arhiwlenen sessiýalar ýüklenýär…",
+  "session.archive.refreshFailed": "Sessiýa täzelendi, ýöne maglumatlary täzelenmedi.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Faýl",
   "desktop.menu.edit": "Redaktirläň",

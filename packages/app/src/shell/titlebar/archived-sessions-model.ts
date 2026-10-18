@@ -27,6 +27,7 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
   const notify = () => listeners.forEach((listener) => listener())
   const state = () => value
   const load = async () => {
+    if (disposed) return
     controller?.abort()
     const current = new AbortController()
     controller = current

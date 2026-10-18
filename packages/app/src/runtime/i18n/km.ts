@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.km,
+  "common.unarchive": "ដកចេញពីប័ណ្ណសារ",
+  "command.session.archive": "ទុកក្នុងប័ណ្ណសារ សម័យ",
+  "command.session.archive.description": "ទុកក្នុងប័ណ្ណសារ សម័យ",
+  "command.session.unarchive": "ដកចេញពីប័ណ្ណសារ សម័យ",
+  "command.session.unarchive.description": "ស្តារសម័យ",
+  "command.session.archivedBrowse": "សម័យដែលបានទុកក្នុងប័ណ្ណសារ",
+  "command.session.archivedBrowse.description": "ស្តារសម័យ សម័យ",
+  "dialog.archivedSessions.title": "សម័យដែលបានទុកក្នុងប័ណ្ណសារ",
+  "dialog.archivedSessions.description": "ស្តារសម័យ សម័យ",
+  "dialog.archivedSessions.empty": "សម័យដែលបានទុកក្នុងប័ណ្ណសារ",
+  "dialog.archivedSessions.noMatches": "សម័យដែលបានទុកក្នុងប័ណ្ណសារ",
+  "dialog.archivedSessions.error": "មិនអាចផ្ទុកសម័យដែលបានទុកក្នុងប័ណ្ណសារបានទេ",
+  "dialog.archivedSessions.loading": "កំពុងផ្ទុកសម័យដែលបានទុកក្នុងប័ណ្ណសារ…",
+  "session.archive.refreshFailed": "សម័យត្រូវបានធ្វើបច្ចុប្បន្នភាព ប៉ុន្តែមិនអាចធ្វើឱ្យព័ត៌មានលម្អិតស្រស់បានទេ។",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ឯកសារ",
   "desktop.menu.edit": "កែសម្រួល",

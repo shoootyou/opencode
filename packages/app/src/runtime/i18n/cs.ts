@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.cs,
+  "common.unarchive": "Obnovit z archivu",
+  "command.session.archive": "Archivovat relaci",
+  "command.session.archive.description": "Archivovat relaci",
+  "command.session.unarchive": "Obnovit z archivu relaci",
+  "command.session.unarchive.description": "Obnovit relaci",
+  "command.session.archivedBrowse": "Archivované relace",
+  "command.session.archivedBrowse.description": "Obnovit relaci relaci",
+  "dialog.archivedSessions.title": "Archivované relace",
+  "dialog.archivedSessions.description": "Obnovit relaci relaci",
+  "dialog.archivedSessions.empty": "Archivované relace",
+  "dialog.archivedSessions.noMatches": "Archivované relace",
+  "dialog.archivedSessions.error": "Archivované relace se nepodařilo načíst",
+  "dialog.archivedSessions.loading": "Načítání archivovaných relací…",
+  "session.archive.refreshFailed": "Relace byla aktualizována, ale její podrobnosti se nepodařilo obnovit.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Soubor",
   "desktop.menu.edit": "Upravit",

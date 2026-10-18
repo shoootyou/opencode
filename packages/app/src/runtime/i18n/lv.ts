@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.lv,
+  "common.unarchive": "Atjaunot no arhīva",
+  "command.session.archive": "Arhivēt sesiju",
+  "command.session.archive.description": "Arhivēt sesiju",
+  "command.session.unarchive": "Atjaunot no arhīva sesiju",
+  "command.session.unarchive.description": "Atjaunot sesiju",
+  "command.session.archivedBrowse": "Arhivētās sesijas",
+  "command.session.archivedBrowse.description": "Atjaunot sesiju sesiju",
+  "dialog.archivedSessions.title": "Arhivētās sesijas",
+  "dialog.archivedSessions.description": "Atjaunot sesiju sesiju",
+  "dialog.archivedSessions.empty": "Arhivētās sesijas",
+  "dialog.archivedSessions.noMatches": "Arhivētās sesijas",
+  "dialog.archivedSessions.error": "Neizdevās ielādēt arhivētās sesijas",
+  "dialog.archivedSessions.loading": "Ielādē arhivētās sesijas…",
+  "session.archive.refreshFailed": "Sesija ir atjaunināta, bet tās informāciju neizdevās atsvaidzināt.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Fails",
   "desktop.menu.edit": "Rediģēt",

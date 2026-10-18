@@ -23,13 +23,6 @@ ui. Scanning the QR code from the OpenCode app, or pasting the link into its
 server address field, connects the app the same way. Sessions last 30 days;
 changing the server password signs every session out.
 
-## Sessions
-
-In the app or web UI, archive a session from **Home** or its session menu. Open
-the command palette to use **Archive session** (`Mod+Shift+Backspace`),
-**Unarchive session**, or **Browse archived sessions**. Archived sessions are
-available from the browser so you can restore them later.
-
 ### Over SSH
 
 When the server listens only on localhost, forward its port from your machine
@@ -65,6 +58,13 @@ The first time it turns remote access on, it asks before going ahead:
 Without an interactive terminal, the command fails unless you pass `--yes` to
 accept. Once accepted, later runs skip the prompt, even after remote access has
 been turned off with `opencode service set remote false`.
+
+## Sessions
+
+In the app or web UI, archive a session from **Home** or its session menu. Open
+the command palette to use **Archive session** (`Mod+Shift+Backspace`),
+**Unarchive session**, or **Browse archived sessions**. Archived sessions are
+available from the browser so you can restore them later.
 
 ## Configure
 

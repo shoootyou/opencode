@@ -1702,6 +1702,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "SessionArchiveLimitError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionArchiveLimitErrorEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Update mutable session properties.",
@@ -19574,6 +19584,45 @@
           }
         },
         "required": ["type"],
+        "additionalProperties": false
+      },
+      "SessionArchiveLimitErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["SessionArchiveLimitError"]
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["rate", "retention"]
+          },
+          "retryAfterMillis": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity", "-Infinity", "NaN"]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "sessionID", "kind", "message"],
         "additionalProperties": false
       },
       "SessionBusyErrorEncoded": {

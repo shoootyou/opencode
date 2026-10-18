@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.bs,
+  "common.unarchive": "Vrati iz arhive",
+  "command.session.archive": "Arhiviraj sesiju",
+  "command.session.archive.description": "Arhiviraj sesiju",
+  "command.session.unarchive": "Vrati iz arhive sesiju",
+  "command.session.unarchive.description": "Vrati sesiju",
+  "command.session.archivedBrowse": "Arhivirane sesije",
+  "command.session.archivedBrowse.description": "Vrati sesiju sesiju",
+  "dialog.archivedSessions.title": "Arhivirane sesije",
+  "dialog.archivedSessions.description": "Vrati sesiju sesiju",
+  "dialog.archivedSessions.empty": "Arhivirane sesije",
+  "dialog.archivedSessions.noMatches": "Arhivirane sesije",
+  "dialog.archivedSessions.error": "Nije moguće učitati arhivirane sesije",
+  "dialog.archivedSessions.loading": "Učitavanje arhiviranih sesija…",
+  "session.archive.refreshFailed": "Sesija je ažurirana, ali detalji nisu osvježeni.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Datoteka",
   "desktop.menu.edit": "Uredi",

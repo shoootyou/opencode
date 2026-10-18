@@ -30,6 +30,7 @@ import {
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionBusyError,
+  SessionArchiveLimitError,
   SessionNotFoundError,
   SkillNotFoundError,
   UnknownError,
@@ -369,7 +370,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           archive: Schema.NullOr(Schema.Finite).pipe(Schema.optional),
         }),
         success: HttpApiSchema.NoContent,
-        error: [ConflictError, SessionNotFoundError],
+        error: [ConflictError, SessionArchiveLimitError, SessionNotFoundError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

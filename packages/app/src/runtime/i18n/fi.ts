@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.fi,
+  "common.unarchive": "Palauta arkistosta",
+  "command.session.archive": "Arkistoi istunto",
+  "command.session.archive.description": "Arkistoi istunto",
+  "command.session.unarchive": "Palauta arkistosta istunto",
+  "command.session.unarchive.description": "Palauta istunto",
+  "command.session.archivedBrowse": "Arkistoidut istunnot",
+  "command.session.archivedBrowse.description": "Palauta istunto istunto",
+  "dialog.archivedSessions.title": "Arkistoidut istunnot",
+  "dialog.archivedSessions.description": "Palauta istunto istunto",
+  "dialog.archivedSessions.empty": "Arkistoidut istunnot",
+  "dialog.archivedSessions.noMatches": "Arkistoidut istunnot",
+  "dialog.archivedSessions.error": "Arkistoituja istuntoja ei voitu ladata",
+  "dialog.archivedSessions.loading": "Ladataan arkistoituja istuntoja…",
+  "session.archive.refreshFailed": "Istunto päivitettiin, mutta sen tietoja ei voitu päivittää.",
   "common.color.orange": "oranssi",
   "common.color.yellow": "keltainen",
   "common.color.cyan": "syaani",

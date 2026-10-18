@@ -2722,6 +2722,16 @@ export type MessageNotFoundError = {
 export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
 
+export type SessionArchiveLimitError = {
+  readonly _tag: "SessionArchiveLimitError"
+  readonly sessionID: string
+  readonly kind: "rate" | "retention"
+  readonly retryAfterMillis?: number | undefined
+  readonly message: string
+}
+export const isSessionArchiveLimitError = (value: unknown): value is SessionArchiveLimitError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionArchiveLimitError"
+
 export type CommandNotFoundError = {
   readonly _tag: "CommandNotFoundError"
   readonly command: string

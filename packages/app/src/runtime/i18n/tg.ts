@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.tg,
+  "common.unarchive": "Аз бойгонӣ барқарор кардан",
+  "command.session.archive": "Бойгонӣ кардан нишаст",
+  "command.session.archive.description": "Бойгонӣ кардан нишаст",
+  "command.session.unarchive": "Аз бойгонӣ барқарор кардан нишаст",
+  "command.session.unarchive.description": "Барқарор кардани нишаст",
+  "command.session.archivedBrowse": "Нишастҳои бойгонӣ",
+  "command.session.archivedBrowse.description": "Барқарор кардани нишаст нишаст",
+  "dialog.archivedSessions.title": "Нишастҳои бойгонӣ",
+  "dialog.archivedSessions.description": "Барқарор кардани нишаст нишаст",
+  "dialog.archivedSessions.empty": "Нишастҳои бойгонӣ",
+  "dialog.archivedSessions.noMatches": "Нишастҳои бойгонӣ",
+  "dialog.archivedSessions.error": "Нишастҳои бойгонӣ бор нашуданд",
+  "dialog.archivedSessions.loading": "Нишастҳои бойгонӣ бор мешаванд…",
+  "session.archive.refreshFailed": "Нишаст нав шуд, аммо тафсилоташ нав карда нашуд.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Файл",
   "desktop.menu.edit": "Таҳрир",

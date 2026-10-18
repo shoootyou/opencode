@@ -7,6 +7,7 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
 import { createArchiveCommandRegistration } from "./session-archive-commands-model"
 import { showArchivedSessionsDialog } from "./dialog-archived-sessions"
+import { useDialog } from "@opencode/ui/context/dialog"
 
 export function useTitlebarArchiveCommands(): void {
   const command = useCommand()
@@ -14,6 +15,7 @@ export function useTitlebarArchiveCommands(): void {
   const global = useGlobal()
   const language = useLanguage()
   const tabs = useTabs()
+  const dialog = useDialog()
   const [version, setVersion] = createSignal(0)
   const registration = createArchiveCommandRegistration({
     read: () => {
@@ -33,7 +35,7 @@ export function useTitlebarArchiveCommands(): void {
     t: language.t,
     archive: (target) => global.sessionArchive.archiveSession(target),
     unarchive: (target) => global.sessionArchive.setSessionArchive({ ...target, archive: null }),
-    browse: (server) => showArchivedSessionsDialog(server),
+    browse: (server) => showArchivedSessionsDialog(dialog, server),
   })
   createEffect(() => global.sessionArchive.isPending({ server: "", sessionID: "" }) || setVersion((value) => value + 1))
   command.register(registration.key, registration.options)

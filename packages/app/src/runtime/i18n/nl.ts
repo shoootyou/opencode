@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.nl,
+  "common.unarchive": "Uit archief halen",
+  "command.session.archive": "Archiveren sessie",
+  "command.session.archive.description": "Archiveren sessie",
+  "command.session.unarchive": "Uit archief halen sessie",
+  "command.session.unarchive.description": "Sessie herstellen",
+  "command.session.archivedBrowse": "Gearchiveerde sessies",
+  "command.session.archivedBrowse.description": "Sessie herstellen sessie",
+  "dialog.archivedSessions.title": "Gearchiveerde sessies",
+  "dialog.archivedSessions.description": "Sessie herstellen sessie",
+  "dialog.archivedSessions.empty": "Gearchiveerde sessies",
+  "dialog.archivedSessions.noMatches": "Gearchiveerde sessies",
+  "dialog.archivedSessions.error": "Gearchiveerde sessies konden niet worden geladen",
+  "dialog.archivedSessions.loading": "Gearchiveerde sessies laden…",
+  "session.archive.refreshFailed": "De sessie is bijgewerkt, maar de details konden niet worden vernieuwd.",
   "common.color.orange": "oranje",
   "common.color.yellow": "geel",
   "common.color.cyan": "cyaan",

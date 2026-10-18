@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.da,
+  "common.unarchive": "Gendan",
+  "command.session.archive": "Arkivér session",
+  "command.session.archive.description": "Arkivér session",
+  "command.session.unarchive": "Gendan session",
+  "command.session.unarchive.description": "Gendan session",
+  "command.session.archivedBrowse": "Arkiverede sessioner",
+  "command.session.archivedBrowse.description": "Gendan session session",
+  "dialog.archivedSessions.title": "Arkiverede sessioner",
+  "dialog.archivedSessions.description": "Gendan session session",
+  "dialog.archivedSessions.empty": "Arkiverede sessioner",
+  "dialog.archivedSessions.noMatches": "Arkiverede sessioner",
+  "dialog.archivedSessions.error": "Kunne ikke indlæse arkiverede sessioner",
+  "dialog.archivedSessions.loading": "Indlæser arkiverede sessioner…",
+  "session.archive.refreshFailed": "Sessionen blev opdateret, men dens oplysninger kunne ikke opdateres.",
   "common.color.orange": "orange",
   "common.color.yellow": "gul",
   "common.color.cyan": "cyan",

@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.sl,
+  "common.unarchive": "Obnovi iz arhiva",
+  "command.session.archive": "Arhiviraj sejo",
+  "command.session.archive.description": "Arhiviraj sejo",
+  "command.session.unarchive": "Obnovi iz arhiva sejo",
+  "command.session.unarchive.description": "Obnovi sejo",
+  "command.session.archivedBrowse": "Arhivirane seje",
+  "command.session.archivedBrowse.description": "Obnovi sejo sejo",
+  "dialog.archivedSessions.title": "Arhivirane seje",
+  "dialog.archivedSessions.description": "Obnovi sejo sejo",
+  "dialog.archivedSessions.empty": "Arhivirane seje",
+  "dialog.archivedSessions.noMatches": "Arhivirane seje",
+  "dialog.archivedSessions.error": "Arhiviranih sej ni bilo mogoče naložiti",
+  "dialog.archivedSessions.loading": "Nalaganje arhiviranih sej…",
+  "session.archive.refreshFailed": "Seja je bila posodobljena, vendar podrobnosti ni bilo mogoče osvežiti.",
   "session.queue.attachments.two": "Še {{count}} priponki",
   "session.queue.attachments.few": "Še {{count}} priponke",
   "settings.workspaces.sessions.filtered.two": "{{count}} seji",

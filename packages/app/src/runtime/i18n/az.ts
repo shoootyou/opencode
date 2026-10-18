@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.az,
+  "common.unarchive": "Arxivdən çıxar",
+  "command.session.archive": "Arxivlə sessiyanı",
+  "command.session.archive.description": "Arxivlə sessiyanı",
+  "command.session.unarchive": "Arxivdən çıxar sessiyanı",
+  "command.session.unarchive.description": "Sessiyanı bərpa et",
+  "command.session.archivedBrowse": "Arxivləşdirilmiş sessiyalar",
+  "command.session.archivedBrowse.description": "Sessiyanı bərpa et sessiyanı",
+  "dialog.archivedSessions.title": "Arxivləşdirilmiş sessiyalar",
+  "dialog.archivedSessions.description": "Sessiyanı bərpa et sessiyanı",
+  "dialog.archivedSessions.empty": "Arxivləşdirilmiş sessiyalar",
+  "dialog.archivedSessions.noMatches": "Arxivləşdirilmiş sessiyalar",
+  "dialog.archivedSessions.error": "Arxivləşdirilmiş sessiyalar yüklənə bilmədi",
+  "dialog.archivedSessions.loading": "Arxivləşdirilmiş sessiyalar yüklənir…",
+  "session.archive.refreshFailed": "Sessiya yeniləndi, lakin təfərrüatlar yenilənə bilmədi.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Fayl",
   "desktop.menu.edit": "Redaktə",

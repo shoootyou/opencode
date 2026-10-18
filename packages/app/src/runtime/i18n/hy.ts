@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.hy,
+  "common.unarchive": "Վերականգնել արխիվից",
+  "command.session.archive": "Արխիվացնել նիստը",
+  "command.session.archive.description": "Արխիվացնել նիստը",
+  "command.session.unarchive": "Վերականգնել արխիվից նիստը",
+  "command.session.unarchive.description": "Վերականգնել նիստը",
+  "command.session.archivedBrowse": "Արխիվացված նիստեր",
+  "command.session.archivedBrowse.description": "Վերականգնել նիստը նիստը",
+  "dialog.archivedSessions.title": "Արխիվացված նիստեր",
+  "dialog.archivedSessions.description": "Վերականգնել նիստը նիստը",
+  "dialog.archivedSessions.empty": "Արխիվացված նիստեր",
+  "dialog.archivedSessions.noMatches": "Արխիվացված նիստեր",
+  "dialog.archivedSessions.error": "Չհաջողվեց բեռնել արխիվացված նիստերը",
+  "dialog.archivedSessions.loading": "Արխիվացված նիստերի բեռնում…",
+  "session.archive.refreshFailed": "Նիստը թարմացվել է, բայց մանրամասները չհաջողվեց թարմացնել։",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Ֆայլ",
   "desktop.menu.edit": "Խմբագրել",

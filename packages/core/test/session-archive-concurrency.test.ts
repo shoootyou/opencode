@@ -5,12 +5,14 @@
  *   - Concurrent archive/restore callers commit at most one represented-state transition.
  *   - A stale observation retries from current state; it never admits a stale transition.
  *   - Commit-hook rejection rolls back the projector, retained event, sequence, and notification.
+ *   - Only the private stale-admission signal retries; rate and retention budgets remain persistent.
  * @edge-cases
  *   - Deletion during admission never recreates a session.
  *   - Contention stops after the initial attempt plus eight retries.
  */
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import { eq } from "drizzle-orm"
 import { Bus } from "@opencode/core/bus"
 import { Database } from "@opencode/core/database/database"
@@ -32,6 +34,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { EventSequenceTable, EventTable } from "@opencode/core/event/sql"
 import { SessionTable } from "@opencode/core/session/sql"
 import { Project } from "@opencode/schema/project"
+import { Event } from "@opencode/schema/event"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { SessionID } from "@opencode/schema/session-id"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -216,6 +219,147 @@ describe("session archive concurrency contract", () => {
       expect(String(result)).toContain("Session.NotFoundError")
       expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
       expect(yield* db.select().from(EventTable).all()).toHaveLength(0)
+    }),
+  )
+
+  it.effect("propagates an arbitrary archive publish defect without retrying or translating it to contention", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const defect = { reason: "injected archive publish defect" }
+      let attempts = 0
+      const sessions = yield* sessionWithArchivePublishHook(() =>
+        Effect.sync(() => ++attempts).pipe(Effect.andThen(Effect.die(defect))),
+      )
+      const result = yield* setArchive(sessions, sessionID, 0).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(String(result)).toContain("injected archive publish defect")
+      expect(String(result)).not.toContain("ArchiveConflictError")
+      expect(attempts).toBe(1)
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({ archived: null })
+    }),
+  )
+
+  it.effect("rejects direct deletion between observation and commit without advancing the archive sequence", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      let deleted = false
+      const sessions = yield* sessionWithArchivePublishHook((input) => {
+        if (deleted) return Effect.void
+        deleted = true
+        return db.delete(SessionTable).where(eq(SessionTable.id, input.sessionID)).run().pipe(Effect.orDie, Effect.asVoid)
+      })
+      const result = yield* setArchive(sessions, sessionID, 0).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(String(result)).toContain("Session.NotFoundError")
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+    }),
+  )
+
+  it.effect("limits alternating archive transitions to six per persistent 60-second window", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      yield* TestClock.setTime(1_000)
+      const sessions = yield* sessionWithArchivePublishHook(() => Effect.void)
+      const results = yield* Effect.forEach([0, null, 1, null, 2, null, 3] as const, (archived) =>
+        setArchive(sessions, sessionID, archived).pipe(Effect.exit),
+      )
+      expect(results.slice(0, 6).every(Exit.isSuccess)).toBe(true)
+      expect(Exit.isFailure(results[6]!)).toBe(true)
+      expect(String(results[6]!)).toContain("ArchiveLimitError")
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+      expect(yield* db.select().from(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, sessionID)).get()).toMatchObject({ seq: 5 })
+      yield* TestClock.adjust("60 seconds")
+      yield* setArchive(sessions, sessionID, 3)
+    }),
+  )
+
+  it.effect("reserves the final archive-event slot for restore and rejects another archive at quota", () =>
+    Effect.gen(function* () {
+      const db = yield* seed([{ id: sessionID, archived: 0 }])
+      yield* TestClock.setTime(2_000_000)
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 1022 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 1023 }, (_, seq) => ({
+            id: Event.ID.make(`evt_archive_quota_${seq}`),
+            aggregate_id: sessionID,
+            seq,
+            // Persisted history is old but realistic; it fills quota without tripping the rolling rate window.
+            created: 1_000_000 + seq,
+            type: Bus.versionedType(SessionEvent.ArchiveChanged.type, 1),
+            data: { sessionID, archived: seq % 2 === 0 ? 0 : null },
+          })),
+        )
+        .run()
+      const sessions = yield* sessionWithArchivePublishHook(() => Effect.void)
+      yield* setArchive(sessions, sessionID, null)
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(1024)
+      const denied = yield* setArchive(sessions, sessionID, 7).pipe(Effect.exit)
+      expect(Exit.isFailure(denied)).toBe(true)
+      expect(String(denied)).toContain("ArchiveLimitError")
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(1024)
+    }),
+  )
+
+  it.effect("counts future-dated retained archive events conservatively for both rate and quota admission", () =>
+    Effect.gen(function* () {
+      const now = 3_000_000
+      const db = yield* seed()
+      yield* TestClock.setTime(now)
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 5 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 6 }, (_, seq) => ({
+            id: Event.ID.make(`evt_archive_future_rate_${seq}`),
+            aggregate_id: sessionID,
+            seq,
+            created: now + 1,
+            type: Bus.versionedType(SessionEvent.ArchiveChanged.type, 1),
+            data: { sessionID, archived: seq % 2 === 0 ? 0 : null },
+          })),
+        )
+        .run()
+      const sessions = yield* sessionWithArchivePublishHook(() => Effect.void)
+      const rateDenied = yield* setArchive(sessions, sessionID, 0).pipe(Effect.exit)
+      expect(Exit.isFailure(rateDenied)).toBe(true)
+      expect(String(rateDenied)).toContain("ArchiveLimitError")
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+
+      const quotaID = SessionID.make("ses_archive_future_quota")
+      yield* db.insert(SessionTable).values({
+        id: quotaID,
+        project_id: Project.ID.global,
+        directory: "/project",
+        slug: String(quotaID),
+        version: "test",
+        time_archived: null,
+        time_created: 1,
+        time_updated: 1,
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: quotaID, seq: 1022 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 1023 }, (_, seq) => ({
+            id: Event.ID.make(`evt_archive_future_quota_${seq}`),
+            aggregate_id: quotaID,
+            seq,
+            created: seq === 1022 ? now + 1 : now - 120_000 - seq,
+            type: Bus.versionedType(SessionEvent.ArchiveChanged.type, 1),
+            data: { sessionID: quotaID, archived: seq % 2 === 0 ? 0 : null },
+          })),
+        )
+        .run()
+      const quotaDenied = yield* setArchive(sessions, quotaID, 0).pipe(Effect.exit)
+      expect(Exit.isFailure(quotaDenied)).toBe(true)
+      expect(String(quotaDenied)).toContain("ArchiveLimitError")
+      expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, quotaID)).all()).toHaveLength(1023)
     }),
   )
 

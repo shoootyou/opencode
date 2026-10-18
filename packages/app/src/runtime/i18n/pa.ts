@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.pa,
+  "common.unarchive": "ਆਰਕਾਈਵ ਤੋਂ ਕੱਢੋ",
+  "command.session.archive": "ਆਰਕਾਈਵ ਕਰੋ ਸੈਸ਼ਨ",
+  "command.session.archive.description": "ਆਰਕਾਈਵ ਕਰੋ ਸੈਸ਼ਨ",
+  "command.session.unarchive": "ਆਰਕਾਈਵ ਤੋਂ ਕੱਢੋ ਸੈਸ਼ਨ",
+  "command.session.unarchive.description": "ਸੈਸ਼ਨ ਮੁੜ ਬਹਾਲ ਕਰੋ",
+  "command.session.archivedBrowse": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ",
+  "command.session.archivedBrowse.description": "ਸੈਸ਼ਨ ਮੁੜ ਬਹਾਲ ਕਰੋ ਸੈਸ਼ਨ",
+  "dialog.archivedSessions.title": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ",
+  "dialog.archivedSessions.description": "ਸੈਸ਼ਨ ਮੁੜ ਬਹਾਲ ਕਰੋ ਸੈਸ਼ਨ",
+  "dialog.archivedSessions.empty": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ",
+  "dialog.archivedSessions.noMatches": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ",
+  "dialog.archivedSessions.error": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੇ",
+  "dialog.archivedSessions.loading": "ਆਰਕਾਈਵ ਕੀਤੇ ਸੈਸ਼ਨ ਲੋਡ ਹੋ ਰਹੇ ਹਨ…",
+  "session.archive.refreshFailed": "ਸੈਸ਼ਨ ਅੱਪਡੇਟ ਹੋ ਗਿਆ, ਪਰ ਵੇਰਵੇ ਤਾਜ਼ਾ ਨਹੀਂ ਹੋ ਸਕੇ।",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "فائل",
   "desktop.menu.edit": "ترمیم",

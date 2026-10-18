@@ -7,12 +7,12 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
 
-export function showArchivedSessionsDialog(server: string) {
-  const dialog = useDialog()
+export function showArchivedSessionsDialog(dialog: Pick<ReturnType<typeof useDialog>, "show">, server: string) {
   dialog.show(() => <ArchivedSessionsDialog server={server} />)
 }
 
 function ArchivedSessionsDialog(props: { server: string }) {
+  const dialog = useDialog()
   const global = useGlobal()
   const language = useLanguage()
   const tabs = useTabs()
@@ -27,11 +27,11 @@ function ArchivedSessionsDialog(props: { server: string }) {
     touchProject: ({ directory }) => ctx.projects.touch(directory),
     addTab: ({ server, sessionId }) => tabs.addSessionTab({ server: server as never, sessionId }),
     selectTab: tabs.select,
-    close: () => useDialog().close(),
+    close: () => dialog.close(),
   })
   model.subscribe(() => setVersion((value) => value + 1))
   void model.load()
   onCleanup(model.dispose)
   const state = () => { version(); return model.state() }
-  return <Dialog size="large"><DialogHeader><DialogTitleGroup title={language.t("dialog.archivedSessions.title")} /></DialogHeader><DialogBody><Show when={state().status === "ready"} fallback={<div>{state().status === "loading" ? language.t("dialog.archivedSessions.loading") : state().status === "error" ? language.t("dialog.archivedSessions.error") : ""}</div>}><List items={(filter) => [...model.search(filter)]} key={(session) => session.id} filterKeys={["title", "location.directory"]} search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }} emptyMessage={language.t("dialog.archivedSessions.empty")}>{(session) => <button type="button" disabled={model.restoringID() === session.id} onClick={() => void model.restore(session.id)}>{session.title ?? session.location.directory}</button>}</List></Show></DialogBody></Dialog>
+  return <Dialog size="large"><DialogHeader><DialogTitleGroup title={language.t("dialog.archivedSessions.title")} /></DialogHeader><DialogBody><Show when={state().status === "ready"} fallback={<div>{state().status === "loading" ? language.t("dialog.archivedSessions.loading") : state().status === "error" ? <button type="button" onClick={() => void model.load()}>{language.t("common.retry")}</button> : ""}</div>}><List items={(filter) => [...model.search(filter)]} key={(session) => session.id} filterKeys={["title", "location.directory"]} search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }} emptyMessage={language.t("dialog.archivedSessions.empty")} onSelect={(session) => { if (session) void model.restore(session.id) }}>{(session) => <span aria-disabled={model.restoringID() === session.id}>{session.title ?? session.location.directory}</span>}</List></Show></DialogBody></Dialog>
 }

@@ -29,6 +29,7 @@ import { SessionExecution } from "./session/execution.js"
 import {
   AttachmentError,
   ArchiveConflictError,
+  ArchiveLimitError,
   BusyError,
   CompactionConflictError,
   ForkEmptyError,
@@ -102,6 +103,7 @@ type ForkInput = {
 export {
   AttachmentError,
   ArchiveConflictError,
+  ArchiveLimitError,
   BusyError,
   CompactionConflictError,
   InboxConflictError,
@@ -187,7 +189,7 @@ export interface Interface {
   readonly setArchive: (input: {
     sessionID: SessionSchema.ID
     archived: number | null
-  }) => Effect.Effect<void, NotFoundError | ArchiveConflictError>
+  }) => Effect.Effect<void, NotFoundError | ArchiveConflictError | ArchiveLimitError>
   readonly move: SessionMove.Interface["move"]
   readonly prompt: (
     input: Parameters<Session.Handle["prompt"]>[0] & { sessionID: SessionSchema.ID },

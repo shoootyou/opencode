@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.sq,
+  "common.unarchive": "Rikthe nga arkivi",
+  "command.session.archive": "Arkivo sesionin",
+  "command.session.archive.description": "Arkivo sesionin",
+  "command.session.unarchive": "Rikthe nga arkivi sesionin",
+  "command.session.unarchive.description": "Rikthe sesionin",
+  "command.session.archivedBrowse": "Sesionet e arkivuara",
+  "command.session.archivedBrowse.description": "Rikthe sesionin sesionin",
+  "dialog.archivedSessions.title": "Sesionet e arkivuara",
+  "dialog.archivedSessions.description": "Rikthe sesionin sesionin",
+  "dialog.archivedSessions.empty": "Sesionet e arkivuara",
+  "dialog.archivedSessions.noMatches": "Sesionet e arkivuara",
+  "dialog.archivedSessions.error": "Nuk u ngarkuan sesionet e arkivuara",
+  "dialog.archivedSessions.loading": "Po ngarkohen sesionet e arkivuara…",
+  "session.archive.refreshFailed": "Sesioni u përditësua, por detajet nuk mund të rifreskoheshin.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Skedari",
   "desktop.menu.edit": "Redakto",

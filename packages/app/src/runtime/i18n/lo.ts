@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.lo,
+  "common.unarchive": "ນຳອອກຈາກຄັງ",
+  "command.session.archive": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",
+  "command.session.archive.description": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",
+  "command.session.unarchive": "ນຳອອກຈາກຄັງ ເຊສຊັນ",
+  "command.session.unarchive.description": "ກູ້ຄືນເຊສຊັນ",
+  "command.session.archivedBrowse": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
+  "command.session.archivedBrowse.description": "ກູ້ຄືນເຊສຊັນ ເຊສຊັນ",
+  "dialog.archivedSessions.title": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
+  "dialog.archivedSessions.description": "ກູ້ຄືນເຊສຊັນ ເຊສຊັນ",
+  "dialog.archivedSessions.empty": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
+  "dialog.archivedSessions.noMatches": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
+  "dialog.archivedSessions.error": "ບໍ່ສາມາດໂຫຼດເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
+  "dialog.archivedSessions.loading": "ກຳລັງໂຫຼດເຊສຊັນທີ່ເກັບເຂົ້າຄັງ…",
+  "session.archive.refreshFailed": "ເຊສຊັນຖືກອັບເດດແລ້ວ ແຕ່ບໍ່ສາມາດໂຫຼດລາຍລະອຽດໃໝ່ໄດ້។",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ໄຟລ໌",
   "desktop.menu.edit": "ແກ້ໄຂ",

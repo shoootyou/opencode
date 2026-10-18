@@ -219,8 +219,7 @@ test("renders configured archive actions without reporting a TextBuffer failure"
   try {
     const frame = await app.waitForFrame(
       (value) =>
-        value.includes("archive/unarchive") &&
-        value.includes("ctrl+a") &&
+        value.includes("archivectrl+a") &&
         value.includes("show archived") &&
         value.includes("ctrl+v"),
     )

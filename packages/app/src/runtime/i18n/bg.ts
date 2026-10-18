@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.bg,
+  "common.unarchive": "Възстанови от архив",
+  "command.session.archive": "Архивирай сесия",
+  "command.session.archive.description": "Архивирай сесия",
+  "command.session.unarchive": "Възстанови от архив сесия",
+  "command.session.unarchive.description": "Възстанови сесия",
+  "command.session.archivedBrowse": "Архивирани сесии",
+  "command.session.archivedBrowse.description": "Възстанови сесия сесия",
+  "dialog.archivedSessions.title": "Архивирани сесии",
+  "dialog.archivedSessions.description": "Възстанови сесия сесия",
+  "dialog.archivedSessions.empty": "Архивирани сесии",
+  "dialog.archivedSessions.noMatches": "Архивирани сесии",
+  "dialog.archivedSessions.error": "Архивираните сесии не могат да се заредят",
+  "dialog.archivedSessions.loading": "Зареждане на архивирани сесии…",
+  "session.archive.refreshFailed": "Сесията е обновена, но подробностите не могат да се опреснят.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Файл",
   "desktop.menu.edit": "Редактиране",

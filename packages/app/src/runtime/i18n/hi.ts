@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.hi,
+  "common.unarchive": "संग्रह से हटाएँ",
+  "command.session.archive": "संग्रहीत करें सत्र",
+  "command.session.archive.description": "संग्रहीत करें सत्र",
+  "command.session.unarchive": "संग्रह से हटाएँ सत्र",
+  "command.session.unarchive.description": "सत्र पुनर्स्थापित करें",
+  "command.session.archivedBrowse": "संग्रहीत सत्र",
+  "command.session.archivedBrowse.description": "सत्र पुनर्स्थापित करें सत्र",
+  "dialog.archivedSessions.title": "संग्रहीत सत्र",
+  "dialog.archivedSessions.description": "सत्र पुनर्स्थापित करें सत्र",
+  "dialog.archivedSessions.empty": "संग्रहीत सत्र",
+  "dialog.archivedSessions.noMatches": "संग्रहीत सत्र",
+  "dialog.archivedSessions.error": "संग्रहीत सत्र लोड नहीं हो सके",
+  "dialog.archivedSessions.loading": "संग्रहीत सत्र लोड हो रहे हैं…",
+  "session.archive.refreshFailed": "सत्र अपडेट हो गया, लेकिन उसका विवरण रीफ़्रेश नहीं हो सका।",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "फ़ाइल",
   "desktop.menu.edit": "संपादित करें",

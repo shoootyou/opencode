@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.ur,
+  "common.unarchive": "آرکائیو سے نکالیں",
+  "command.session.archive": "محفوظ کریں سیشن",
+  "command.session.archive.description": "محفوظ کریں سیشن",
+  "command.session.unarchive": "آرکائیو سے نکالیں سیشن",
+  "command.session.unarchive.description": "سیشن بحال کریں",
+  "command.session.archivedBrowse": "آرکائیو شدہ سیشن",
+  "command.session.archivedBrowse.description": "سیشن بحال کریں سیشن",
+  "dialog.archivedSessions.title": "آرکائیو شدہ سیشن",
+  "dialog.archivedSessions.description": "سیشن بحال کریں سیشن",
+  "dialog.archivedSessions.empty": "آرکائیو شدہ سیشن",
+  "dialog.archivedSessions.noMatches": "آرکائیو شدہ سیشن",
+  "dialog.archivedSessions.error": "آرکائیو شدہ سیشن لوڈ نہیں ہو سکے",
+  "dialog.archivedSessions.loading": "آرکائیو شدہ سیشن لوڈ ہو رہے ہیں…",
+  "session.archive.refreshFailed": "سیشن اپ ڈیٹ ہو گیا، مگر اس کی تفصیلات تازہ نہیں ہو سکیں۔",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "فائل",
   "desktop.menu.edit": "ترمیم",

@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.sv,
+  "common.unarchive": "Återställ från arkiv",
+  "command.session.archive": "Arkivera session",
+  "command.session.archive.description": "Arkivera session",
+  "command.session.unarchive": "Återställ från arkiv session",
+  "command.session.unarchive.description": "Återställ session",
+  "command.session.archivedBrowse": "Arkiverade sessioner",
+  "command.session.archivedBrowse.description": "Återställ session session",
+  "dialog.archivedSessions.title": "Arkiverade sessioner",
+  "dialog.archivedSessions.description": "Återställ session session",
+  "dialog.archivedSessions.empty": "Arkiverade sessioner",
+  "dialog.archivedSessions.noMatches": "Arkiverade sessioner",
+  "dialog.archivedSessions.error": "Kunde inte läsa in arkiverade sessioner",
+  "dialog.archivedSessions.loading": "Läser in arkiverade sessioner…",
+  "session.archive.refreshFailed": "Sessionen uppdaterades, men informationen kunde inte uppdateras.",
   "common.color.orange": "orange",
   "common.color.yellow": "gul",
   "common.color.cyan": "cyan",

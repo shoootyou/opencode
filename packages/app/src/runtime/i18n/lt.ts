@@ -71,10 +71,21 @@ const desktop = [
   "Pasirinkti priedai viršija {{limit}} MB ribą",
 ]
 
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.lt,
+  "common.unarchive": "Atkurti iš archyvo",
+  "command.session.archive": "Archyvuoti seansą",
+  "command.session.archive.description": "Archyvuoti seansą",
+  "command.session.unarchive": "Atkurti iš archyvo seansą",
+  "command.session.unarchive.description": "Atkurti seansą",
+  "command.session.archivedBrowse": "Archyvuoti seansai",
+  "command.session.archivedBrowse.description": "Atkurti seansą seansą",
+  "dialog.archivedSessions.title": "Archyvuoti seansai",
+  "dialog.archivedSessions.description": "Atkurti seansą seansą",
+  "dialog.archivedSessions.empty": "Archyvuoti seansai",
+  "dialog.archivedSessions.noMatches": "Archyvuoti seansai",
+  "dialog.archivedSessions.error": "Nepavyko įkelti archyvuotų seansų",
+  "dialog.archivedSessions.loading": "Įkeliami archyvuoti seansai…",
+  "session.archive.refreshFailed": "Seansas atnaujintas, bet nepavyko atnaujinti jo informacijos.",
   ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
   "command.category.suggested": "Siūloma",
   "command.category.view": "Rodinys",

@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.pl,
+  "common.unarchive": "Przywróć z archiwum",
+  "command.session.archive": "Archiwizuj sesję",
+  "command.session.archive.description": "Archiwizuj sesję",
+  "command.session.unarchive": "Przywróć z archiwum sesję",
+  "command.session.unarchive.description": "Przywróć sesję",
+  "command.session.archivedBrowse": "Zarchiwizowane sesje",
+  "command.session.archivedBrowse.description": "Przywróć sesję sesję",
+  "dialog.archivedSessions.title": "Zarchiwizowane sesje",
+  "dialog.archivedSessions.description": "Przywróć sesję sesję",
+  "dialog.archivedSessions.empty": "Zarchiwizowane sesje",
+  "dialog.archivedSessions.noMatches": "Zarchiwizowane sesje",
+  "dialog.archivedSessions.error": "Nie można załadować zarchiwizowanych sesji",
+  "dialog.archivedSessions.loading": "Ładowanie zarchiwizowanych sesji…",
+  "session.archive.refreshFailed": "Sesja została zaktualizowana, ale nie można było odświeżyć jej szczegółów.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Plik",
   "desktop.menu.edit": "Edycja",

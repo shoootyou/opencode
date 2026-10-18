@@ -22,7 +22,7 @@ export function getArchiveCommandState(input: ArchiveCommandInput): ArchiveComma
   return { server, target, canArchive: !!target && !pending && !!info && !isArchivedSession(info), canUnarchive: !!target && !pending && !!info && isArchivedSession(info), canBrowse: !!server }
 }
 
-export function createArchiveCommandRegistration(deps: Readonly<{ read: () => ArchiveCommandInput; t: (key: ArchiveCommandTextKey) => string; archive: (target: ArchiveTarget) => Promise<boolean>; unarchive: (target: ArchiveTarget) => Promise<boolean>; browse: (server: string) => unknown }>): Readonly<{ key: "titlebar.session-archive"; options: () => ArchiveCommandOption[] }> {
+export function createArchiveCommandRegistration(deps: Readonly<{ read: () => ArchiveCommandInput; t: (key: ArchiveCommandTextKey) => string; archive: (target: ArchiveTarget) => Promise<boolean>; unarchive: (target: ArchiveTarget) => Promise<boolean>; transition?: (target: ArchiveTarget) => Promise<boolean>; browse: (server: string) => unknown }>): Readonly<{ key: "titlebar.session-archive"; options: () => ArchiveCommandOption[] }> {
   const option = (id: ArchiveCommandID, action: "archive" | "unarchive" | "browse"): ArchiveCommandOption => {
     const input = deps.read()
     const state = getArchiveCommandState(input)
@@ -38,7 +38,7 @@ export function createArchiveCommandRegistration(deps: Readonly<{ read: () => Ar
       disabled: !eligible,
       onSelect: async () => {
         const current = getArchiveCommandState(deps.read())
-        if (action === "archive" && current.canArchive && current.target) await deps.archive(current.target)
+        if (action === "archive" && current.canArchive && current.target) await (deps.transition ?? deps.archive)(current.target)
         if (action === "unarchive" && current.canUnarchive && current.target) await deps.unarchive(current.target)
         if (action === "browse" && current.canBrowse && current.server) await deps.browse(current.server)
       },

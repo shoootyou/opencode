@@ -17,19 +17,20 @@ export function isArchiveRouteCurrent(target: ArchiveTarget, current: Readonly<{
   return current?.server === target.server && current.sessionID === target.sessionID
 }
 
-export async function runTimelineArchive(input: Readonly<{ target: ArchiveTarget; session: ArchiveSession; sessions: readonly ArchiveSession[] }>, deps: Readonly<{ setArchive: SetSessionArchive; now: () => number; isActive: () => boolean; currentRoute: () => Readonly<{ server: string; sessionID: string }> | undefined; navigate: (landing: ArchiveLanding) => Promise<void>; removeTabs: (detail: ArchiveTabsRemoved) => void; toast: (notice: ArchiveNotice) => void }>): Promise<boolean> {
+export async function runTimelineArchive(input: Readonly<{ target: ArchiveTarget; session: ArchiveSession; sessions: readonly ArchiveSession[] }>, deps: Readonly<{ setArchive: SetSessionArchive; now: () => number; isActive: () => boolean; currentRoute: () => Readonly<{ server: string; sessionID: string }> | undefined; navigate: (landing: ArchiveLanding) => void | Promise<void>; removeTabs: (detail: ArchiveTabsRemoved & Readonly<{ navigate: false }>) => void; toast: (notice: ArchiveNotice) => void }>): Promise<boolean> {
   if (input.session.id !== input.target.sessionID || input.session.parentID || !deps.isActive()) return false
   if (isArchivedSession(input.session)) return deps.setArchive({ ...input.target, archive: null })
   const landing = snapshotArchiveNeighbour({ target: input.target, directory: input.session.location.directory, sessions: input.sessions })
   const committed = await deps.setArchive({ ...input.target, archive: deps.now() })
   if (!committed || !deps.isActive()) return committed
-  try {
-    if (isArchiveRouteCurrent(input.target, deps.currentRoute())) await deps.navigate(landing)
-    if (isArchiveRouteCurrent(input.target, deps.currentRoute())) throw new Error("Archive navigation did not leave target")
-  } catch (error) {
-    deps.toast({ kind: "navigation", error })
-    return true
+  const current = isArchiveRouteCurrent(input.target, deps.currentRoute())
+  deps.removeTabs({ server: input.target.server, directory: input.session.location.directory, sessionIDs: [input.target.sessionID], navigate: false })
+  if (current && deps.isActive()) {
+    try {
+      await deps.navigate(landing)
+    } catch (error) {
+      deps.toast({ kind: "navigation", error })
+    }
   }
-  if (deps.isActive()) deps.removeTabs({ server: input.target.server, directory: input.session.location.directory, sessionIDs: [input.target.sessionID] })
   return true
 }

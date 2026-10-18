@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.es,
+  "common.unarchive": "Desarchivar",
+  "command.session.archive": "Archivar sesión",
+  "command.session.archive.description": "Archivar sesión",
+  "command.session.unarchive": "Desarchivar sesión",
+  "command.session.unarchive.description": "Restaura la sesión actual en la lista de sesiones",
+  "command.session.archivedBrowse": "Sesiones archivadas",
+  "command.session.archivedBrowse.description": "Encuentra y restaura una sesión archivada",
+  "dialog.archivedSessions.title": "Sesiones archivadas",
+  "dialog.archivedSessions.description": "Encuentra y restaura una sesión archivada",
+  "dialog.archivedSessions.empty": "No se encontraron sesiones archivadas",
+  "dialog.archivedSessions.noMatches": "No hay sesiones archivadas que coincidan con tu búsqueda",
+  "dialog.archivedSessions.error": "No se pudieron cargar las sesiones archivadas",
+  "dialog.archivedSessions.loading": "Cargando sesiones archivadas…",
+  "session.archive.refreshFailed": "La sesión se actualizó, pero no se pudieron actualizar sus detalles.",
   "common.color.orange": "naranja",
   "common.color.yellow": "amarillo",
   "common.color.cyan": "cian",

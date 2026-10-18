@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.fa,
+  "common.unarchive": "خارج کردن از بایگانی",
+  "command.session.archive": "بایگانی نشست",
+  "command.session.archive.description": "بایگانی نشست",
+  "command.session.unarchive": "خارج کردن از بایگانی نشست",
+  "command.session.unarchive.description": "بازیابی نشست",
+  "command.session.archivedBrowse": "نشست‌های بایگانی‌شده",
+  "command.session.archivedBrowse.description": "بازیابی نشست نشست",
+  "dialog.archivedSessions.title": "نشست‌های بایگانی‌شده",
+  "dialog.archivedSessions.description": "بازیابی نشست نشست",
+  "dialog.archivedSessions.empty": "نشست‌های بایگانی‌شده",
+  "dialog.archivedSessions.noMatches": "نشست‌های بایگانی‌شده",
+  "dialog.archivedSessions.error": "نشست‌های بایگانی‌شده بارگیری نشدند",
+  "dialog.archivedSessions.loading": "در حال بارگیری نشست‌های بایگانی‌شده…",
+  "session.archive.refreshFailed": "نشست به‌روزرسانی شد، اما جزئیات آن تازه‌سازی نشد.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "فایل",
   "desktop.menu.edit": "ویرایش کنید",

@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.el,
+  "common.unarchive": "Επαναφορά από αρχείο",
+  "command.session.archive": "Αρχειοθέτηση συνεδρία",
+  "command.session.archive.description": "Αρχειοθέτηση συνεδρία",
+  "command.session.unarchive": "Επαναφορά από αρχείο συνεδρία",
+  "command.session.unarchive.description": "Επαναφορά συνεδρίας",
+  "command.session.archivedBrowse": "Αρχειοθετημένες συνεδρίες",
+  "command.session.archivedBrowse.description": "Επαναφορά συνεδρίας συνεδρία",
+  "dialog.archivedSessions.title": "Αρχειοθετημένες συνεδρίες",
+  "dialog.archivedSessions.description": "Επαναφορά συνεδρίας συνεδρία",
+  "dialog.archivedSessions.empty": "Αρχειοθετημένες συνεδρίες",
+  "dialog.archivedSessions.noMatches": "Αρχειοθετημένες συνεδρίες",
+  "dialog.archivedSessions.error": "Δεν ήταν δυνατή η φόρτωση αρχειοθετημένων συνεδριών",
+  "dialog.archivedSessions.loading": "Φόρτωση αρχειοθετημένων συνεδριών…",
+  "session.archive.refreshFailed": "Η συνεδρία ενημερώθηκε, αλλά δεν ήταν δυνατή η ανανέωση των λεπτομερειών της.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Αρχείο",
   "desktop.menu.edit": "Επεξεργασία",

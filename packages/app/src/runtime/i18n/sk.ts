@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.sk,
+  "common.unarchive": "Obnoviť z archívu",
+  "command.session.archive": "Archivovať reláciu",
+  "command.session.archive.description": "Archivovať reláciu",
+  "command.session.unarchive": "Obnoviť z archívu reláciu",
+  "command.session.unarchive.description": "Obnoviť reláciu",
+  "command.session.archivedBrowse": "Archivované relácie",
+  "command.session.archivedBrowse.description": "Obnoviť reláciu reláciu",
+  "dialog.archivedSessions.title": "Archivované relácie",
+  "dialog.archivedSessions.description": "Obnoviť reláciu reláciu",
+  "dialog.archivedSessions.empty": "Archivované relácie",
+  "dialog.archivedSessions.noMatches": "Archivované relácie",
+  "dialog.archivedSessions.error": "Archivované relácie sa nepodarilo načítať",
+  "dialog.archivedSessions.loading": "Načítavajú sa archivované relácie…",
+  "session.archive.refreshFailed": "Relácia bola aktualizovaná, ale jej podrobnosti sa nepodarilo obnoviť.",
   "session.queue.attachments.few": "Plus {{count}} prílohy",
   "session.queue.attachments.many": "Plus {{count}} prílohy",
   "settings.workspaces.sessions.filtered.few": "{{count}} relácie",

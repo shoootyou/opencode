@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.uz,
+  "common.unarchive": "Arxivdan tiklash",
+  "command.session.archive": "Arxivlash sessiyani",
+  "command.session.archive.description": "Arxivlash sessiyani",
+  "command.session.unarchive": "Arxivdan tiklash sessiyani",
+  "command.session.unarchive.description": "Sessiyani tiklash",
+  "command.session.archivedBrowse": "Arxivlangan sessiyalar",
+  "command.session.archivedBrowse.description": "Sessiyani tiklash sessiyani",
+  "dialog.archivedSessions.title": "Arxivlangan sessiyalar",
+  "dialog.archivedSessions.description": "Sessiyani tiklash sessiyani",
+  "dialog.archivedSessions.empty": "Arxivlangan sessiyalar",
+  "dialog.archivedSessions.noMatches": "Arxivlangan sessiyalar",
+  "dialog.archivedSessions.error": "Arxivlangan sessiyalarni yuklab bo‘lmadi",
+  "dialog.archivedSessions.loading": "Arxivlangan sessiyalar yuklanmoqda…",
+  "session.archive.refreshFailed": "Sessiya yangilandi, ammo tafsilotlarini yangilab bo‘lmadi.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Fayl",
   "desktop.menu.edit": "Tahrirlash",

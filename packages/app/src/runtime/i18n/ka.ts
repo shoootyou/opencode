@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.ka,
+  "common.unarchive": "არქივიდან აღდგენა",
+  "command.session.archive": "დაარქივე სესია",
+  "command.session.archive.description": "დაარქივე სესია",
+  "command.session.unarchive": "არქივიდან აღდგენა სესია",
+  "command.session.unarchive.description": "სესიის აღდგენა",
+  "command.session.archivedBrowse": "დაარქივებული სესიები",
+  "command.session.archivedBrowse.description": "სესიის აღდგენა სესია",
+  "dialog.archivedSessions.title": "დაარქივებული სესიები",
+  "dialog.archivedSessions.description": "სესიის აღდგენა სესია",
+  "dialog.archivedSessions.empty": "დაარქივებული სესიები",
+  "dialog.archivedSessions.noMatches": "დაარქივებული სესიები",
+  "dialog.archivedSessions.error": "დაარქივებული სესიების ჩატვირთვა ვერ მოხერხდა",
+  "dialog.archivedSessions.loading": "დაარქივებული სესიების ჩატვირთვა…",
+  "session.archive.refreshFailed": "სესია განახლდა, მაგრამ მისი დეტალების განახლება ვერ მოხერხდა.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ფაილი",
   "desktop.menu.edit": "რედაქტირება",

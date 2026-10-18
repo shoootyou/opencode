@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.ro,
+  "common.unarchive": "Restaurează din arhivă",
+  "command.session.archive": "Arhivează sesiunea",
+  "command.session.archive.description": "Arhivează sesiunea",
+  "command.session.unarchive": "Restaurează din arhivă sesiunea",
+  "command.session.unarchive.description": "Restaurează sesiunea",
+  "command.session.archivedBrowse": "Sesiuni arhivate",
+  "command.session.archivedBrowse.description": "Restaurează sesiunea sesiunea",
+  "dialog.archivedSessions.title": "Sesiuni arhivate",
+  "dialog.archivedSessions.description": "Restaurează sesiunea sesiunea",
+  "dialog.archivedSessions.empty": "Sesiuni arhivate",
+  "dialog.archivedSessions.noMatches": "Sesiuni arhivate",
+  "dialog.archivedSessions.error": "Nu s-au putut încărca sesiunile arhivate",
+  "dialog.archivedSessions.loading": "Se încarcă sesiunile arhivate…",
+  "session.archive.refreshFailed": "Sesiunea a fost actualizată, dar detaliile nu au putut fi reîmprospătate.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Fișier",
   "desktop.menu.edit": "Editare",

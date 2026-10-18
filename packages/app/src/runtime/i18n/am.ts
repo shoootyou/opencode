@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.am,
+  "common.unarchive": "ከማህደር አውጣ",
+  "command.session.archive": "ማህደር አስቀምጥ ክፍለ ጊዜ",
+  "command.session.archive.description": "ማህደር አስቀምጥ ክፍለ ጊዜ",
+  "command.session.unarchive": "ከማህደር አውጣ ክፍለ ጊዜ",
+  "command.session.unarchive.description": "ክፍለ ጊዜ መልስ",
+  "command.session.archivedBrowse": "የተመዘገቡ ክፍለ ጊዜዎች",
+  "command.session.archivedBrowse.description": "ክፍለ ጊዜ መልስ ክፍለ ጊዜ",
+  "dialog.archivedSessions.title": "የተመዘገቡ ክፍለ ጊዜዎች",
+  "dialog.archivedSessions.description": "ክፍለ ጊዜ መልስ ክፍለ ጊዜ",
+  "dialog.archivedSessions.empty": "የተመዘገቡ ክፍለ ጊዜዎች",
+  "dialog.archivedSessions.noMatches": "የተመዘገቡ ክፍለ ጊዜዎች",
+  "dialog.archivedSessions.error": "የተመዘገቡ ክፍለ ጊዜዎችን መጫን አልተቻለም",
+  "dialog.archivedSessions.loading": "የተመዘገቡ ክፍለ ጊዜዎችን በመጫን ላይ…",
+  "session.archive.refreshFailed": "ክፍለ ጊዜው ተዘምኗል፣ ግን ዝርዝሮቹን ማደስ አልተቻለም።",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ፋይል",
   "desktop.menu.edit": "አርትዕ",

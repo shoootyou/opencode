@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.fo,
+  "common.unarchive": "Endurstovna",
+  "command.session.archive": "Goym setu",
+  "command.session.archive.description": "Goym setu",
+  "command.session.unarchive": "Endurstovna setu",
+  "command.session.unarchive.description": "Endurstovna setu",
+  "command.session.archivedBrowse": "Goymdar setur",
+  "command.session.archivedBrowse.description": "Endurstovna setu setu",
+  "dialog.archivedSessions.title": "Goymdar setur",
+  "dialog.archivedSessions.description": "Endurstovna setu setu",
+  "dialog.archivedSessions.empty": "Goymdar setur",
+  "dialog.archivedSessions.noMatches": "Goymdar setur",
+  "dialog.archivedSessions.error": "Kundi ikki lesa goymdar setur",
+  "dialog.archivedSessions.loading": "Lesur goymdar setur…",
+  "session.archive.refreshFailed": "Setan varð dagførd, men smálutirnir kundu ikki dagførast.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Skrá",
   "desktop.menu.edit": "Rætta",

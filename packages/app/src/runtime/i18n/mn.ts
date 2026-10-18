@@ -1,7 +1,18 @@
-import { ARCHIVE_MESSAGES } from "./archive"
-
 export const dict = {
-  ...ARCHIVE_MESSAGES.mn,
+  "common.unarchive": "Архиваас сэргээх",
+  "command.session.archive": "Архивлах сешн",
+  "command.session.archive.description": "Архивлах сешн",
+  "command.session.unarchive": "Архиваас сэргээх сешн",
+  "command.session.unarchive.description": "Сешнийг сэргээх",
+  "command.session.archivedBrowse": "Архивласан сешнүүд",
+  "command.session.archivedBrowse.description": "Сешнийг сэргээх сешн",
+  "dialog.archivedSessions.title": "Архивласан сешнүүд",
+  "dialog.archivedSessions.description": "Сешнийг сэргээх сешн",
+  "dialog.archivedSessions.empty": "Архивласан сешнүүд",
+  "dialog.archivedSessions.noMatches": "Архивласан сешнүүд",
+  "dialog.archivedSessions.error": "Архивласан сешнүүдийг ачаалж чадсангүй",
+  "dialog.archivedSessions.loading": "Архивласан сешнүүдийг ачаалж байна…",
+  "session.archive.refreshFailed": "Сешн шинэчлэгдсэн ч дэлгэрэнгүйг шинэчилж чадсангүй.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Файл",
   "desktop.menu.edit": "Засварлах",

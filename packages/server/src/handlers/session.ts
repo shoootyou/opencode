@@ -20,6 +20,7 @@ import {
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionBusyError,
+  SessionArchiveLimitError,
   SkillNotFoundError,
 } from "@opencode/protocol/errors"
 import { AbsolutePath } from "@opencode/core/schema"
@@ -285,6 +286,15 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 Effect.catchTag(
                   "Session.ArchiveConflictError",
                   (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
+                ),
+                Effect.catchTag(
+                  "Session.ArchiveLimitError",
+                  (error) => new SessionArchiveLimitError({
+                    sessionID: error.sessionID,
+                    kind: error.kind,
+                    ...(error.retryAfterMillis === undefined ? {} : { retryAfterMillis: error.retryAfterMillis }),
+                    message: error.kind === "rate" ? "Archive transition rate limit exceeded" : "Archive history limit reached; restore remains available.",
+                  }),
                 ),
               )
           return HttpApiSchema.NoContent.make()

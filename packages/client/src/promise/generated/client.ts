@@ -702,7 +702,7 @@ export function make(options: ClientOptions) {
               archive: input["archive"],
             },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404, 409],
+            declaredStatuses: [400, 401, 404, 409, 429],
             empty: true,
           },
           requestOptions,

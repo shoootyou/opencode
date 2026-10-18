@@ -53,6 +53,7 @@ type DialogSelectActionBase<T> = {
   side?: "left" | "right"
   hidden?: boolean
   disabled?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
+  showWhenUnbound?: boolean
 }
 
 type DialogSelectAction<T> =
@@ -167,7 +168,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
   const visibleActions = createMemo(() => [
     ...shownActions()
-      .map((item) => ({ ...item, label: actionLabels().get(item.command) ?? "" }))
+      .map((item) => ({ ...item, label: actionLabels().get(item.command) ?? (item.showWhenUnbound ? "Tab" : "") }))
       .filter((item) => item.label),
     ...(props.footerHints ?? []),
   ])

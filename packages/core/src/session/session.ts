@@ -1,12 +1,14 @@
 export * as Session from "./session.js"
 
-import { DateTime, Effect, Fiber, Scope } from "effect"
+import { Clock, DateTime, Effect, Fiber, Scope } from "effect"
+import { and, desc, eq } from "drizzle-orm"
 import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { Permission } from "@opencode/schema/permission"
 import { Event } from "@opencode/schema/event"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Bus } from "../bus.js"
+import { EventTable } from "../event/sql.js"
 import { Database } from "../database/database.js"
 import { Instance } from "../instance/service.js"
 import { ShellResult } from "../shell/result.js"
@@ -14,6 +16,7 @@ import type { Skill } from "../skill.js"
 import {
   BusyError,
   ArchiveConflictError,
+  ArchiveLimitError,
   CompactionConflictError,
   InboxConflictError,
   NotFoundError,
@@ -37,6 +40,9 @@ type PromptRequest = SessionPrompt.Input & {
 }
 
 class StaleArchiveObservation extends Error {}
+class ArchiveAdmissionLimit extends Error {
+  constructor(readonly error: ArchiveLimitError) { super(error._tag) }
+}
 
 /**
  * Build once in the host Scope: `const sessions = yield* Session.make()`.
@@ -93,21 +99,38 @@ export const make = Effect.fn("Session.make")(function* () {
     sessionID: SessionSchema.ID,
     input: { archived: number | null },
   ) {
-    const attempt = (remaining: number): Effect.Effect<void, NotFoundError | ArchiveConflictError> =>
+    const attempt = (remaining: number): Effect.Effect<void, NotFoundError | ArchiveConflictError | ArchiveLimitError> =>
       Effect.gen(function* () {
         const observed = yield* Bus.latestSequence(database.db, sessionID)
         const session = yield* get(sessionID)
         if ((session.time.archived !== undefined) === (input.archived !== null)) return
+        const now = yield* Clock.currentTimeMillis
         yield* bus.publish(SessionEvent.ArchiveChanged, { sessionID, archived: input.archived }, {
           commit: (seq) =>
             Effect.gen(function* () {
               if (seq !== observed + 1) return yield* Effect.die(new StaleArchiveObservation())
               if (!(yield* store.get(sessionID))) return yield* Effect.die(new StaleArchiveObservation())
+              const records = yield* database.db
+                .select({ created: EventTable.created })
+                .from(EventTable)
+                .where(and(eq(EventTable.aggregate_id, sessionID), eq(EventTable.type, Bus.versionedType(SessionEvent.ArchiveChanged.type, 1))))
+                .orderBy(desc(EventTable.created))
+                .all()
+                .pipe(Effect.orDie)
+              const recent = records.filter((record) => record.created > now - 60_000)
+              if (recent.length >= 6) {
+                const cutoff = recent[5]!.created
+                return yield* Effect.die(new ArchiveAdmissionLimit(new ArchiveLimitError({ sessionID, kind: "rate", retryAfterMillis: Math.max(1, cutoff + 60_000 - now) })))
+              }
+              if (input.archived !== null && records.length >= 1023)
+                return yield* Effect.die(new ArchiveAdmissionLimit(new ArchiveLimitError({ sessionID, kind: "retention" })))
             }),
         })
       }).pipe(
         Effect.catchDefect((defect) =>
-          defect instanceof StaleArchiveObservation
+          defect instanceof ArchiveAdmissionLimit
+            ? defect.error
+            : defect instanceof StaleArchiveObservation
             ? remaining === 0
               ? new ArchiveConflictError({ sessionID })
               : attempt(remaining - 1)
