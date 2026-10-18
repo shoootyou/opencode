@@ -26,6 +26,7 @@ import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui/timeline/projection"
 import { useGlobal } from "@/runtime/server/runtime"
 import { archiveLabelKey, createArchiveLandingEffects, runTimelineArchive } from "./archive-model"
+import { useLayout } from "@/shell/state/layout"
 
 const emptyMessages: SessionMessageInfo[] = []
 
@@ -72,6 +73,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const language = useLanguage()
   const platform = usePlatform()
   const global = useGlobal()
+  const layout = useLayout()
 
   const visibleMessages = createMemo(() => {
     const id = input.session.identity.sessionID()
@@ -260,6 +262,8 @@ export function createTimelineController(input: { session: TimelineSessionSource
     const session = input.session.data.info()
     const sessionID = input.session.identity.sessionID()
     if (!session || !sessionID || pending.archive) return false
+    const ctx = global.serverCtx(server.key)
+    if (!ctx || ctx !== server.ctx) return false
     setPending("archive", true)
     try {
       return await runTimelineArchive(
@@ -267,10 +271,10 @@ export function createTimelineController(input: { session: TimelineSessionSource
         {
           setArchive: global.sessionArchive.setSessionArchive,
           now: Date.now,
-          isActive: () => alive && input.session.identity.sessionID() === sessionID,
+          isActive: () => alive && global.serverCtx(server.key) === ctx,
           currentRoute: () => {
-            const route = input.session.identity.params
-            return route.id ? { server: server.key, sessionID: route.id } : undefined
+            const route = layout.route()
+            return route.type === "session" ? { server: route.server, sessionID: route.sessionId } : undefined
           },
           navigate: async (landing) => {
             if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))

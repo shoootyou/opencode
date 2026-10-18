@@ -37,6 +37,36 @@ test("keeps one page, only fetches next after an explicit action, and restores i
   await model.restore("x"); expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
   model.dispose(); expect(await model.restore("x")).toBe(false)
 })
+
+test("uses each ready page cursor for Next and Previous, then Reset restores the first page", async () => {
+  const requests: unknown[] = []
+  const pages = [
+    { data: [{ id: "first", location: { directory: "/one" }, time: { archived: 1 } }], cursor: { next: "next" } },
+    { data: [{ id: "second", location: { directory: "/two" }, time: { archived: 2 } }], cursor: { previous: "previous" } },
+    { data: [{ id: "again", location: { directory: "/three" }, time: { archived: 3 } }], cursor: {} },
+    { data: [{ id: "reset", location: { directory: "/four" }, time: { archived: 4 } }], cursor: {} },
+  ]
+  const model = createArchivedSessionsModel({
+    server: "s",
+    list: async (input: unknown) => {
+      requests.push(input)
+      return pages[requests.length - 1]
+    },
+    setArchive: async () => true,
+    openProject: () => {}, touchProject: () => {}, addTab: () => "tab", selectTab: () => {}, close: () => {},
+  })
+  await model.load()
+  await model.next()
+  await model.previous()
+  await model.load()
+  expect(requests).toEqual([
+    { archived: "only", parentID: null, order: "desc", limit: 50 },
+    { archived: "only", parentID: null, order: "desc", limit: 50, cursor: "next" },
+    { archived: "only", parentID: null, order: "desc", limit: 50, cursor: "previous" },
+    { archived: "only", parentID: null, order: "desc", limit: 50 },
+  ])
+  expect(model.state()).toMatchObject({ status: "ready", page: { sessions: [{ id: "reset" }] } })
+})
 test("does not start loading or notify after disposal", async () => {
   let requests = 0
   let notifications = 0

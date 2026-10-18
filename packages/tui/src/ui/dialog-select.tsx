@@ -39,7 +39,6 @@ export interface DialogSelectProps<T> {
     label: string
     side?: "left" | "right"
   }[]
-  footerGap?: number
   bindings?: readonly KeymapCommand[]
   current?: T
   focusTarget?: T
@@ -55,7 +54,6 @@ type DialogSelectActionBase<T> = {
   hidden?: boolean
   disabled?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
   showWhenUnbound?: boolean
-  noWrap?: boolean
 }
 
 type DialogSelectAction<T> =
@@ -646,7 +644,6 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         onMouseUp={() => trigger(item)}
       >
         <text
-          wrapMode={item.noWrap ? "none" : undefined}
           fg={
             disabled()
               ? theme.text.action.primary.disabled
@@ -838,7 +835,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       </box>
       <Show when={props.footer || visibleActions().length} fallback={<box flexShrink={0} />}>
         <box paddingRight={2} paddingLeft={4} flexDirection="row" justifyContent="space-between" flexShrink={0}>
-          <box flexDirection={dimensions().width < 60 ? "column" : "row"} gap={props.footerGap ?? (dimensions().width < 60 ? 0 : 2)}>
+          <box flexDirection={dimensions().width < 60 ? "column" : "row"} gap={dimensions().width < 60 ? 0 : 2}>
             {props.footer}
             <For each={left()}>{(item) => <FooterAction item={item} />}</For>
           </box>

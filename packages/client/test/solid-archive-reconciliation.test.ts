@@ -142,12 +142,16 @@ test("does not discard an unrelated session sync when an archive event arrives",
   }
 })
 
-test("does not sweep remembered metadata on repeated connection events", async () => {
+test("does not sweep remembered metadata on the second server.connected event", async () => {
   let sessionReads = 0
+  let activeReads = 0
   const setup = fixture(async (input, init) => {
     const pathname = new URL((input instanceof Request ? input : new Request(input, init)).url).pathname
     if (pathname === "/api/session/ses_remembered") sessionReads++
-    if (pathname === "/api/session/active") return Response.json({ data: {} })
+    if (pathname === "/api/session/active") {
+      activeReads++
+      return Response.json({ data: {} })
+    }
     if (pathname === "/api/location") return Response.json({ directory: "/project" })
     if (pathname === "/api/project") return Response.json([])
     if (pathname === "/api/vcs") return Response.json({ location: { directory: "/project" }, data: {} })
@@ -155,9 +159,12 @@ test("does not sweep remembered metadata on repeated connection events", async (
   })
   try {
     setup.data.session.remember(session("ses_remembered"))
-    setup.emit({ id: "connected_1", created: 1, type: "server.connected", data: {} })
-    setup.emit({ id: "connected_2", created: 2, type: "server.connected", data: {} })
-    await Bun.sleep(20)
+    activeReads = 0
+    setup.emit({ id: "evt_connected_1", created: 1, type: "server.connected", data: {} })
+    await wait(() => activeReads === 1)
+    activeReads = 0
+    setup.emit({ id: "evt_connected_2", created: 2, type: "server.connected", data: {} })
+    await wait(() => activeReads === 1)
     expect(sessionReads).toBe(0)
   } finally {
     setup.dispose()

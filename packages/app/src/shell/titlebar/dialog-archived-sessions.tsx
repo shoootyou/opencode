@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, Show } from "solid-js"
 import { Dialog, DialogBody, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
 import { List } from "@opencode/ui/list"
+import { Button } from "@opencode/ui/button"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -17,6 +18,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const language = useLanguage()
   const tabs = useTabs()
   const [version, setVersion] = createSignal(0)
+  const [filter, setFilter] = createSignal("")
   const ctx = global.serverCtx(props.server as never)
   if (!ctx) return null
   const model = createArchivedSessionsModel({
@@ -39,6 +41,10 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const restoringID = () => {
     version()
     return model.restoringID()
+  }
+  const page = () => {
+    const current = state()
+    return current.status === "ready" ? current.page : undefined
   }
   return (
     <Dialog size="large">
@@ -63,13 +69,25 @@ function ArchivedSessionsDialog(props: { server: string }) {
             key={(session) => session.id}
             filterKeys={["title", "location.directory"]}
             search={{ placeholder: language.t("dialog.archivedSessions.search.placeholder"), autofocus: true }}
-            emptyMessage={language.t("dialog.archivedSessions.empty")}
+            emptyMessage={language.t(filter().trim() ? "dialog.archivedSessions.noMatches" : "dialog.archivedSessions.empty")}
+            onFilter={setFilter}
             onSelect={(session) => {
               if (session) void model.restore(session.id)
             }}
           >
             {(session) => <span aria-disabled={restoringID() === session.id}>{session.title ?? session.location.directory}</span>}
           </List>
+          <div class="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" disabled={!page()?.cursor.previous} onClick={() => void model.previous()}>
+              {language.t("dialog.archivedSessions.previousPage")}
+            </Button>
+            <Button variant="ghost" disabled={!page()?.cursor.next} onClick={() => void model.next()}>
+              {language.t("dialog.archivedSessions.nextPage")}
+            </Button>
+            <Button variant="ghost" onClick={() => void model.load()}>
+              {language.t("common.reset")}
+            </Button>
+          </div>
         </Show>
       </DialogBody>
     </Dialog>

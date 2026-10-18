@@ -38,6 +38,24 @@ test("completes the already-admitted landing after no-auto removal disposes the 
   )
   expect(calls).toEqual(["remove", "navigate"])
 })
+test("uses the exact route-server identity when deciding whether archive may navigate", async () => {
+  const patches: unknown[] = []
+  const calls: string[] = []
+  await runTimelineArchive(
+    { target: { server: "route-server", sessionID: "a" }, session: root("a"), sessions: [root("a"), root("b")] },
+    {
+      setArchive: async (input: unknown) => { patches.push(input); return true },
+      now: () => 7,
+      isActive: () => true,
+      currentRoute: () => ({ server: "selected-server", sessionID: "a" }),
+      removeTabs: () => calls.push("remove"),
+      navigate: async () => calls.push("navigate"),
+      toast: () => {},
+    } as never,
+  )
+  expect(patches).toEqual([{ server: "route-server", sessionID: "a", archive: 7 }])
+  expect(calls).toEqual(["remove"])
+})
 test("removes through the real tabs adapter with automatic navigation explicitly disabled", async () => {
   const module = await requireArchiveModel()
   expect(module.createArchiveLandingEffects).toBeTypeOf("function")

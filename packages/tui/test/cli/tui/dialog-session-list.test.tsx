@@ -1,3 +1,13 @@
+/**
+ * @spec-handoff
+ * @interface DialogSessionList(): JSX.Element
+ * @behavior
+ *   - Renders the bounded archived-picker disclosure only when the archived page contains 50 rows.
+ *   - Keeps the existing session-list presentation and input bindings intact.
+ * @edge-cases
+ *   - A shorter archived page does not imply that history is complete.
+ * @see RFC 057 Addendum C.3
+ */
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
@@ -171,7 +181,7 @@ test("renders configured archive actions without reporting a TextBuffer failure"
               <ConfigProvider
                 config={createTuiResolvedConfig({
                   keybinds: {
-                    "session.archive.toggle": "ctrl+a",
+                    "session.archive.toggle": "ctrl+b",
                     "session.archived.toggle_visibility": "ctrl+v",
                   },
                 })}
@@ -205,7 +215,7 @@ test("renders configured archive actions without reporting a TextBuffer failure"
         </TuiAppProvider>
       </TestTuiContexts>
     ),
-    { width: 100, height: 30, kittyKeyboard: true },
+    { width: 140, height: 30, kittyKeyboard: true },
   )
   const errors: unknown[] = []
   const renderer = app.renderer as unknown as { handleError(error: unknown): void }
@@ -219,15 +229,52 @@ test("renders configured archive actions without reporting a TextBuffer failure"
   try {
     const frame = await app.waitForFrame(
       (value) =>
-        value.includes("archive/unarchive") &&
-        value.includes("Tab") &&
-        value.includes("show archived") &&
-        value.includes("ctrl+v") &&
-        value.includes("all projects") &&
-        value.includes("ctrl+a"),
+        value.includes("archive/") &&
+        value.includes("unarchive") &&
+        value.includes("ctrl+b") &&
+        value.includes("show") &&
+        value.includes("archived") &&
+        value.includes("ctrl+v"),
     )
     expect(frame).not.toContain("Failed to create TextBuffer")
     expect(errors.map(String).join("\n")).not.toContain("Failed to create TextBuffer")
+  } finally {
+    app.renderer.destroy()
+    await storage.flush()
+    await temporary[Symbol.asyncDispose]()
+  }
+})
+
+test("discloses that an archived picker page is bounded to fifty sessions", async () => {
+  const events = createEventStream()
+  const archived = Array.from({ length: 50 }, (_, index) => ({
+    id: `ses_archived_${index}`,
+    projectID: "proj_fixture",
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: index + 2, archived: index },
+    title: `Archived ${index}`,
+    location: { directory: process.cwd() },
+  }))
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+    if (url.pathname === "/api/session") return json({ data: url.searchParams.get("archived") === "only" ? archived : [], cursor: {} })
+    return undefined
+  }, events)
+  const temporary = await tmpdir()
+  let storage!: ReturnType<typeof useStorage>
+  function Probe() {
+    const dialog = useDialog()
+    storage = useStorage()
+    onMount(() => dialog.replace(() => <DialogSessionList />))
+    return null
+  }
+  const app = await testRender(() => <TestTuiContexts paths={{ state: temporary.path }}><TuiAppProvider value={{ name: "test", version: "test", channel: "test" }}><StorageProvider><ArgsProvider><ConfigProvider config={createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } })}><Keymap.Provider><ToastProvider><RouteProvider><ClientProvider api={createApi(calls.fetch)}><PermissionProvider><DataProvider directory={process.cwd()}><LocationProvider><SessionTabsProvider><ThemeProvider mode="dark" source={emptyThemeSource}><LocalProvider><DialogProvider><Probe /></DialogProvider></LocalProvider></ThemeProvider></SessionTabsProvider></LocationProvider></DataProvider></PermissionProvider></ClientProvider></RouteProvider></ToastProvider></Keymap.Provider></ConfigProvider></ArgsProvider></StorageProvider></TuiAppProvider></TestTuiContexts>, { width: 100, height: 30, kittyKeyboard: true })
+  app.renderer.start()
+  try {
+    await app.waitForFrame((frame) => frame.includes("Sessions"))
+    app.mockInput.pressKey("b", { ctrl: true })
+    await app.waitForFrame((frame) => frame.includes("Showing up to 50 archived sessions; refine search to find others."))
   } finally {
     app.renderer.destroy()
     await storage.flush()

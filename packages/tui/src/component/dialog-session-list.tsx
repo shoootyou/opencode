@@ -80,9 +80,6 @@ export function DialogSessionList() {
   const local = useLocal()
   const sessionTabs = useSessionTabs()
   const config = useConfig().data
-  // The dialog owns Ctrl+A for its scope action. Keep keymap precedence unambiguous
-  // and leave the archive action reachable through DialogSelect's Tab fallback.
-  const archiveBinding = config.keybinds.get("session.archive.toggle").some((binding) => binding.key === "ctrl+a")
   const toast = useToast()
   const activeLocation = useLocation()
   const [filter, setFilter] = createSignal("")
@@ -285,17 +282,21 @@ export function DialogSessionList() {
     <DialogSelect
       title="Sessions"
       titleView={
-        <box flexDirection="row">
-          <text fg={theme.text.base} attributes={TextAttributes.BOLD}>
-            Sessions
-          </text>
-          <Show when={!allProjects() && currentProjectName()}>
-            <text fg={theme.text.muted}> for {currentProjectName()}</text>
+        <box flexDirection="column">
+          <box flexDirection="row">
+            <text fg={theme.text.base} attributes={TextAttributes.BOLD}>
+              Sessions
+            </text>
+            <Show when={!allProjects() && currentProjectName()}>
+              <text fg={theme.text.muted}> for {currentProjectName()}</text>
+            </Show>
+          </box>
+          <Show when={showArchived() && sessions().length === 50}>
+            <text fg={theme.text.muted}>Showing up to 50 archived sessions; refine search to find others.</text>
           </Show>
         </box>
       }
       options={options()}
-      footerGap={0}
       skipFilter={true}
       current={currentSessionID()}
       onFilter={(query) => {
@@ -375,8 +376,6 @@ export function DialogSessionList() {
         },
         {
           command: "session.archive.toggle",
-          bind: archiveBinding ? false : undefined,
-          noWrap: archiveBinding,
           title: "archive/unarchive",
           showWhenUnbound: true,
           disabled: archivePending(),
@@ -426,6 +425,7 @@ export function DialogSessionList() {
         {
           command: "session.archived.toggle_visibility",
           title: showArchived() ? "hide archived" : "show archived",
+          side: "right",
           showWhenUnbound: true,
           selection: "none",
           onTrigger: () => setShowArchived((value) => !value),

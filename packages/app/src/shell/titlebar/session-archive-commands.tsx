@@ -8,8 +8,11 @@ import { createArchiveCommandRegistration } from "./session-archive-commands-mod
 import { showArchivedSessionsDialog } from "./dialog-archived-sessions"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { createArchiveLandingEffects, runTimelineArchive } from "@/session/timeline/archive-model"
+import { onCleanup } from "solid-js"
 
 export function useTitlebarArchiveCommands(): void {
+  let alive = true
+  onCleanup(() => (alive = false))
   const command = useCommand()
   const layout = useLayout()
   const global = useGlobal()
@@ -36,7 +39,12 @@ export function useTitlebarArchiveCommands(): void {
       const ctx = global.serverCtx(key)
       const route = layout.route()
       const session = ctx?.data.session.get(target.sessionID)
+      // A registered command can outlive its owner briefly. A command invoked from that
+      // stale registration has no owner-owned cleanup to suppress, while a live owner
+      // that is disposed during its request must not finalize the archive transition.
+      const ownerAlive = alive
       if (!ctx || !session || route.type !== "session") return false
+      let mutationStarted = false
       const effects = createArchiveLandingEffects({
         removeSessions: (detail, options) =>
           tabs.removeSessions({ ...detail, server: detail.server as ServerConnection.Key, sessionIDs: [...detail.sessionIDs] }, options),
@@ -51,9 +59,12 @@ export function useTitlebarArchiveCommands(): void {
       return runTimelineArchive(
         { target, session, sessions: ctx.data.session.list() },
         {
-          setArchive: global.sessionArchive.setSessionArchive,
+          setArchive: async (input) => {
+            mutationStarted = true
+            return global.sessionArchive.setSessionArchive(input)
+          },
           now: Date.now,
-          isActive: () => true,
+          isActive: () => !mutationStarted || !ownerAlive || (alive && global.serverCtx(key) === ctx),
           currentRoute: () => {
             const current = layout.route()
             return current.type === "session" ? { server: current.server, sessionID: current.sessionId } : undefined
