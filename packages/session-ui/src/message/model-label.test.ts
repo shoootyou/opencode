@@ -3,7 +3,7 @@
  * @interface assistantModelLabel(model: ModelLabelRef | undefined, providers: ProviderNames | undefined, formatVariant: FormatModelVariant): string
  * @behavior
  *   - Resolves model display names only by the message (providerID, id) identity.
- *   - Delegates variant formatting with the app's ui.message.modelVariant callback.
+ *   - Delegates one sanitized shared label, including its variant, to the app formatter.
  * @edge-cases
  *   - Missing catalog entries preserve raw provider/model IDs.
  *   - Missing identity and prototype-key IDs produce a safe empty or raw label.
@@ -107,5 +107,31 @@ describe("session-ui assistantModelLabel", () => {
     expect(assistantModelLabel({ providerID: "team", id: "constructor" }, providers, formatVariant)).toBe(
       "team/constructor",
     )
+  })
+
+  test("uses raw catalog keys while returning a control-free label for hostile provider, name, and variant displays", () => {
+    const rawProviderID = "team\u001b"
+    const hostileProviders = new Map([
+      [
+        rawProviderID,
+        {
+          models: {
+            reviewer: { name: "Review\u001b[31m\u202e\u200b Model" },
+            "vendor/model-v1": { name: "API ID Decoy" },
+          },
+        },
+      ],
+    ])
+    const label = assistantModelLabel(
+      { providerID: rawProviderID, id: "reviewer", variant: "thin\u001b]8;;https://invalid.example\u0007king" },
+      hostileProviders,
+      (model, variant) => `${model} (${variant})`,
+    )
+
+    expect(label).toBe("team/Review[31m Model (Thin]8;;https://invalid.exampleking)")
+    expect(label).not.toMatch(
+      /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]/u,
+    )
+    expect(label).not.toContain("API ID Decoy")
   })
 })

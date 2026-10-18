@@ -3,7 +3,7 @@
  * @interface assistantModelLabel(model: ModelLabelRef | undefined, models: readonly Readonly<{ providerID: string; id: string; name: string }>[] | undefined): string
  * @behavior
  *   - Resolves the exact message (providerID, id) against the TUI catalog and formats it through @opencode/util/model-label.
- *   - Falls back independently to raw providerID/id when the catalog, provider, or model is unavailable.
+ *   - Returns a control-free display label while looking up catalog entries by raw providerID/id.
  *   - Adds a parenthesized, first-code-unit-capitalized non-default variant to the complete label.
  * @edge-cases
  *   - Missing or empty reference identities return an empty label.
@@ -62,10 +62,9 @@ describe("util.model", () => {
 
   test("formats the assistant footer label with the shared formatter using the matching catalog identity", () => {
     expect(
-      assistantModelLabel(
-        { providerID: "team", id: "reviewer", variant: "thinking" },
-        [{ providerID: "team", id: "reviewer", name: "Review Model" }],
-      ),
+      assistantModelLabel({ providerID: "team", id: "reviewer", variant: "thinking" }, [
+        { providerID: "team", id: "reviewer", name: "Review Model" },
+      ]),
     ).toBe("team/Review Model (Thinking)")
   })
 
@@ -106,8 +105,25 @@ describe("util.model", () => {
 
   test("preserves long Unicode catalog names for native footer wrapping", () => {
     const name = "長いモデル名e\u0301/مرحبا"
-    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [{ providerID: "team", id: "reviewer", name }])).toBe(
-      `team/${name}`,
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, [{ providerID: "team", id: "reviewer", name }]),
+    ).toBe(`team/${name}`)
+  })
+
+  test("uses raw catalog identities while returning a control-free assistant footer label for hostile displays", () => {
+    const rawProviderID = "team\u001b"
+    const label = assistantModelLabel(
+      { providerID: rawProviderID, id: "reviewer", variant: "thin\u001b]8;;https://invalid.example\u0007king" },
+      [
+        { providerID: rawProviderID, id: "reviewer", name: "Review\u001b[31m\u202e\u200b Model" },
+        { providerID: rawProviderID, id: "vendor/model-v1", name: "API ID Decoy" },
+      ],
     )
+
+    expect(label).toBe("team/Review[31m Model (Thin]8;;https://invalid.exampleking)")
+    expect(label).not.toMatch(
+      /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]/u,
+    )
+    expect(label).not.toContain("API ID Decoy")
   })
 })
