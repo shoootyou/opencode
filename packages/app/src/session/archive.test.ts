@@ -5,6 +5,7 @@
  *   - PATCHes a captured server/session once, then canonically hydrates it.
  *   - Always releases pending after request, hydration, or presentation failure so retry is possible.
  *   - Exposes pending transitions to the reactive shell bridge.
+ *   - Does not own retired archive-index reconnect scheduling.
  * @edge-cases
  *   - Epoch zero is archived; null and undefined are active.
  * @see RFC 057 Addendum A.2
@@ -49,20 +50,9 @@ test("releases pending after a failed PATCH so the same target can retry", async
   expect(attempts).toBe(2)
   expect(pending).toEqual([true, false, true, false])
 })
-test("coalesces reconnect refreshes, runs one trailing refresh, and is inert after disposal", async () => {
-  const module = await import("./archive") as unknown as {
-    createArchiveIndexRefresh: (deps: { refresh: () => Promise<void>; onError: (error: unknown) => void; now: () => number; schedule: (run: () => void, delayMs: number) => () => void }) => { request: () => void; dispose: () => void }
-  }
-  let now = 0
-  let scheduled: (() => void) | undefined
-  let refreshes = 0
-  const refresh = module.createArchiveIndexRefresh({ refresh: async () => { refreshes++ }, onError: () => {}, now: () => now, schedule: (run) => { scheduled = run; return () => { scheduled = undefined } } })
-  refresh.request(); refresh.request()
-  expect(refreshes).toBe(1)
-  now = 1_000; scheduled?.()
-  expect(refreshes).toBe(2)
-  refresh.dispose(); refresh.request(); scheduled?.()
-  expect(refreshes).toBe(2)
+test("leaves archive index refresh scheduling to the existing Home and dialog query lifecycles", async () => {
+  const module = await import("./archive")
+  expect("createArchiveIndexRefresh" in module).toBe(false)
 })
 test("uses numeric archive presence, including epoch zero", () => {
   expect(isArchivedSession(session(0))).toBe(true); expect(isArchivedSession(session(null))).toBe(false); expect(isArchivedSession(session())).toBe(false)

@@ -1,27 +1,40 @@
 /**
  * @spec-handoff
- * @interface loadArchivedSessions(api, {signal}): Promise<ArchiveSession[]>; createArchivedSessionsModel(deps)
+ * @interface loadArchivedSessions(api, {signal,cursor?}): Promise<ArchivedPage>; createArchivedSessionsModel(deps)
  * @behavior
- *   - Loads all archived root rows once and searches its ready snapshot locally.
+ *   - Loads exactly one archived-only root page of at most 50 rows per explicit action.
+ *   - Replaces the current page on next/previous/reset and searches that page locally.
  *   - Restores a row then opens its captured server tab in the specified order.
  *   - A disposed model retains its snapshot and performs no new load, retry, or notification.
  * @edge-cases
  *   - Epoch zero is retained; stale/disposed completions have no effects.
- * @see RFC 057 Addendum A.5
+ * @see RFC 057 Addendum C.3, C.6
  */
 import { expect, test } from "bun:test"
 import { createArchivedSessionsModel, loadArchivedSessions, matchesArchivedSession } from "./archived-sessions-model"
-test("loads archived root rows including zero and searches locally", async () => {
+test("loads exactly one archived-only root page including epoch zero", async () => {
   const calls: unknown[] = []
-  const rows = await loadArchivedSessions({ list: async (input: unknown) => { calls.push(input); return { data: [{ id: "zero", location: { directory: "/Project" }, time: { archived: 0 } }, { id: "active", location: { directory: "/x" }, time: {} }], cursor: {} } } }, { signal: new AbortController().signal })
-  expect(rows.map((x: { id: string }) => x.id)).toEqual(["zero"])
-  expect(calls).toHaveLength(1); expect(matchesArchivedSession(rows[0], "project")).toBe(true)
+  const page = await loadArchivedSessions({
+    list: (async (input: unknown) => {
+      calls.push(input)
+      return { data: [{ id: "zero", location: { directory: "/Project" }, time: { archived: 0 } }], cursor: {} }
+    }) as never,
+  }, { signal: new AbortController().signal })
+  expect(page.sessions.map((x: { id: string }) => x.id)).toEqual(["zero"])
+  expect(calls).toEqual([{ archived: "only", parentID: null, order: "desc", limit: 50 }])
+  expect(page.cursor.next).toBeUndefined()
+  expect(matchesArchivedSession(page.sessions[0], "project")).toBe(true)
 })
-test("models loading, retry, local search, restore order, and disposal", async () => {
+test("keeps one page, only fetches next after an explicit action, and restores in order", async () => {
   const calls: string[] = []; let resolve!: () => void; const wait = new Promise<void>((r) => resolve = r)
-  const model = createArchivedSessionsModel({ server: "s", list: async () => { await wait; return { data: [{ id: "x", title: "Alpha", location: { directory: "/d" }, time: { archived: 0 } }], cursor: {} } }, setArchive: async () => true, openProject: () => calls.push("open"), touchProject: () => calls.push("touch"), addTab: () => { calls.push("tab"); return "tab" }, selectTab: () => calls.push("select"), close: () => calls.push("close") })
+  const requests: unknown[] = []
+  const model = createArchivedSessionsModel({ server: "s", list: async (input: unknown) => { requests.push(input); await wait; return { data: [{ id: "x", title: "Alpha", location: { directory: "/d" }, time: { archived: 0 } }], cursor: { next: "page-2" } } }, setArchive: async () => true, openProject: () => calls.push("open"), touchProject: () => calls.push("touch"), addTab: () => { calls.push("tab"); return "tab" }, selectTab: () => calls.push("select"), close: () => calls.push("close") } as never)
   const load = model.load(); expect(model.state().status).toBe("loading"); resolve(); await load
-  expect(model.search("alpha")).toHaveLength(1); await model.restore("x"); expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
+  expect(requests).toHaveLength(1)
+  expect(model.search("alpha")).toHaveLength(1)
+  await model.next()
+  expect(requests).toHaveLength(2)
+  await model.restore("x"); expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
   model.dispose(); expect(await model.restore("x")).toBe(false)
 })
 test("does not start loading or notify after disposal", async () => {

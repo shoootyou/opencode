@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Obnoviť z archívu",
   "command.session.archive": "Archivovať reláciu",
   "command.session.archive.description": "Archivovať reláciu",

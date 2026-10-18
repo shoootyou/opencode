@@ -45,52 +45,6 @@ export function createSessionArchiveActions(deps: Readonly<{ update: (input: Arc
   return { setSessionArchive, archiveSession: (target) => setSessionArchive({ ...target, archive: deps.now() }), isPending }
 }
 
-export function createArchiveIndexRefresh(deps: Readonly<{ refresh: () => Promise<void>; onError: (error: unknown) => void; now: () => number; schedule: (run: () => void, delayMs: number) => () => void }>) {
-  let running = false
-  let dirty = false
-  let disposed = false
-  let last = -Infinity
-  let cancel: (() => void) | undefined
-  const run = () => {
-    if (disposed || running) return
-    running = true
-    last = deps.now()
-    void deps.refresh().catch(deps.onError).finally(() => {
-      running = false
-      if (!dirty || disposed) return
-      dirty = false
-      request()
-    })
-  }
-  const request = () => {
-    if (disposed) return
-    dirty = true
-    if (running) {
-      if (!cancel) cancel = deps.schedule(() => {
-        cancel = undefined
-        if (disposed) return
-        dirty = false
-        last = deps.now()
-        void deps.refresh().catch(deps.onError)
-      }, Math.max(0, last + 1_000 - deps.now()))
-      return
-    }
-    const delay = Math.max(0, last + 1_000 - deps.now())
-    if (delay === 0) {
-      dirty = false
-      run()
-      return
-    }
-    cancel?.()
-    cancel = deps.schedule(() => {
-      cancel = undefined
-      dirty = false
-      run()
-    }, delay)
-  }
-  return { request, dispose() { disposed = true; dirty = false; cancel?.(); cancel = undefined } }
-}
-
 export function isArchivedSession(session: ArchiveSession): boolean {
   return typeof session.time.archived === "number"
 }

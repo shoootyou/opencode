@@ -2,7 +2,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { Button } from "@opencode/ui/button"
 import { useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, on } from "solid-js"
+import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Option, Predicate, Schema } from "effect"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
@@ -25,7 +25,7 @@ import { useServer } from "@/runtime/server/current"
 import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui/timeline/projection"
 import { useGlobal } from "@/runtime/server/runtime"
-import { archiveLabelKey, runTimelineArchive } from "./archive-model"
+import { archiveLabelKey, createArchiveLandingEffects, runTimelineArchive } from "./archive-model"
 
 const emptyMessages: SessionMessageInfo[] = []
 
@@ -59,6 +59,8 @@ export type TimelineSessionSource = {
 }
 
 export function createTimelineController(input: { session: TimelineSessionSource }) {
+  let alive = true
+  onCleanup(() => (alive = false))
   const navigate = useNavigate()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
@@ -265,7 +267,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
         {
           setArchive: global.sessionArchive.setSessionArchive,
           now: Date.now,
-          isActive: () => input.session.identity.sessionID() === sessionID,
+          isActive: () => alive && input.session.identity.sessionID() === sessionID,
           currentRoute: () => {
             const route = input.session.identity.params
             return route.id ? { server: server.key, sessionID: route.id } : undefined
@@ -274,7 +276,14 @@ export function createTimelineController(input: { session: TimelineSessionSource
             if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
             await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
           },
-          removeTabs: (detail) => notifySessionTabsRemoved({ ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] }),
+          removeTabs: createArchiveLandingEffects({
+            removeSessions: (detail, options) =>
+              tabs.removeSessions({ ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] }, options),
+            navigate: async (landing) => {
+              if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+              await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
+            },
+          }).removeTabs,
           toast: ({ kind, error }) => showToast({ title: language.t("common.requestFailed"), description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error) }),
         },
       )

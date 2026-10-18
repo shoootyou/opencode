@@ -3,6 +3,9 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "अभिलेखबाट हटाउनुहोस्",
   "command.session.archive": "अभिलेखमा राख्नुहोस् सत्र",
   "command.session.archive.description": "अभिलेखमा राख्नुहोस् सत्र",

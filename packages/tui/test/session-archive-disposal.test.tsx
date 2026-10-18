@@ -4,9 +4,10 @@
  * @behavior
  *   - Unmounting aborts owner-scoped archive PATCH and archived-pagination requests.
  *   - A disposed dialog does not refetch or publish after PATCH or shared canonical sync settles.
+ *   - Restoring an archived row sends archive: null, awaits canonical refresh, then refetches the list.
  * @edge-cases
  *   - Shared createData sync may finish after unmount because it deliberately has no abort signal.
- *   - The post-sync disposed gate is equivalent to the resource fetcher's disposed entry guard: either prevents a disposed refetch from publishing.
+ *   - Archived visibility uses one archived-only request rather than automatic cursor pagination.
  * @see ../src/component/dialog-session-list.tsx
  */
 /** @jsxImportSource @opentui/solid */
@@ -209,17 +210,15 @@ test.serial("a shared canonical sync may drain after unmount but cannot refetch 
   }
 })
 
-test.serial("unmounting during archived cursor pagination aborts it without publishing the held page", async () => {
-  const page = Promise.withResolvers<Response>()
+test.serial("archived visibility makes one archived-only request without following its cursor", async () => {
   const setup = await mount({
     keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
     respond(request) {
       if (request.url.pathname === "/api/location")
         return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
       if (request.phase === "initial-list") return json({ data: [], cursor: {} })
-      if (request.url.pathname === "/api/session" && request.url.searchParams.get("archived") === "true" && !request.url.searchParams.get("cursor"))
+      if (request.url.pathname === "/api/session" && request.url.searchParams.get("archived"))
         return json({ data: [], cursor: { next: "older" } })
-      if (request.phase === "pagination") return page.promise
       return undefined
     },
   })
@@ -228,13 +227,52 @@ test.serial("unmounting during archived cursor pagination aborts it without publ
     await stableDrain(setup.pending)
     await setup.app.waitForFrame((frame) => frame.includes("No sessions available"), { maxPasses: 100 })
     setup.dispatch("session.archived.toggle_visibility")
-    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "pagination"))
-    const inFlight = setup.requests.find((request) => request.phase === "pagination")!
-    setup.unmount()
-    expect(inFlight.signal.aborted).toBe(true)
-    page.resolve(json({ data: [{ ...active, title: "Late archived page", time: { created: 1, updated: 2, archived: 0 } }], cursor: {} }))
+    await setup.app.waitFor(() => setup.requests.some((request) => request.url.searchParams.get("archived")))
     await stableDrain(setup.pending)
-    expect(setup.requests.filter((request) => request.phase === "pagination")).toHaveLength(1)
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "only")).toHaveLength(1)
+    expect(setup.requests.filter((request) => request.phase === "pagination")).toEqual([])
+  } finally {
+    await setup.dispose()
+  }
+})
+
+test.serial("selected archived row sends null, awaits sync, then refetches with pending released", async () => {
+  const sync = Promise.withResolvers<Response>()
+  const archived = { ...active, id: "ses_archived", title: "Archived root", time: { ...active.time, archived: 0 } }
+  let archivedPageRequests = 0
+  const setup = await mount({
+    keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
+    respond: async (request) => {
+      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+      if (request.phase === "initial-list") return json({ data: [archived], cursor: {} })
+      if (request.url.pathname === "/api/session" && request.url.searchParams.get("archived")) {
+        archivedPageRequests++
+        return json({ data: archivedPageRequests === 1 ? [archived] : [active], cursor: {} })
+      }
+      if (request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH") return new Response(null, { status: 204 })
+      if (request.url.pathname === "/api/session/ses_archived") return sync.promise
+      if (request.phase === "dialog-refetch") return json({ data: [active], cursor: {} })
+      return undefined
+    },
+  })
+  try {
+    await setup.app.waitForFrame((frame) => frame.includes("No sessions available"), { maxPasses: 100 })
+    setup.dispatch("session.archived.toggle_visibility")
+    await setup.app.waitForFrame((frame) => frame.includes("Archived root"), { maxPasses: 100 })
+    setup.dispatch("session.archive.toggle")
+    await setup.app.waitFor(() => setup.requests.some((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH"))
+    const patch = setup.requests.find((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH")!
+    expect(JSON.parse(await patch.body)).toEqual({ archive: null })
+    await setup.app.waitFor(() => setup.requests.some((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "GET"))
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived"))).toHaveLength(1)
+    sync.resolve(json({ data: active }))
+    await setup.app.waitFor(() => setup.requests.filter((request) => request.url.searchParams.get("archived")).length === 2)
+    await stableDrain(setup.pending)
+    await setup.app.waitForFrame((frame) => !frame.includes("Archived root"), { maxPasses: 100 })
+    setup.dispatch("session.archived.toggle_visibility")
+    await setup.app.waitForFrame((frame) => frame.includes("Active root"), { maxPasses: 100 })
+    setup.dispatch("session.archive.toggle")
+    await setup.app.waitFor(() => setup.requests.filter((request) => request.url.pathname === "/api/session/ses_active" && request.method === "PATCH").length === 1)
   } finally {
     await setup.dispose()
   }
@@ -298,7 +336,7 @@ test.serial("failed selected archive keeps the row and skips refetch", async () 
   }
 })
 
-test.serial("selection-free show and hide archived toggles inclusion mode", async () => {
+test.serial("selection-free show and hide archived uses archived-only mode", async () => {
   const setup = await mount({
     keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
     respond(request) {
@@ -310,7 +348,8 @@ test.serial("selection-free show and hide archived toggles inclusion mode", asyn
   try {
     await setup.app.waitForFrame((frame) => frame.includes("No sessions available"), { maxPasses: 100 })
     setup.dispatch("session.archived.toggle_visibility")
-    await setup.app.waitFor(() => setup.requests.some((request) => request.url.searchParams.get("archived") === "true"))
+    await setup.app.waitFor(() => setup.requests.some((request) => request.url.searchParams.get("archived")))
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "only")).toHaveLength(1)
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitFor(() => setup.requests.filter((request) => request.phase === "dialog-refetch").length >= 2)
   } finally {

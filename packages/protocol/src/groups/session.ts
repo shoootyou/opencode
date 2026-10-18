@@ -65,6 +65,8 @@ const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
   }),
 )
 
+const ArchivedFromString = Schema.Union([BooleanFromString, Schema.Literal("only")])
+
 const SessionsQueryFields = {
   limit: Schema.NumberFromString.pipe(Schema.decodeTo(PositiveInt), Schema.optional).annotate({
     description: "Maximum number of sessions to return. Defaults to the newest 50 sessions.",
@@ -74,7 +76,7 @@ const SessionsQueryFields = {
   }),
   search: Schema.optional(Schema.String),
   parentID: ParentIDFilter.pipe(Schema.optional),
-  archived: BooleanFromString.pipe(Schema.optional),
+  archived: ArchivedFromString.pipe(Schema.optional),
 }
 
 const SessionsDirectoryQuery = Schema.Struct({

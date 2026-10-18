@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ਆਰਕਾਈਵ ਤੋਂ ਕੱਢੋ",
   "command.session.archive": "ਆਰਕਾਈਵ ਕਰੋ ਸੈਸ਼ਨ",
   "command.session.archive.description": "ਆਰਕਾਈਵ ਕਰੋ ਸੈਸ਼ਨ",

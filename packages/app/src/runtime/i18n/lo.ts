@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ນຳອອກຈາກຄັງ",
   "command.session.archive": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",
   "command.session.archive.description": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",

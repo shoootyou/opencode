@@ -1,6 +1,6 @@
 /**
  * @spec-handoff
- * @interface archiveLabelKey(session); snapshotArchiveNeighbour(input); runTimelineArchive(input, deps): Promise<boolean>
+ * @interface createArchiveLandingEffects(deps); archiveLabelKey(session); snapshotArchiveNeighbour(input); runTimelineArchive(input, deps): Promise<boolean>
  * @behavior
  *   - Archives a root only after snapshotting its next/previous/draft landing.
  *   - Removes the target tab with automatic navigation suppressed, then issues one chosen landing.
@@ -21,3 +21,37 @@ test("uses the pre-PATCH neighbour snapshot and suppresses automatic tab navigat
   expect(result).toBe(true)
   expect(calls).toEqual(["patch", 'remove:{"server":"s","directory":"/d","sessionIDs":["a"],"navigate":false}', "navigate:b"])
 })
+test("completes the already-admitted landing after no-auto removal disposes the target owner", async () => {
+  let active = true
+  const calls: string[] = []
+  await runTimelineArchive(
+    { target: { server: "s", sessionID: "a" }, session: root("a"), sessions: [root("a"), root("b")] },
+    {
+      setArchive: async () => true,
+      now: () => 0,
+      isActive: () => active,
+      currentRoute: () => ({ server: "s", sessionID: "a" }),
+      removeTabs: () => { active = false; calls.push("remove") },
+      navigate: async () => calls.push("navigate"),
+      toast: () => calls.push("toast"),
+    },
+  )
+  expect(calls).toEqual(["remove", "navigate"])
+})
+test("removes through the real tabs adapter with automatic navigation explicitly disabled", async () => {
+  const module = await requireArchiveModel()
+  expect(module.createArchiveLandingEffects).toBeTypeOf("function")
+  const calls: unknown[][] = []
+  const effects = module.createArchiveLandingEffects({
+    removeSessions: (...args: unknown[]) => calls.push(args),
+    navigate: () => {},
+  } as never)
+  effects.removeTabs({ server: "s", directory: "/d", sessionIDs: ["a"], navigate: false })
+  expect(calls).toEqual([[{ server: "s", directory: "/d", sessionIDs: ["a"] }, { navigate: false }]])
+})
+
+async function requireArchiveModel() {
+  return (await import("./archive-model")) as unknown as {
+    createArchiveLandingEffects: (deps: Readonly<{ removeSessions: (...args: unknown[]) => void; navigate: (landing: ArchiveLanding) => void }>) => Readonly<{ removeTabs: (detail: { server: string; directory: string; sessionIDs: readonly string[]; navigate: false }) => void }>
+  }
+}

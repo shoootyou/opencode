@@ -3,7 +3,7 @@
  * @interface PATCH /api/session/:sessionID { archive?: number | null }: 204
  * @behavior
  *   - archive: 0 and finite numbers archive; archive: null restores; omission preserves state.
- *   - GET remains archive-inclusive while list hides archived unless archived=true.
+ *   - GET remains archive-inclusive while list hides archived unless archived=true and returns archived-only rows for archived=only.
  *   - PATCH retains existing title, metadata, permissions, location middleware, and error mapping.
  * @edge-cases
  *   - Invalid archive values do not mutate state; missing sessions return 404.
@@ -88,6 +88,13 @@ it.live("archives, restores, and lists session archive state through the real se
     expect((yield* list("?archived=true")).map((session) => session.id)).toEqual(
       expect.arrayContaining([active.id, archivedAtZero.id, archivedAtFinite.id]),
     )
+    const onlyResponse = yield* request("/api/session?archived=only")
+    expect(onlyResponse.status).toBe(200)
+    const only = Schema.decodeUnknownSync(SessionsResponse)(yield* Effect.promise(() => onlyResponse.json())).data
+    expect(only.map((session) => session.id)).toEqual(
+      expect.arrayContaining([archivedAtZero.id, archivedAtFinite.id]),
+    )
+    expect(only.map((session) => session.id)).not.toContain(active.id)
 
     const restored = yield* request(`/api/session/${archivedAtFinite.id}`, "PATCH", { archive: null })
     expect(restored.status).toBe(204)

@@ -45,7 +45,6 @@ import {
   isFormAlreadySettledError,
   isFormNotFoundError,
   isPermissionNotFoundError,
-  isSessionNotFoundError,
   type SessionPromptInput,
 } from "../promise"
 import { createStore, produce, reconcile } from "solid-js/store"
@@ -206,10 +205,6 @@ function createSync() {
 }
 
 export function createData(config: CreateDataInput) {
-  let metadataEpoch = 0
-  let wasConnected = false
-  let reconnectRunning = false
-  let reconnectTrailing = false
   const api = config.api
   let disposed = false
   onCleanup(() => (disposed = true))
@@ -572,7 +567,6 @@ export function createData(config: CreateDataInput) {
   }
 
   function removeSession(sessionID: string) {
-    metadataEpoch++
     activeUpdates?.set(sessionID, undefined)
     store.session.pending[sessionID]?.forEach((item) => outbox.delete(item.id))
     messageIndex.delete(sessionID)
@@ -605,8 +599,6 @@ export function createData(config: CreateDataInput) {
   function handleEvent(event: OpenCodeEvent) {
     switch (event.type) {
       case "server.connected": {
-        const reconnecting = wasConnected
-        wasConnected = true
         const updates = new Map<string, DataSessionStatus | undefined>()
         activeUpdates = updates
         refresh(() =>
@@ -637,35 +629,6 @@ export function createData(config: CreateDataInput) {
         )
         refresh(() => result.location.vcs.sync())
         refresh(() => result.project.sync())
-        if (!reconnecting) return
-        if (reconnectRunning) {
-          reconnectTrailing = true
-          return
-        }
-        reconnectRunning = true
-        const sessions = Object.keys(store.session.info)
-        metadataEpoch++
-        sessions.forEach((sessionID) => result.session.invalidate(sessionID))
-        refresh(async () => {
-          const queue = [...sessions]
-          const worker = async () => {
-            const sessionID = queue.shift()
-            if (!sessionID) return
-            try {
-              await result.session.sync(sessionID)
-            } catch (error) {
-              if (isSessionNotFoundError(error) || isNotFoundResponse(error)) removeSession(sessionID)
-              else config.onError?.(error)
-            }
-            await worker()
-          }
-          await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
-          reconnectRunning = false
-          if (reconnectTrailing) {
-            reconnectTrailing = false
-            handleEvent({ type: "server.connected", data: {} } as OpenCodeEvent)
-          }
-        })
         return
       }
       case "project.updated":
@@ -740,13 +703,18 @@ export function createData(config: CreateDataInput) {
         })
         return
       }
-      case "session.archive.changed":
-        if (!store.session.info[event.data.sessionID] && !sync.has(`session:${event.data.sessionID}`) && !sync.has(`session.family:${event.data.sessionID}`)) return
-        metadataEpoch++
-        result.session.invalidate(event.data.sessionID)
-        sync.invalidate(`session.family:${event.data.sessionID}`)
-        refresh(() => result.session.sync(event.data.sessionID))
+      case "session.archive.changed": {
+        refresh(() => {
+          const family = sync.pending(`session.family:${event.data.sessionID}`)
+            ? result.session.sync(event.data.sessionID, { children: true })
+            : Promise.resolve()
+          return Promise.all([result.session.sync(event.data.sessionID), family]).then(() => {
+            if (store.session.info[event.data.sessionID])
+              setStore("session", "info", event.data.sessionID, "time", "archived", event.data.archived ?? undefined)
+          })
+        })
         return
+      }
       case "session.permissions":
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "permissions", event.data.permissions)
@@ -1658,7 +1626,6 @@ export function createData(config: CreateDataInput) {
       },
       sync(sessionID: string, options?: { children?: boolean }) {
         return sync.run(options?.children ? `session.family:${sessionID}` : `session:${sessionID}`, async () => {
-          const epoch = metadataEpoch
           const [info, children] = await Promise.all([
             api().session.get({ sessionID }),
             options?.children
@@ -1668,7 +1635,6 @@ export function createData(config: CreateDataInput) {
               : [],
           ])
           const sessions = [info, ...children]
-          if (epoch !== metadataEpoch) return
           batch(() => {
             setStore(
               "session",
@@ -2020,13 +1986,6 @@ export function createData(config: CreateDataInput) {
   )
 
   return result
-}
-
-function isNotFoundResponse(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-  if ("status" in error && error.status === 404) return true
-  if (!("response" in error) || typeof error.response !== "object" || error.response === null) return false
-  return "status" in error.response && error.response.status === 404
 }
 
 export type Data = ReturnType<typeof createData>

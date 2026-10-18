@@ -878,7 +878,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "enum": ["true", "false"]
+                  "enum": ["true", "false", "only"]
                 },
                 {
                   "type": "null"

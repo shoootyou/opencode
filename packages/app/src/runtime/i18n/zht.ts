@@ -3,6 +3,9 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "取消封存",
   "command.session.archive": "封存 工作階段",
   "command.session.archive.description": "封存 工作階段",

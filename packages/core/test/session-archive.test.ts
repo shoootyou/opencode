@@ -5,7 +5,7 @@
  * @behavior
  *   - Archives/restores one session through SessionEvent.ArchiveChanged atomically and idempotently.
  *   - Retains archive events by definition metadata while ordinary events retain their existing default.
- *   - SessionStore.ListInput.archived hides archived sessions unless true, without changing keyset ordering.
+ *   - SessionStore.ListInput.archived hides archived sessions unless true and selects only archived sessions for "only", without changing keyset ordering.
  * @edge-cases
  *   - Epoch zero is archived; null restores; contention fails after the initial attempt plus eight retries.
  *   - Recursive removal and replay include archived children and preserve replay safety guarantees.
@@ -160,7 +160,8 @@ describe("session archive core contract", () => {
       ])
       const store = yield* SessionStore.Service
       expect((yield* store.list({ limit: 2 })).map((item) => String(item.id))).toEqual(["ses_c", "ses_b"])
-      expect((yield* store.list({ archived: true, limit: 2 } as never)).map((item) => String(item.id))).toEqual(["ses_z", "ses_c"])
+      expect((yield* store.list({ archived: true, limit: 2 })).map((item) => String(item.id))).toEqual(["ses_z", "ses_c"])
+      expect((yield* store.list({ archived: "only", limit: 2 })).map((item) => String(item.id))).toEqual(["ses_z"])
       expect(
         (yield* store.list({ archived: true, order: "asc", anchor: { id: SessionID.make("ses_b"), time: 10, direction: "previous" } } as never)).map(
           (item) => String(item.id),

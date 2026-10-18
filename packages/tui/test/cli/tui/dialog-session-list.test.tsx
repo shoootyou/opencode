@@ -219,9 +219,12 @@ test("renders configured archive actions without reporting a TextBuffer failure"
   try {
     const frame = await app.waitForFrame(
       (value) =>
-        value.includes("archivectrl+a") &&
+        value.includes("archive/unarchive") &&
+        value.includes("Tab") &&
         value.includes("show archived") &&
-        value.includes("ctrl+v"),
+        value.includes("ctrl+v") &&
+        value.includes("all projects") &&
+        value.includes("ctrl+a"),
     )
     expect(frame).not.toContain("Failed to create TextBuffer")
     expect(errors.map(String).join("\n")).not.toContain("Failed to create TextBuffer")

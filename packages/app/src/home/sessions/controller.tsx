@@ -3,7 +3,7 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { Button } from "@opencode/ui/button"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
-import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
+import { type Accessor, createEffect, createMemo, type JSX, onCleanup, startTransition, untrack } from "solid-js"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { useCommand } from "@/shell/commands/command"
 import {
@@ -44,6 +44,8 @@ export type HomeSessionGroup = {
 export type OpenSessionOptions = { background?: boolean }
 
 export function createHomeSessionsController(home: HomeController) {
+  let alive = true
+  onCleanup(() => (alive = false))
   const tabs = useTabs()
   const command = useCommand()
   const dialog = useDialog()
@@ -372,7 +374,7 @@ export function createHomeSessionsController(home: HomeController) {
             archiveSession: global.sessionArchive.archiveSession,
             remove: () => ctx.data.session.evict(session.id),
             notifyTabsRemoved: (detail) => notifySessionTabsRemoved({ ...detail, server: detail.server as ServerConnection.Key, sessionIDs: [...detail.sessionIDs] }),
-            isActive: () => true,
+            isActive: () => alive,
           },
         )
       },

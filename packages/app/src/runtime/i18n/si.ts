@@ -3,6 +3,9 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "සංරක්ෂිතයෙන් ඉවත් කරන්න",
   "command.session.archive": "සංරක්ෂිත කරන්න සැසිය",
   "command.session.archive.description": "සංරක්ෂිත කරන්න සැසිය",

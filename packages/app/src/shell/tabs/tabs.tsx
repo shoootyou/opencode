@@ -472,7 +472,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
 
         for (const draftID of drafts) removeDraftPersisted(draftID)
       },
-      removeSessions: (input: SessionTabsRemovedDetail) => {
+      removeSessions: (input: SessionTabsRemovedDetail, options?: Readonly<{ navigate?: boolean }>) => {
         const targetServer = input.server
         updateClosed((stack) => removeClosedTabs(stack, targetServer, input.sessionIDs))
 
@@ -516,7 +516,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
                 tabs.splice(i, 1)
               }
 
-              if (!removedCurrent) return
+              if (!removedCurrent || options?.navigate === false) return
 
               const nextTab =
                 tabs.slice(currentIndex).find((tab) => tab.type === "session") ??

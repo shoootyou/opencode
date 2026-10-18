@@ -72,6 +72,9 @@ const desktop = [
 ]
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Visszaállítás az archívumból",
   "command.session.archive": "Archiválás munkamenet",
   "command.session.archive.description": "Archiválás munkamenet",

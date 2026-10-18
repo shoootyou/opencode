@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "このページを検索",
+  "dialog.archivedSessions.previousPage": "前のページ",
+  "dialog.archivedSessions.nextPage": "次のページ",
   "common.unarchive": "アーカイブ解除",
   "command.session.archive": "セッションをアーカイブ",
   "command.session.archive.description": "現在のセッションをアーカイブ",

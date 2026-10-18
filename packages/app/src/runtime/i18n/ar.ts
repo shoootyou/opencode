@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "البحث في هذه الصفحة",
+  "dialog.archivedSessions.previousPage": "الصفحة السابقة",
+  "dialog.archivedSessions.nextPage": "الصفحة التالية",
   "common.unarchive": "إلغاء الأرشفة",
   "command.session.archive": "أرشفة الجلسة",
   "command.session.archive.description": "أرشف الجلسة الحالية",

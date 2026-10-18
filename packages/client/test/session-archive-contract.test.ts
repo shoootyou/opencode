@@ -3,7 +3,7 @@
  * @interface session.update({ sessionID: string, archive?: number | null }): Promise<void> | Effect<void, E>
  * @behavior
  *   - Promise and Effect clients encode archive: 0 and archive: null exactly.
- *   - Promise and Effect list clients encode archived: true and archived: false, omitting undefined.
+ *   - Promise and Effect list clients encode archived: true, false, and "only", omitting undefined.
  * @edge-cases
  *   - archive: null is accepted by generated TypeScript inputs without a cast.
  *   - Generated OpenAPI declares archive nullable after S4 generation.
@@ -29,11 +29,13 @@ test("Promise generated session methods encode archive and archived fields", asy
   await client.session.update({ sessionID: "ses_archive", archive: null })
   await client.session.list({ archived: true })
   await client.session.list({ archived: false })
+  await client.session.list({ archived: "only" })
 
   expect(await requests[0]?.json()).toEqual({ archive: 0 })
   expect(await requests[1]?.json()).toEqual({ archive: null })
   expect(new URL(requests[2]!.url).searchParams.get("archived")).toBe("true")
   expect(new URL(requests[3]!.url).searchParams.get("archived")).toBe("false")
+  expect(new URL(requests[4]!.url).searchParams.get("archived")).toBe("only")
 })
 
 test("Effect generated session methods encode archive and archived fields", async () => {
@@ -62,6 +64,7 @@ test("Effect generated session methods encode archive and archived fields", asyn
     yield* client.session.list()
     yield* client.session.list({ archived: true })
     yield* client.session.list({ archived: false })
+    yield* client.session.list({ archived: "only" })
   }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.runPromise)
 
   expect(requests).toEqual([
@@ -70,6 +73,7 @@ test("Effect generated session methods encode archive and archived fields", asyn
     { method: "GET", url: "http://localhost:3000/api/session", urlParams: {} },
     { method: "GET", url: "http://localhost:3000/api/session", urlParams: { archived: "true" } },
     { method: "GET", url: "http://localhost:3000/api/session", urlParams: { archived: "false" } },
+    { method: "GET", url: "http://localhost:3000/api/session", urlParams: { archived: "only" } },
   ])
 })
 

@@ -1,4 +1,7 @@
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ยกเลิกการเก็บถาวร",
   "command.session.archive": "เก็บถาวร เซสชัน",
   "command.session.archive.description": "เก็บถาวร เซสชัน",

@@ -23,7 +23,6 @@ import { useConfig } from "../config"
 import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
 import { projectName } from "../util/project"
 import { useLocation } from "../context/location"
-import { shouldKeepSessionScopeBinding } from "./session-list-model"
 
 type SessionListItem = {
   parentID?: string
@@ -45,7 +44,7 @@ type SessionListResult<T extends SessionListItem, Location> = {
 
 export function createSessionListModel<Location>(input: SessionListModelInput<Location>) {
   const identity = { ...input }
-  const request = identity.showArchived ? { archived: true as const } : {}
+  const request = identity.showArchived ? { archived: "only" as const } : {}
   const matches = <T extends SessionListItem>(session: T) =>
     !session.parentID && (identity.showArchived ? typeof session.time.archived === "number" : session.time.archived === undefined)
   const sameIdentity = (result: SessionListResult<SessionListItem, Location> | undefined) =>
@@ -81,15 +80,9 @@ export function DialogSessionList() {
   const local = useLocal()
   const sessionTabs = useSessionTabs()
   const config = useConfig().data
-  const archiveToggleBound = createMemo(() =>
-    !shouldKeepSessionScopeBinding({
-      archiveBindings: () => [
-        ...config.keybinds.get("session.archive.toggle"),
-        ...config.keybinds.get("session.archived.toggle_visibility"),
-      ],
-      matchesCtrlA: (binding) => binding === "ctrl+a",
-    }),
-  )
+  // The dialog owns Ctrl+A for its scope action. Keep keymap precedence unambiguous
+  // and leave the archive action reachable through DialogSelect's Tab fallback.
+  const archiveBinding = config.keybinds.get("session.archive.toggle").some((binding) => binding.key === "ctrl+a")
   const toast = useToast()
   const activeLocation = useLocation()
   const [filter, setFilter] = createSignal("")
@@ -125,6 +118,8 @@ export function DialogSessionList() {
     }),
     async ({ query, allProjects, location, showArchived }) => {
       if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
+      const controller = new AbortController()
+      onCleanup(() => controller.abort())
       try {
         if (!data.location.info(location)) await data.location.sync(location)
         if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
@@ -140,33 +135,20 @@ export function DialogSessionList() {
                   subpath: path.relative(current.project.directory, current.directory).replaceAll("\\", "/"),
                 }),
           ...(query ? { search: query } : {}),
-          ...(showArchived ? { archived: true } : {}),
+          ...(showArchived ? { archived: "only" as const } : {}),
           limit: 50,
           order: "desc",
           parentID: null,
-        }, { signal: ownerController.signal })
+        }, { signal: controller.signal })
         if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
-        const sessions = [...response.data]
-        const seen = new Set(sessions.map((session) => session.id))
-        let cursor = response.cursor.next
-        while (showArchived && cursor && sessions.filter((session) => !session.parentID && typeof session.time.archived === "number").length < 50) {
-          const next = await client.api.session.list({ cursor, archived: true, parentID: null, order: "desc", limit: 50 }, { signal: ownerController.signal })
-          if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
-          if (next.cursor.next === cursor) throw new Error("Repeated session cursor")
-          next.data.forEach((session) => {
-            if (seen.has(session.id)) return
-            seen.add(session.id)
-            sessions.push(session)
-          })
-          cursor = next.cursor.next
-        }
+        const sessions = response.data
         return {
           identity: { query, allProjects, location, showArchived },
           sessions,
           error: undefined,
         }
       } catch (error) {
-        if (disposed || ownerController.signal.aborted) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
+        if (disposed || controller.signal.aborted) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         // A transient transport failure must degrade search, not crash the TUI
         // through the root ErrorBoundary when the errored resource is read.
         return {
@@ -313,28 +295,25 @@ export function DialogSessionList() {
         </box>
       }
       options={options()}
+      footerGap={0}
       skipFilter={true}
       current={currentSessionID()}
       onFilter={(query) => {
         setFilter(query)
         setSearch(query)
       }}
-      bindings={
-        archiveToggleBound()
-          ? []
-          : [
-              {
-                bind: "ctrl+a",
-                title: allProjects() ? "Show current directory sessions" : "Show all project sessions",
-                group: "Dialog",
-                run: () => {
-                  void updatePrefs((draft) => {
-                    draft.allProjects = !draft.allProjects
-                  }).catch(() => {})
-                },
-              },
-            ]
-      }
+      bindings={[
+        {
+          bind: "ctrl+a",
+          title: allProjects() ? "Show current directory sessions" : "Show all project sessions",
+          group: "Dialog",
+          run: () => {
+            void updatePrefs((draft) => {
+              draft.allProjects = !draft.allProjects
+            }).catch(() => {})
+          },
+        },
+      ]}
       emptyView={
         <box paddingLeft={4} paddingRight={4}>
           <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
@@ -396,7 +375,9 @@ export function DialogSessionList() {
         },
         {
           command: "session.archive.toggle",
-          title: "archive",
+          bind: archiveBinding ? false : undefined,
+          noWrap: archiveBinding,
+          title: "archive/unarchive",
           showWhenUnbound: true,
           disabled: archivePending(),
           onTrigger: (option: { value: string }) => {
@@ -452,9 +433,7 @@ export function DialogSessionList() {
       ]}
       footerHints={[
         ...quickSwitchFooterHints(),
-        ...(archiveToggleBound()
-          ? []
-          : [{ title: allProjects() ? "current directory" : "all projects", label: "ctrl+a", side: "right" as const }]),
+        { title: allProjects() ? "current directory" : "all projects", label: "ctrl+a", side: "right" as const },
       ]}
     />
   )

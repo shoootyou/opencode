@@ -1,14 +1,15 @@
-import type { SessionApi } from "@opencode/client/promise"
 import { isArchivedSession, type ArchiveSession, type SetSessionArchive } from "@/session/archive"
-import { listAllSessions } from "@/session/list"
 
-export type ArchivedSessionsState = Readonly<{ status: "idle" }> | Readonly<{ status: "loading" }> | Readonly<{ status: "ready"; sessions: readonly ArchiveSession[] }> | Readonly<{ status: "error"; error: unknown }>
-export type ArchivedSessionsModel = Readonly<{ state: () => ArchivedSessionsState; subscribe: (listener: () => void) => () => void; load: () => Promise<void>; search: (query: string) => readonly ArchiveSession[]; restoringID: () => string | undefined; restore: (sessionID: string) => Promise<boolean>; dispose: () => void }>
-type ArchiveList = (input?: never, options?: never) => Promise<{ data: ArchiveSession[]; cursor: { next?: string | null } }>
+export type ArchivedPage = Readonly<{ sessions: readonly ArchiveSession[]; cursor: Readonly<{ previous?: string; next?: string }> }>
+export type ArchivedSessionsState = Readonly<{ status: "idle" }> | Readonly<{ status: "loading" }> | Readonly<{ status: "ready"; page: ArchivedPage }> | Readonly<{ status: "error"; error: unknown }>
+export type ArchivedSessionsModel = Readonly<{ state: () => ArchivedSessionsState; subscribe: (listener: () => void) => () => void; load: () => Promise<void>; next: () => Promise<void>; previous: () => Promise<void>; search: (query: string) => readonly ArchiveSession[]; restoringID: () => string | undefined; restore: (sessionID: string) => Promise<boolean>; dispose: () => void }>
+type ArchiveList = (input?: { archived?: "only"; parentID?: null; order?: "desc"; limit?: number; cursor?: string }, options?: { signal?: AbortSignal }) => Promise<{ data: ArchiveSession[]; cursor: { previous?: string | null; next?: string | null } }>
 
-export async function loadArchivedSessions(api: Readonly<{ list: ArchiveList }>, input: Readonly<{ signal: AbortSignal }>): Promise<ArchiveSession[]> {
-  const sessions = await listAllSessions({ list: api.list as SessionApi["list"] }, { archived: true, parentID: null, order: "desc" }, { signal: input.signal })
-  return sessions.filter((session) => !session.parentID && isArchivedSession(session))
+export async function loadArchivedSessions(api: Readonly<{ list: ArchiveList }>, input: Readonly<{ signal: AbortSignal; cursor?: string }>): Promise<ArchivedPage> {
+  const response = await api.list({ archived: "only", parentID: null, order: "desc", limit: 50, ...(input.cursor ? { cursor: input.cursor } : {}) }, { signal: input.signal })
+  if (response.data.length > 50 || response.data.some((session) => session.parentID || !isArchivedSession(session)))
+    throw new Error("Invalid archived session page")
+  return { sessions: response.data, cursor: { ...(response.cursor.previous ? { previous: response.cursor.previous } : {}), ...(response.cursor.next ? { next: response.cursor.next } : {}) } }
 }
 
 export function matchesArchivedSession(session: ArchiveSession, query: string): boolean {
@@ -26,7 +27,7 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
   const listeners = new Set<() => void>()
   const notify = () => listeners.forEach((listener) => listener())
   const state = () => value
-  const load = async () => {
+  const load = async (cursor?: string) => {
     if (disposed) return
     controller?.abort()
     const current = new AbortController()
@@ -35,9 +36,9 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
     value = { status: "loading" }
     notify()
     try {
-      const sessions = await loadArchivedSessions({ list: deps.list }, { signal: current.signal })
+      const page = await loadArchivedSessions({ list: deps.list }, { signal: current.signal, cursor })
       if (disposed || version !== generation) return
-      value = { status: "ready", sessions }
+      value = { status: "ready", page }
       notify()
     } catch (error) {
       if (disposed || version !== generation || current.signal.aborted) return
@@ -49,11 +50,13 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
     state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
     load,
-    search(query) { return value.status === "ready" ? value.sessions.filter((session) => matchesArchivedSession(session, query)) : [] },
+    next: () => value.status === "ready" && value.page.cursor.next ? load(value.page.cursor.next) : Promise.resolve(),
+    previous: () => value.status === "ready" && value.page.cursor.previous ? load(value.page.cursor.previous) : Promise.resolve(),
+    search(query) { return value.status === "ready" ? value.page.sessions.filter((session) => matchesArchivedSession(session, query)) : [] },
     restoringID: () => restoring,
     async restore(sessionID) {
       if (disposed || restoring || value.status !== "ready") return false
-      const session = value.sessions.find((item) => item.id === sessionID)
+      const session = value.page.sessions.find((item) => item.id === sessionID)
       if (!session || !isArchivedSession(session)) return false
       const version = generation
       restoring = sessionID
@@ -62,7 +65,7 @@ export function createArchivedSessionsModel<Tab>(deps: Readonly<{ server: string
       if (!committed) { restoring = undefined; notify(); return false }
       if (disposed || version !== generation) return true
       restoring = undefined
-      value = { status: "ready", sessions: value.sessions.filter((item) => item.id !== sessionID) }
+      value = { status: "ready", page: { ...value.page, sessions: value.page.sessions.filter((item) => item.id !== sessionID) } }
       notify()
       deps.openProject({ server: deps.server, directory: session.location.directory })
       deps.touchProject({ server: deps.server, directory: session.location.directory })
