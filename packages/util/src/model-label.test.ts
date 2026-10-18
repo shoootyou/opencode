@@ -4,9 +4,10 @@
  * @behavior
  *   - Sanitizes each display component without changing raw lookup identities.
  *   - Renders safe resolved names or safe raw IDs and non-default variants.
+ *   - Treats unreadable or non-object references as missing without swallowing callback errors.
  * @edge-cases
  *   - Sanitized-empty components fall back or are omitted; each is capped at 64 code points.
- *   - Missing raw reference identity returns an empty label without throwing for malformed Unicode.
+ *   - Missing, hostile, or unreadable reference fields return an empty label.
  * @see ../../session-ui/src/message/model-label.ts
  */
 import { describe, expect, test } from "bun:test"
@@ -286,5 +287,51 @@ describe("formatModelLabel", () => {
     expect(() =>
       formatModelLabel({ providerID: "team\ud800", id: "model", variant: "high\udc00" }, "Model\ud800"),
     ).not.toThrow()
+  })
+
+  test.each([
+    ["null", null],
+    ["number", 42],
+    ["string", "team/reviewer"],
+    ["array", []],
+  ])("treats a %s reference as missing", (_kind, reference) => {
+    expect(() => formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).not.toThrow()
+    expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
+  })
+
+  test.each(["providerID", "id", "variant"])("treats a throwing %s reference getter as missing", (field) => {
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      enumerable: true,
+      get() {
+        throw new Error(`${field} getter must not escape`)
+      },
+    })
+
+    expect(() => formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).not.toThrow()
+    expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
+  })
+
+  test("treats a throwing reference Proxy trap as missing", () => {
+    const reference = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error("reference proxy trap must not escape")
+        },
+      },
+    )
+
+    expect(() => formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).not.toThrow()
+    expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
+  })
+
+  test("propagates errors from the caller-supplied variant formatter", () => {
+    const error = new Error("caller callback failure")
+
+    expect(() =>
+      formatModelLabel({ providerID: "team", id: "reviewer", variant: "thinking" }, "Review Model", () => {
+        throw error
+      }),
+    ).toThrow(error)
   })
 })

@@ -2,11 +2,11 @@
  * @spec-handoff
  * @interface assistantModelLabel(model: ModelLabelRef | undefined, providers: ProviderNames | undefined, formatVariant: FormatModelVariant): string
  * @behavior
- *   - Resolves model display names only by the message (providerID, id) identity.
+ *   - Resolves model display names only when message providerID and id are primitive strings.
  *   - Delegates one sanitized shared label, including its variant, to the app formatter.
  * @edge-cases
  *   - Missing catalog entries preserve raw provider/model IDs.
- *   - Missing identity and prototype-key IDs produce a safe empty or raw label.
+ *   - Dirty catalogs and unreadable references degrade to a missing display name without throwing.
  * @see ./message-content.tsx
  */
 import { describe, expect, test } from "bun:test"
@@ -156,4 +156,146 @@ describe("session-ui assistantModelLabel", () => {
       ),
     ).toBe("")
   })
+
+  test("does not resolve numeric provider or model IDs through colliding string catalog keys", () => {
+    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+    const collidingProviders = new Map([
+      ["42", { models: { reviewer: { name: "Wrong Numeric Provider Match" } } }],
+      ["team", { models: { "42": { name: "Wrong Numeric Model Match" }, reviewer: { name: "Review Model" } } }],
+    ])
+
+    expect(
+      assistantModelLabel(
+        { providerID: 42, id: "reviewer" } as unknown as Parameters<typeof assistantModelLabel>[0],
+        collidingProviders as Parameters<typeof assistantModelLabel>[1],
+        formatVariant,
+      ),
+    ).toBe("reviewer")
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: 42 } as unknown as Parameters<typeof assistantModelLabel>[0],
+        collidingProviders as Parameters<typeof assistantModelLabel>[1],
+        formatVariant,
+      ),
+    ).toBe("")
+  })
+
+  test.each([
+    ["providerID", "team", "reviewer"],
+    ["id", "reviewer", ""],
+  ])("does not convert an object %s lookup identity", (position, existingKey, expected) => {
+    let conversions = 0
+    const conversionObject = {
+      toString: () => {
+        conversions += 1
+        return existingKey
+      },
+      valueOf: () => {
+        conversions += 1
+        return existingKey
+      },
+      [Symbol.toPrimitive]: () => {
+        conversions += 1
+        return existingKey
+      },
+    }
+    const model = { providerID: "team", id: "reviewer" }
+    model[position as keyof typeof model] = conversionObject as never
+    const collidingProviders = new Map([["team", { models: { reviewer: { name: "Wrong Converted Match" } } }]])
+
+    expect(assistantModelLabel(model, collidingProviders, (label, variant) => `${label} (${variant})`)).toBe(expected)
+    expect(conversions).toBe(0)
+  })
+
+  test.each(["providerID", "id"])("does not throw for a throwing %s conversion object", (field) => {
+    const model = { providerID: "team", id: "reviewer" }
+    model[field as keyof typeof model] = {
+      [Symbol.toPrimitive]() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+      toString() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+      valueOf() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+    } as never
+
+    expect(() => assistantModelLabel(model, providers, (label, variant) => `${label} (${variant})`)).not.toThrow()
+  })
+
+  test.each([
+    ["null models map", { models: null }],
+    ["undefined models map", { models: undefined }],
+    ["null model entry", { models: { reviewer: null } }],
+    ["array models map", { models: [] }],
+    ["non-object models map", { models: 42 }],
+  ])("treats a %s as a missing catalog name", (_kind, provider) => {
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer" },
+        new Map([["team", provider]]) as unknown as Parameters<typeof assistantModelLabel>[1],
+        (label, variant) => `${label} (${variant})`,
+      ),
+    ).toBe("team/reviewer")
+  })
+
+  test.each(["providerID", "id", "variant"])("does not throw for a reference %s getter", (field) => {
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      get() {
+        throw new Error(`${field} getter must not escape`)
+      },
+    })
+    expect(() =>
+      assistantModelLabel(
+        reference as Parameters<typeof assistantModelLabel>[0],
+        providers,
+        (label, variant) => `${label} (${variant})`,
+      ),
+    ).not.toThrow()
+  })
+
+  test.each([
+    ["null", null],
+    ["primitive", 42],
+  ])("treats a %s reference as missing", (_kind, reference) => {
+    expect(() =>
+      assistantModelLabel(
+        reference as Parameters<typeof assistantModelLabel>[0],
+        providers,
+        (label, variant) => `${label} (${variant})`,
+      ),
+    ).not.toThrow()
+    expect(
+      assistantModelLabel(
+        reference as Parameters<typeof assistantModelLabel>[0],
+        providers,
+        (label, variant) => `${label} (${variant})`,
+      ),
+    ).toBe("")
+  })
+
+  test.each(["reference", "provider entry", "model entry", "catalog name"])(
+    "does not throw at a throwing %s Proxy/accessor boundary",
+    (boundary) => {
+      const trap = () => {
+        throw new Error("proxy trap must not escape")
+      }
+      const reference =
+        boundary === "reference"
+          ? new Proxy({}, { getOwnPropertyDescriptor: trap })
+          : { providerID: "team", id: "reviewer" }
+      const dirtyProviders =
+        boundary === "provider entry"
+          ? new Map([["team", new Proxy({}, { get: trap })]])
+          : boundary === "model entry"
+            ? new Map([["team", { models: { reviewer: new Proxy({}, { get: trap }) } }]])
+            : boundary === "catalog name"
+              ? new Map([["team", { models: { reviewer: Object.defineProperty({}, "name", { get: trap }) } }]])
+              : providers
+      const formatVariant = (label: string, variant: string) => `${label} (${variant})`
+
+      expect(() => assistantModelLabel(reference as never, dirtyProviders as never, formatVariant)).not.toThrow()
+    },
+  )
 })

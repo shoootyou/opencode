@@ -1,4 +1,9 @@
-import { formatModelLabel, type FormatModelVariant, type ModelLabelRef } from "@opencode/util/model-label"
+import {
+  formatModelLabel,
+  readModelLabelRef,
+  type FormatModelVariant,
+  type ModelLabelRef,
+} from "@opencode/util/model-label"
 
 type ProviderNames = ReadonlyMap<
   string,
@@ -12,7 +17,27 @@ export function assistantModelLabel(
   providers: ProviderNames | undefined,
   formatVariant: FormatModelVariant,
 ): string {
-  const provider = model?.providerID ? providers?.get(model.providerID) : undefined
-  const name = model?.id && provider && Object.hasOwn(provider.models, model.id) ? provider.models[model.id]?.name : undefined
-  return formatModelLabel(model, name, formatVariant)
+  const reference = readModelLabelRef(model)
+  const name =
+    typeof reference?.providerID === "string" && typeof reference.id === "string"
+      ? catalogName(providers, reference.providerID, reference.id)
+      : undefined
+  return formatModelLabel(reference, name, formatVariant)
+}
+
+function catalogName(providers: ProviderNames | undefined, providerID: string, id: string): string | undefined {
+  try {
+    const provider = providers?.get(providerID)
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) return
+
+    const models = provider.models
+    if (!models || typeof models !== "object" || Array.isArray(models) || !Object.hasOwn(models, id)) return
+
+    const model = models[id]
+    if (!model || typeof model !== "object" || Array.isArray(model)) return
+    const name = model.name
+    return typeof name === "string" ? name : undefined
+  } catch {
+    return
+  }
 }

@@ -11,21 +11,36 @@ export function formatModelLabel(
   name?: string,
   formatVariant?: FormatModelVariant,
 ): string {
-  if (!model || !Object.hasOwn(model, "providerID") || !Object.hasOwn(model, "id")) return ""
-  if (model.providerID === "" || model.id === "") return ""
+  const reference = readModelLabelRef(model)
+  if (!reference || reference.providerID === "" || reference.id === "") return ""
 
-  const provider = sanitizeComponent(model.providerID)
-  const modelName = sanitizeComponent(name) || sanitizeComponent(model.id)
+  const provider = sanitizeComponent(reference.providerID)
+  const modelName = sanitizeComponent(name) || sanitizeComponent(reference.id)
   if (!modelName) return ""
 
   const label = [provider, modelName].filter(Boolean).join("/")
-  const variant = sanitizeComponent(model.variant ?? "")
+  const variant = sanitizeComponent(reference.variant)
   if (!variant || variant === "default") return label
 
   return (formatVariant ?? ((label, variant) => `${label} (${variant})`))(
     label,
     capComponent(variant[0].toUpperCase() + variant.slice(1)),
   )
+}
+
+export function readModelLabelRef(model: ModelLabelRef | undefined): ModelLabelRef | undefined {
+  if (!model || typeof model !== "object") return
+
+  try {
+    if (!Object.hasOwn(model, "providerID") || !Object.hasOwn(model, "id")) return
+    return {
+      providerID: model.providerID,
+      id: model.id,
+      variant: model.variant,
+    } as ModelLabelRef
+  } catch {
+    return
+  }
 }
 
 const forbiddenDisplayCharacter =

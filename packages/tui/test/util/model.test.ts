@@ -2,13 +2,13 @@
  * @spec-handoff
  * @interface assistantModelLabel(model: ModelLabelRef | undefined, models: readonly Readonly<{ providerID: string; id: string; name: string }>[] | undefined): string
  * @behavior
- *   - Resolves the exact message (providerID, id) against the TUI catalog and formats it through @opencode/util/model-label.
+ *   - Resolves the exact message (providerID, id) only when both identities are primitive strings.
  *   - Returns a control-free display label while looking up catalog entries by raw providerID/id.
  *   - Adds a parenthesized, first-code-unit-capitalized non-default variant to the complete label.
  * @edge-cases
  *   - Missing or empty reference identities return an empty label.
  *   - Catalog modelID is never a lookup key; aliases sharing an API ID retain their own display names.
- *   - Long, Unicode, slash-containing names remain untruncated plain text for native footer wrapping.
+ *   - Dirty catalogs and unreadable references degrade as missing without throwing.
  * @see ../../src/util/model.ts
  */
 import { describe, expect, test } from "bun:test"
@@ -142,5 +142,108 @@ describe("util.model", () => {
     expect(
       assistantModelLabel({ providerID: "team", id: {} } as unknown as Parameters<typeof assistantModelLabel>[0], []),
     ).toBe("")
+  })
+
+  test("does not resolve numeric provider or model IDs through colliding string catalog keys", () => {
+    const models = [
+      { providerID: "42", id: "reviewer", name: "Wrong Numeric Provider Match" },
+      { providerID: "team", id: "42", name: "Wrong Numeric Model Match" },
+      { providerID: "team", id: "reviewer", name: "Review Model" },
+    ]
+
+    expect(assistantModelLabel({ providerID: 42, id: "reviewer" } as never, models)).toBe("reviewer")
+    expect(assistantModelLabel({ providerID: "team", id: 42 } as never, models)).toBe("")
+  })
+
+  test.each([
+    ["provider", "reviewer"],
+    ["id", ""],
+  ])("does not convert an object %s lookup identity", (position, expected) => {
+    let conversions = 0
+    const conversionObject = {
+      toString: () => {
+        conversions += 1
+        return position === "provider" ? "team" : "reviewer"
+      },
+      valueOf: () => {
+        conversions += 1
+        return position === "provider" ? "team" : "reviewer"
+      },
+      [Symbol.toPrimitive]: () => {
+        conversions += 1
+        return position === "provider" ? "team" : "reviewer"
+      },
+    }
+    const model =
+      position === "provider"
+        ? { providerID: conversionObject, id: "reviewer" }
+        : { providerID: "team", id: conversionObject }
+
+    expect(
+      assistantModelLabel(model as never, [{ providerID: "team", id: "reviewer", name: "Wrong Converted Match" }]),
+    ).toBe(expected)
+    expect(conversions).toBe(0)
+  })
+
+  test.each(["providerID", "id"])("does not throw for a throwing %s conversion object", (field) => {
+    const conversionObject = {
+      [Symbol.toPrimitive]() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+      toString() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+      valueOf() {
+        throw new Error(`${field} conversion must not escape`)
+      },
+    }
+    const model =
+      field === "providerID"
+        ? { providerID: conversionObject, id: "reviewer" }
+        : { providerID: "team", id: conversionObject }
+
+    expect(() => assistantModelLabel(model as never, [])).not.toThrow()
+  })
+
+  test.each([
+    ["null entry", [null]],
+    ["sparse array", new Array(1)],
+    ["non-array catalog", {}],
+  ])("treats a %s as a missing catalog", (_kind, models) => {
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/reviewer")
+  })
+
+  test.each(["providerID", "id", "variant"])("does not throw for a reference %s getter", (field) => {
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      get() {
+        throw new Error(`${field} getter must not escape`)
+      },
+    })
+    expect(() => assistantModelLabel(reference as never, [])).not.toThrow()
+  })
+
+  test.each([
+    ["null", null],
+    ["primitive", 42],
+  ])("treats a %s reference as missing", (_kind, reference) => {
+    expect(() => assistantModelLabel(reference as never, [])).not.toThrow()
+    expect(assistantModelLabel(reference as never, [])).toBe("")
+  })
+
+  test("does not throw for throwing reference, catalog-entry, or field Proxy/accessor boundaries", () => {
+    const trap = () => {
+      throw new Error("proxy trap must not escape")
+    }
+    const throwingReference = new Proxy({}, { getOwnPropertyDescriptor: trap })
+    const throwingEntry = new Proxy({}, { get: trap })
+    const providerGetter = Object.defineProperty({}, "providerID", { get: trap })
+    const idGetter = Object.defineProperty({}, "id", { get: trap })
+    const nameGetter = Object.defineProperty({}, "name", { get: trap })
+
+    expect(() => assistantModelLabel(throwingReference as never, [])).not.toThrow()
+    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [throwingEntry] as never)).not.toThrow()
+    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [providerGetter] as never)).not.toThrow()
+    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [idGetter] as never)).not.toThrow()
+    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [nameGetter] as never)).not.toThrow()
   })
 })
