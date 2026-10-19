@@ -80,6 +80,32 @@ describe("util.model", () => {
     expect(assistantModelLabel({ providerID: "team", id: "writer" }, [...models].reverse())).toBe("team/Writer Model")
   })
 
+  test.each([
+    ["leading provider space", " team", "reviewer", "team/reviewer"],
+    ["trailing provider space", "team ", "reviewer", "team/reviewer"],
+    ["provider tab", "\tteam", "reviewer", "team/reviewer"],
+    ["provider no-break space", "\u00a0team", "reviewer", "team/reviewer"],
+    ["provider newline", "team\n", "reviewer", "team/reviewer"],
+    ["leading model space", "team", " reviewer", "team/reviewer"],
+    ["trailing model space", "team", "reviewer ", "team/reviewer"],
+    ["model tab", "team", "\treviewer", "team/reviewer"],
+    ["model no-break space", "team", "\u00a0reviewer", "team/reviewer"],
+    ["model newline", "team", "reviewer\n", "team/reviewer"],
+    ["case-distinct provider", "Team", "reviewer", "Team/reviewer"],
+    ["case-distinct model", "team", "Reviewer", "team/Reviewer"],
+    ["NFD provider", "te\u0301am", "reviewer", "te\u0301am/reviewer"],
+    ["NFD model", "team", "re\u0301viewer", "team/re\u0301viewer"],
+  ])("does not normalize or otherwise rewrite a %s catalog key", (_case, providerID, id, fallback) => {
+    const models = [
+      { providerID: "team", id: "reviewer", name: "Review Model" },
+      { providerID: "téam", id: "reviewer", name: "Accent Provider Model" },
+      { providerID: "team", id: "réviewer", name: "Accent Model" },
+    ]
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models)).toBe("team/Review Model")
+    expect(assistantModelLabel({ providerID, id }, models)).toBe(fallback)
+  })
+
   test("falls back independently for unknown models, unknown providers, and an unavailable catalog", () => {
     const models = [{ providerID: "team", id: "reviewer", name: "Review Model" }]
 

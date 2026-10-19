@@ -47,6 +47,35 @@ describe("session-ui assistantModelLabel", () => {
     ).toBe("team/Second Alias")
   })
 
+  test.each([
+    ["leading provider space", " team", "reviewer", "team/reviewer"],
+    ["trailing provider space", "team ", "reviewer", "team/reviewer"],
+    ["provider tab", "\tteam", "reviewer", "team/reviewer"],
+    ["provider no-break space", "\u00a0team", "reviewer", "team/reviewer"],
+    ["provider newline", "team\n", "reviewer", "team/reviewer"],
+    ["leading model space", "team", " reviewer", "team/reviewer"],
+    ["trailing model space", "team", "reviewer ", "team/reviewer"],
+    ["model tab", "team", "\treviewer", "team/reviewer"],
+    ["model no-break space", "team", "\u00a0reviewer", "team/reviewer"],
+    ["model newline", "team", "reviewer\n", "team/reviewer"],
+    ["case-distinct provider", "Team", "reviewer", "Team/reviewer"],
+    ["case-distinct model", "team", "Reviewer", "team/Reviewer"],
+    ["NFD provider", "te\u0301am", "reviewer", "te\u0301am/reviewer"],
+    ["NFD model", "team", "re\u0301viewer", "team/re\u0301viewer"],
+  ])("does not normalize or otherwise rewrite a %s catalog key", (_case, providerID, id, fallback) => {
+    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+    const catalog = new Map<string, { models: Record<string, { name: string }> }>([
+      ["team", { models: { reviewer: { name: "Review Model" } } }],
+      ["téam", { models: { reviewer: { name: "Accent Provider Model" } } }],
+      ["team", { models: { reviewer: { name: "Review Model" }, réviewer: { name: "Accent Model" } } }],
+    ])
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog, formatVariant)).toBe(
+      "team/Review Model",
+    )
+    expect(assistantModelLabel({ providerID, id }, catalog, formatVariant)).toBe(fallback)
+  })
+
   test("falls back independently for a missing provider map, provider, or model", () => {
     const formatVariant = (model: string, variant: string) => `${model} (${variant})`
 

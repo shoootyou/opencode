@@ -27,16 +27,8 @@ export function assistantModelLabel(
 
 function catalogName(providers: ProviderNames | undefined, providerID: string, id: string): string | undefined {
   try {
-    const provider = providers?.get(providerID)
-    if (!provider || typeof provider !== "object" || Array.isArray(provider)) return
-
-    const models = provider.models
-    if (!models || typeof models !== "object" || Array.isArray(models) || !Object.hasOwn(models, id)) return
-
-    const model = models[id]
-    if (!model || typeof model !== "object" || Array.isArray(model)) return
-    const name = model.name
-    return typeof name === "string" ? name : undefined
+    const models = providers?.get(providerID)?.models
+    return models && Object.hasOwn(models, id) ? models[id]?.name : undefined
   } catch {
     return
   }

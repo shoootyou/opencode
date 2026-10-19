@@ -27,17 +27,11 @@ function catalogName(
   id: string,
 ): string | undefined {
   try {
-    if (!Array.isArray(models)) return
-
-    for (const item of models) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    return models?.find((item) => {
       const itemProviderID = item.providerID
       const itemID = item.id
-      if (itemProviderID === providerID && itemID === id) {
-        const name = item.name
-        return typeof name === "string" ? name : undefined
-      }
-    }
+      return itemProviderID === providerID && itemID === id
+    })?.name
   } catch {
     return
   }
