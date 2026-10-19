@@ -629,8 +629,10 @@ export function AssistantTextContent(props: {
       i18n.t("ui.message.modelVariant", { model, variant }),
     ),
   )
+
   const agent = createMemo(() => {
     const agent = props.message.agent
+
     return agent ? agent[0]?.toUpperCase() + agent.slice(1) : ""
   })
 

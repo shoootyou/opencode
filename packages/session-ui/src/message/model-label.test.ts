@@ -13,6 +13,17 @@
 import { describe, expect, test } from "bun:test"
 import { assistantModelLabel } from "./model-label"
 
+type HostileFixture = object | string | number | boolean | symbol | bigint | null | undefined
+
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- test-only dynamic field writes deliberately exercise hostile identities.
+type MutableHostileFixture = { [field: string]: HostileFixture }
+
+// oxlint-disable-next-line anti-slop/no-object-parameters -- accepts deliberately malformed test fixtures at the runtime trust boundary.
+function asHostileFixture<T>(value: HostileFixture): T {
+  // SAFETY: Hostile and dirty-input fixtures deliberately violate static types to exercise the runtime trust boundary.
+  return value as T
+}
+
 const providers = new Map([
   [
     "team",
@@ -65,6 +76,7 @@ describe("session-ui assistantModelLabel", () => {
     ["NFD model", "team", "re\u0301viewer", "team/re\u0301viewer"],
   ])("does not normalize or otherwise rewrite a %s catalog key", (_case, providerID, id, fallback) => {
     const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+
     const catalog = new Map<string, { models: Record<string, { name: string }> }>([
       ["team", { models: { reviewer: { name: "Review Model" } } }],
       ["téam", { models: { reviewer: { name: "Accent Provider Model" } } }],
@@ -89,9 +101,11 @@ describe("session-ui assistantModelLabel", () => {
 
   test("uses the real ui.message.modelVariant callback with the complete label and capitalized variant", () => {
     const keys: string[] = []
+
     const i18n = {
       t(key: string, values: { model: string; variant: string }) {
         keys.push(key)
+
         return `${values.model} (${values.variant})`
       },
     }
@@ -141,6 +155,7 @@ describe("session-ui assistantModelLabel", () => {
 
   test("uses raw catalog keys while returning a control-free label for hostile provider, name, and variant displays", () => {
     const rawProviderID = "team\u001b"
+
     const hostileProviders = new Map([
       [
         rawProviderID,
@@ -152,6 +167,7 @@ describe("session-ui assistantModelLabel", () => {
         },
       ],
     ])
+
     const label = assistantModelLabel(
       { providerID: rawProviderID, id: "reviewer", variant: "thin\u001b]8;;https://invalid.example\u0007king" },
       hostileProviders,
@@ -167,12 +183,16 @@ describe("session-ui assistantModelLabel", () => {
 
   test("does not coerce dirty lookup identities and treats dirty display components as missing", () => {
     const formatVariant = (model: string, variant: string) => `${model} (${variant})`
-    const dirtyModel = { providerID: 42, id: "reviewer", variant: true } as unknown as Parameters<
-      typeof assistantModelLabel
-    >[0]
-    const dirtyCatalog = new Map([
-      ["team", { models: { reviewer: { name: [] as unknown as string } } }],
-    ]) as unknown as Parameters<typeof assistantModelLabel>[1]
+
+    const dirtyModel = asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({
+      providerID: 42,
+      id: "reviewer",
+      variant: true,
+    })
+
+    const dirtyCatalog = asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(
+      new Map([["team", { models: { reviewer: { name: [] } } }]]),
+    )
 
     expect(assistantModelLabel(dirtyModel, providers, formatVariant)).toBe("reviewer")
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, dirtyCatalog, formatVariant)).toBe(
@@ -180,7 +200,7 @@ describe("session-ui assistantModelLabel", () => {
     )
     expect(
       assistantModelLabel(
-        { providerID: "team", id: {} } as unknown as Parameters<typeof assistantModelLabel>[0],
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({ providerID: "team", id: {} }),
         providers,
         formatVariant,
       ),
@@ -191,9 +211,11 @@ describe("session-ui assistantModelLabel", () => {
     const decomposed = "cafe\u0301"
     const composed = "café"
     const keys = [decomposed, composed, "reviewer", "Reviewer", " reviewer", "reviewer "]
+
     const providerCatalog = new Map(
       keys.map((providerID, index) => [providerID, { models: { model: { name: `Provider ${index}` } } }]),
     )
+
     const modelCatalog = new Map([
       [
         "team",
@@ -202,6 +224,7 @@ describe("session-ui assistantModelLabel", () => {
         },
       ],
     ])
+
     const formatVariant = (label: string, variant: string) => `${label} (${variant})`
 
     for (const [index, key] of keys.entries()) {
@@ -223,6 +246,7 @@ describe("session-ui assistantModelLabel", () => {
     ["String object", new String("team"), "7"],
   ])("does not coerce a %s provider identity into a colliding catalog key", (_kind, providerID, expected) => {
     const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+
     const collidingProviders = new Map([
       ["42", { models: { "7": { name: "Coerced Match" } } }],
       ["true", { models: { "7": { name: "Coerced Match" } } }],
@@ -232,9 +256,13 @@ describe("session-ui assistantModelLabel", () => {
       ["team", { models: { "7": { name: "Coerced Match" } } }],
     ])
 
-    expect(assistantModelLabel({ providerID, id: "7" } as never, collidingProviders as never, formatVariant)).toBe(
-      expected,
-    )
+    expect(
+      assistantModelLabel(
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({ providerID, id: "7" }),
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(collidingProviders),
+        formatVariant,
+      ),
+    ).toBe(expected)
   })
 
   test.each([
@@ -246,6 +274,7 @@ describe("session-ui assistantModelLabel", () => {
     ["String object", new String("7")],
   ])("does not coerce a %s model identity into a colliding catalog key", (_kind, id) => {
     const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+
     const collidingProviders = new Map([
       [
         "team",
@@ -261,9 +290,13 @@ describe("session-ui assistantModelLabel", () => {
       ],
     ])
 
-    expect(assistantModelLabel({ providerID: "team", id } as never, collidingProviders as never, formatVariant)).toBe(
-      "",
-    )
+    expect(
+      assistantModelLabel(
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({ providerID: "team", id }),
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(collidingProviders),
+        formatVariant,
+      ),
+    ).toBe("")
   })
 
   test.each([
@@ -285,9 +318,13 @@ describe("session-ui assistantModelLabel", () => {
         ["undefined", { models: { reviewer: { name: "String Undefined Provider Catalog Entry" } } }],
       ])
 
-      expect(assistantModelLabel({ providerID, id: "reviewer" } as never, catalog as never, (label) => label)).toBe(
-        expected,
-      )
+      expect(
+        assistantModelLabel(
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({ providerID, id: "reviewer" }),
+          asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+          (label) => label,
+        ),
+      ).toBe(expected)
     },
   )
 
@@ -313,9 +350,13 @@ describe("session-ui assistantModelLabel", () => {
         ],
       ])
 
-      expect(assistantModelLabel({ providerID: "team", id } as never, catalog as never, (label) => label)).toBe(
-        expected,
-      )
+      expect(
+        assistantModelLabel(
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>({ providerID: "team", id }),
+          asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+          (label) => label,
+        ),
+      ).toBe(expected)
     },
   )
 
@@ -324,22 +365,28 @@ describe("session-ui assistantModelLabel", () => {
     ["id", "7", ""],
   ])("does not convert an object %s lookup identity", (position, existingKey, expected) => {
     let conversions = 0
+
     const conversionObject = {
       toString: () => {
         conversions += 1
+
         return existingKey
       },
       valueOf: () => {
         conversions += 1
+
         return existingKey
       },
       [Symbol.toPrimitive]: () => {
         conversions += 1
+
         return existingKey
       },
     }
+
     const model = { providerID: "team", id: "7" }
-    model[position as keyof typeof model] = conversionObject as never
+    asHostileFixture<MutableHostileFixture>(model)[position] = conversionObject
+
     const collidingProviders = new Map([["team", { models: { "7": { name: "Coerced Match" } } }]])
 
     expect(assistantModelLabel(model, collidingProviders, (label, variant) => `${label} (${variant})`)).toBe(expected)
@@ -348,7 +395,7 @@ describe("session-ui assistantModelLabel", () => {
 
   test.each(["providerID", "id"])("does not throw for a throwing %s conversion object", (field) => {
     const model = { providerID: "team", id: "reviewer" }
-    model[field as keyof typeof model] = {
+    asHostileFixture<MutableHostileFixture>(model)[field] = {
       [Symbol.toPrimitive]() {
         throw new Error(`${field} conversion must not escape`)
       },
@@ -358,7 +405,7 @@ describe("session-ui assistantModelLabel", () => {
       valueOf() {
         throw new Error(`${field} conversion must not escape`)
       },
-    } as never
+    }
 
     expect(() => assistantModelLabel(model, providers, (label, variant) => `${label} (${variant})`)).not.toThrow()
   })
@@ -373,7 +420,7 @@ describe("session-ui assistantModelLabel", () => {
     expect(
       assistantModelLabel(
         { providerID: "team", id: "reviewer" },
-        new Map([["team", provider]]) as unknown as Parameters<typeof assistantModelLabel>[1],
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(new Map([["team", provider]])),
         (label, variant) => `${label} (${variant})`,
       ),
     ).toBe("team/reviewer")
@@ -391,9 +438,13 @@ describe("session-ui assistantModelLabel", () => {
     const formatVariant = (label: string, variant: string) => `${label} (${variant})`
     const catalog = new Map([["team", provider]])
 
-    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
-      "team/reviewer",
-    )
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer" },
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+        formatVariant,
+      ),
+    ).toBe("team/reviewer")
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
       "team/Review Model",
     )
@@ -408,9 +459,13 @@ describe("session-ui assistantModelLabel", () => {
     const formatVariant = (label: string, variant: string) => `${label} (${variant})`
     const catalog = new Map([["team", { models }]])
 
-    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
-      "team/reviewer",
-    )
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer" },
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+        formatVariant,
+      ),
+    ).toBe("team/reviewer")
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
       "team/Review Model",
     )
@@ -425,9 +480,13 @@ describe("session-ui assistantModelLabel", () => {
     const formatVariant = (label: string, variant: string) => `${label} (${variant})`
     const catalog = new Map([["team", { models: { reviewer: entry } }]])
 
-    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
-      "team/reviewer",
-    )
+    expect(
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer" },
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+        formatVariant,
+      ),
+    ).toBe("team/reviewer")
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
       "team/Review Model",
     )
@@ -443,7 +502,11 @@ describe("session-ui assistantModelLabel", () => {
       "team/reviewer",
     )
     expect(
-      assistantModelLabel({ providerID: "team", id: "reviewer" }, nonStringNameCatalog as never, formatVariant),
+      assistantModelLabel(
+        { providerID: "team", id: "reviewer" },
+        asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(nonStringNameCatalog),
+        formatVariant,
+      ),
     ).toBe("team/reviewer")
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
       "team/Review Model",
@@ -454,15 +517,17 @@ describe("session-ui assistantModelLabel", () => {
     "reaches a throwing reference %s getter and returns an empty label",
     (field) => {
       let reads = 0
+
       const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
         get() {
           reads += 1
           throw new Error(`${field} getter must not escape`)
         },
       })
+
       expect(
         assistantModelLabel(
-          reference as Parameters<typeof assistantModelLabel>[0],
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(reference),
           providers,
           (label, variant) => `${label} (${variant})`,
         ),
@@ -477,14 +542,14 @@ describe("session-ui assistantModelLabel", () => {
   ])("treats a %s reference as missing", (_kind, reference) => {
     expect(() =>
       assistantModelLabel(
-        reference as Parameters<typeof assistantModelLabel>[0],
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(reference),
         providers,
         (label, variant) => `${label} (${variant})`,
       ),
     ).not.toThrow()
     expect(
       assistantModelLabel(
-        reference as Parameters<typeof assistantModelLabel>[0],
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(reference),
         providers,
         (label, variant) => `${label} (${variant})`,
       ),
@@ -496,6 +561,7 @@ describe("session-ui assistantModelLabel", () => {
       "reference descriptor Proxy",
       () => {
         let hits = 0
+
         return {
           hostile: new Proxy(
             {},
@@ -510,7 +576,7 @@ describe("session-ui assistantModelLabel", () => {
           ),
           control: new Proxy(
             { providerID: "team", id: "reviewer" },
-            { getOwnPropertyDescriptor: (target, key) => ((hits += 1), Reflect.getOwnPropertyDescriptor(target, key)) },
+            { getOwnPropertyDescriptor: (target, key) => ((hits += 1), Object.getOwnPropertyDescriptor(target, key)) },
           ),
           hits: () => hits,
         }
@@ -521,6 +587,7 @@ describe("session-ui assistantModelLabel", () => {
       "provider models Proxy",
       () => {
         let hits = 0
+
         return {
           hostile: new Map([
             [
@@ -543,7 +610,7 @@ describe("session-ui assistantModelLabel", () => {
               "team",
               new Proxy(
                 { models: { reviewer: { name: "Review Model" } } },
-                { get: (target, key) => ((hits += 1), Reflect.get(target, key)) },
+                { get: (target, key) => ((hits += 1), key === "models" ? target.models : undefined) },
               ),
             ],
           ]),
@@ -556,6 +623,7 @@ describe("session-ui assistantModelLabel", () => {
       "model entry Proxy",
       () => {
         let hits = 0
+
         return {
           hostile: new Map([
             [
@@ -584,7 +652,7 @@ describe("session-ui assistantModelLabel", () => {
                 models: {
                   reviewer: new Proxy(
                     { name: "Review Model" },
-                    { get: (target, key) => ((hits += 1), Reflect.get(target, key)) },
+                    { get: (target, key) => ((hits += 1), key === "name" ? target.name : undefined) },
                   ),
                 },
               },
@@ -599,6 +667,7 @@ describe("session-ui assistantModelLabel", () => {
       "catalog name getter",
       () => {
         let hits = 0
+
         return {
           hostile: new Map([
             [
@@ -634,18 +703,33 @@ describe("session-ui assistantModelLabel", () => {
       const fixture = build()
       const formatVariant = (label: string, variant: string) => `${label} (${variant})`
 
-      const model =
-        _boundary === "reference descriptor Proxy" ? fixture.hostile : { providerID: "team", id: "reviewer" }
-      const controlModel =
-        _boundary === "reference descriptor Proxy" ? fixture.control : { providerID: "team", id: "reviewer" }
-      const catalog = _boundary === "reference descriptor Proxy" ? providers : fixture.hostile
-      const controlCatalog = _boundary === "reference descriptor Proxy" ? providers : fixture.control
+      let model: HostileFixture = { providerID: "team", id: "reviewer" }
+      let controlModel: HostileFixture = { providerID: "team", id: "reviewer" }
+      let catalog: HostileFixture = fixture.hostile
+      let controlCatalog: HostileFixture = fixture.control
 
-      expect(assistantModelLabel(model as never, catalog as never, formatVariant)).toBe(expected)
+      if (_boundary === "reference descriptor Proxy") {
+        model = fixture.hostile
+        controlModel = fixture.control
+        catalog = providers
+        controlCatalog = providers
+      }
+
+      expect(
+        assistantModelLabel(
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(model),
+          asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+          formatVariant,
+        ),
+      ).toBe(expected)
       expect(fixture.hits()).toBeGreaterThan(0)
-      expect(assistantModelLabel(controlModel as never, controlCatalog as never, formatVariant)).toBe(
-        "team/Review Model",
-      )
+      expect(
+        assistantModelLabel(
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(controlModel),
+          asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(controlCatalog),
+          formatVariant,
+        ),
+      ).toBe("team/Review Model")
     },
   )
 
@@ -653,34 +737,52 @@ describe("session-ui assistantModelLabel", () => {
     "degrades a revoked %s Proxy to its exact fallback",
     (boundary) => {
       const revocable = Proxy.revocable({}, {})
+
       revocable.revoke()
-      const catalog =
-        boundary === "provider entry"
-          ? new Map([["team", revocable.proxy]])
-          : boundary === "model entry"
-            ? new Map([["team", { models: { reviewer: revocable.proxy } }]])
-            : providers
-      const reference = boundary === "reference" ? revocable.proxy : { providerID: "team", id: "reviewer" }
+
+      let catalog: HostileFixture = providers
+      let reference: HostileFixture = { providerID: "team", id: "reviewer" }
+
+      if (boundary === "provider entry") catalog = new Map([["team", revocable.proxy]])
+
+      if (boundary === "model entry") catalog = new Map([["team", { models: { reviewer: revocable.proxy } }]])
+
+      if (boundary === "reference") reference = revocable.proxy
 
       expect(
-        assistantModelLabel(reference as never, catalog as never, (label, variant) => `${label} (${variant})`),
+        assistantModelLabel(
+          asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(reference),
+          asHostileFixture<Parameters<typeof assistantModelLabel>[1]>(catalog),
+          (label, variant) => `${label} (${variant})`,
+        ),
       ).toBe(boundary === "reference" ? "" : "team/reviewer")
     },
   )
 
   test.each(["providerID", "id", "variant"])("reads a stable %s getter exactly once", (field) => {
     let reads = 0
+
     const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
       get() {
         reads += 1
+
         if (reads > 1) throw new Error(`${field} was read more than once`)
-        return field === "providerID" ? "team" : field === "id" ? "reviewer" : "thinking"
+
+        if (field === "providerID") return "team"
+
+        if (field === "id") return "reviewer"
+
+        return "thinking"
       },
     })
 
-    expect(assistantModelLabel(reference as never, providers, (label, variant) => `${label} (${variant})`)).toBe(
-      "team/Review Model (Thinking)",
-    )
+    expect(
+      assistantModelLabel(
+        asHostileFixture<Parameters<typeof assistantModelLabel>[0]>(reference),
+        providers,
+        (label, variant) => `${label} (${variant})`,
+      ),
+    ).toBe("team/Review Model (Thinking)")
     expect(reads).toBe(1)
   })
 })
