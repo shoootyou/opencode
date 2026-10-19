@@ -14,8 +14,10 @@ export async function archiveHomeSession(
   const directory = input.session.location.directory
   const server = input.server
   const committed = await deps.archiveSession({ server, sessionID })
+
   if (!committed || !deps.isActive()) return committed
   deps.remove()
   deps.notifyTabsRemoved({ server, directory, sessionIDs: [sessionID] })
+
   return true
 }

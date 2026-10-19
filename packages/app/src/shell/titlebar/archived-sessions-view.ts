@@ -7,23 +7,29 @@ export type ArchivedSessionsView = Readonly<{
   resetEnabled: boolean
 }>
 
-export function selectArchivedSessionsView(input: Readonly<{
-  status: ArchivedSessionsState["status"]
-  visibleSessionCount: number
-  filter: string
-  previousCursor?: string
-  nextCursor?: string
-  restoringID?: string
-}>): ArchivedSessionsView {
+export function selectArchivedSessionsView(
+  input: Readonly<{
+    status: ArchivedSessionsState["status"]
+    visibleSessionCount: number
+    filter: string
+    previousCursor?: string
+    nextCursor?: string
+    restoringID?: string
+  }>,
+): ArchivedSessionsView {
   const ready = input.status === "ready"
   const canChangePage = ready && !input.restoringID
-  const message = input.status === "loading"
-    ? "loading"
-    : input.status === "error"
-      ? "error"
-      : ready && input.visibleSessionCount === 0
-        ? input.filter.trim() ? "no-match" : "page-empty"
-        : undefined
+
+  const message =
+    input.status === "loading"
+      ? "loading"
+      : input.status === "error"
+        ? "error"
+        : ready && input.visibleSessionCount === 0
+          ? input.filter.trim()
+            ? "no-match"
+            : "page-empty"
+          : undefined
 
   return {
     message,

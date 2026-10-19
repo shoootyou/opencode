@@ -64,6 +64,7 @@ describe("listAllSessions", () => {
       list: async (query = {}) => {
         if (!query.cursor)
           return { data: [sessionInfo("session-2"), sessionInfo("session-1")], cursor: { next: "older" } }
+
         return { data: [sessionInfo("session-1"), sessionInfo("session-0")], cursor: {} }
       },
     } satisfies Pick<SessionApi, "list">
@@ -75,10 +76,13 @@ describe("listAllSessions", () => {
 
   test("rejects a repeated cursor before issuing another duplicate page request", async () => {
     const cursors: Array<string | undefined> = []
+
     const api = {
       list: async (query = {}) => {
         cursors.push(query.cursor)
+
         if (cursors.length > 2) throw new Error("must not request a repeated cursor")
+
         return { data: [sessionInfo(`session-${cursors.length}`)], cursor: { next: "same-cursor" } }
       },
     } satisfies Pick<SessionApi, "list">
@@ -90,11 +94,14 @@ describe("listAllSessions", () => {
   test("does not fetch the next page after cancellation", async () => {
     const controller = new AbortController()
     const cursors: Array<string | undefined> = []
+
     const api = {
       list: async (query = {}) => {
         cursors.push(query.cursor)
+
         if (cursors.length > 1) throw new Error("must not fetch after cancellation")
         controller.abort()
+
         return { data: [sessionInfo("session-1")], cursor: { next: "next" } }
       },
     } satisfies Pick<SessionApi, "list">
@@ -105,6 +112,7 @@ describe("listAllSessions", () => {
 })
 
 function sessionInfo(id: string, archived = false) {
+  // SAFETY: This shared fixture intentionally supplies the SessionInfo fields used by pagination tests.
   return {
     id,
     projectID: "project-1",

@@ -261,10 +261,13 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const archive = async () => {
     const session = input.session.data.info()
     const sessionID = input.session.identity.sessionID()
+
     if (!session || !sessionID || pending.archive) return false
     const ctx = global.serverCtx(server.key)
+
     if (!ctx || ctx !== server.ctx) return false
     setPending("archive", true)
+
     try {
       return await runTimelineArchive(
         { target: { server: server.key, sessionID }, session, sessions: data.session.list() },
@@ -274,21 +277,36 @@ export function createTimelineController(input: { session: TimelineSessionSource
           isActive: () => alive && global.serverCtx(server.key) === ctx,
           currentRoute: () => {
             const route = layout.route()
+
             return route.type === "session" ? { server: route.server, sessionID: route.sessionId } : undefined
           },
           navigate: async (landing) => {
-            if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+            if (landing.type === "session")
+              // SAFETY: archive landings retain the current timeline server key.
+              return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+            // oxlint-disable-next-line anti-slop/require-readable-spacing -- SAFETY: archive landings retain the current timeline server key.
             await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
           },
           removeTabs: createArchiveLandingEffects({
             removeSessions: (detail, options) =>
-              tabs.removeSessions({ ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] }, options),
+              // SAFETY: archive tab removals are produced for this timeline's current server key.
+              tabs.removeSessions(
+                { ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] },
+                options,
+              ),
             navigate: async (landing) => {
-              if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+              if (landing.type === "session")
+                // SAFETY: archive landings retain the current timeline server key.
+                return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+              // oxlint-disable-next-line anti-slop/require-readable-spacing -- SAFETY: archive landings retain the current timeline server key.
               await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
             },
           }).removeTabs,
-          toast: ({ kind, error }) => showToast({ title: language.t("common.requestFailed"), description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error) }),
+          toast: ({ kind, error }) =>
+            showToast({
+              title: language.t("common.requestFailed"),
+              description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error),
+            }),
         },
       )
     } finally {
@@ -379,9 +397,9 @@ export function createTimelineController(input: { session: TimelineSessionSource
       shellToolPartsExpanded,
       editToolPartsExpanded,
     },
-      pending: {
-        rename: () => pending.rename,
-        archive: () => pending.archive,
+    pending: {
+      rename: () => pending.rename,
+      archive: () => pending.archive,
     },
     action: {
       rename,

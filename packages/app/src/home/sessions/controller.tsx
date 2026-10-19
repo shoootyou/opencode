@@ -373,7 +373,13 @@ export function createHomeSessionsController(home: HomeController) {
           {
             archiveSession: global.sessionArchive.archiveSession,
             remove: () => ctx.data.session.evict(session.id),
-            notifyTabsRemoved: (detail) => notifySessionTabsRemoved({ ...detail, server: detail.server as ServerConnection.Key, sessionIDs: [...detail.sessionIDs] }),
+            // SAFETY: home archive events are created for the focused server connection.
+            notifyTabsRemoved: (detail) =>
+              notifySessionTabsRemoved({
+                ...detail,
+                server: detail.server as ServerConnection.Key,
+                sessionIDs: [...detail.sessionIDs],
+              }),
             isActive: () => alive && home.server.focusedContext() === ctx,
           },
         )
@@ -410,7 +416,10 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
   const now = new Date()
   const today = localDay(now)
   const yesterday = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
-  const day = (record: HomeSessionRecord) => localDay(new Date(record.session.time.updated ?? record.session.time.created))
+
+  const day = (record: HomeSessionRecord) =>
+    localDay(new Date(record.session.time.updated ?? record.session.time.created))
+
   const todaySessions = records.filter((record) => day(record) === today)
   const yesterdaySessions = records.filter((record) => day(record) === yesterday)
   const olderSessions = records.filter((record) => day(record) !== today && day(record) !== yesterday)

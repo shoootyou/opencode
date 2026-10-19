@@ -35,7 +35,12 @@ test("wires the actual shell archive command through shared transition cleanup a
     if (calls.includes("direct")) throw new Error("production command used direct archive fallback")
     if (!calls.includes("patch") || !calls.includes("remove:false")) throw new Error("production transition omitted PATCH or no-auto tab removal")
   `
-  const child = Bun.spawn({ cmd: ["/usr/local/bin/bun", "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script], cwd: import.meta.dir })
+
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script],
+    cwd: import.meta.dir,
+  })
+
   expect(await child.exited).toBe(0)
 })
 
@@ -65,7 +70,12 @@ test("does no caller-owned work after the shell owner is disposed during a held 
     await pending
     if (calls.some((call) => call !== "patch")) throw new Error("disposed shell owner finalized archive work: " + calls.join(","))
   `
-  const child = Bun.spawn({ cmd: ["/usr/local/bin/bun", "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script], cwd: import.meta.dir })
+
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script],
+    cwd: import.meta.dir,
+  })
+
   expect(await child.exited).toBe(0)
 })
 
@@ -91,7 +101,12 @@ test("does not start an archive PATCH from a callback invoked after its shell ow
     await options().find((option) => option.id === "session.archive").onSelect()
     if (calls.length) throw new Error("disposed command callback started archive work: " + calls.join(","))
   `
-  const child = Bun.spawn({ cmd: ["/usr/local/bin/bun", "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script], cwd: import.meta.dir })
+
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script],
+    cwd: import.meta.dir,
+  })
+
   expect(await child.exited).toBe(0)
 })
 
@@ -121,6 +136,11 @@ test("does no caller-owned work after the captured route-server context is repla
     await pending
     if (calls.some((call) => call !== "patch")) throw new Error("replaced server context finalized archive work: " + calls.join(","))
   `
-  const child = Bun.spawn({ cmd: ["/usr/local/bin/bun", "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script], cwd: import.meta.dir })
+
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--conditions=solid", "--preload", "../../../happydom.ts", "--eval", script],
+    cwd: import.meta.dir,
+  })
+
   expect(await child.exited).toBe(0)
 })

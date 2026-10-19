@@ -9,6 +9,7 @@
 import { expect, test } from "bun:test"
 import en from "./en"
 import { DESKTOP_NATIVE_LOCALES } from "./desktop-native"
+
 const expected = {
   "common.unarchive": "Unarchive",
   "command.session.archive": "Archive session",
@@ -28,22 +29,31 @@ const expected = {
   "dialog.archivedSessions.nextPage": "Next page",
   "session.archive.refreshFailed": "Session updated, but its details could not be refreshed.",
 } as const
+
+// oxlint-disable-next-line anti-slop/no-known-value-widening -- The dictionary test intentionally indexes the complete exact-copy fixture by dynamic locale keys.
+const expectedCopy: Record<string, string> = expected
+
+const english: Record<string, string> = en
+
 const slots = (value: string) => [...value.matchAll(/{{([^{}]+)}}/g)].map((x) => x[1]).sort()
+
 test("defines exact English archive copy and 63 locale own-property parity", async () => {
   expect(DESKTOP_NATIVE_LOCALES).toHaveLength(63)
   expect(new Set(DESKTOP_NATIVE_LOCALES).size).toBe(63)
-  for (const [key, value] of Object.entries(expected)) expect(en[key as keyof typeof en]).toBe(value)
+
+  for (const [key, value] of Object.entries(expectedCopy)) expect(english[key]).toBe(value)
+
   for (const locale of DESKTOP_NATIVE_LOCALES) {
-    const dictionary = locale === "en" ? en : (await import(`./${locale}.ts`)).dict
-    for (const key of Object.keys(expected)) {
+    const dictionary: Record<string, string> = locale === "en" ? en : (await import(`./${locale}.ts`)).dict
+
+    for (const key of Object.keys(expectedCopy)) {
       expect(Object.hasOwn(dictionary, key)).toBe(true)
-      expect(dictionary[key as keyof typeof dictionary]?.trim()).not.toBe("")
-      expect(slots(dictionary[key as keyof typeof dictionary] as string)).toEqual(
-        slots(expected[key as keyof typeof expected]),
-      )
+      expect(dictionary[key]?.trim()).not.toBe("")
+      expect(slots(dictionary[key])).toEqual(slots(expectedCopy[key]))
     }
   }
 })
+
 test("keeps corrected Spanish and French whole sentences with page, restore, and tab meaning", async () => {
   const checked = {
     es: {
@@ -75,11 +85,11 @@ test("keeps corrected Spanish and French whole sentences with page, restore, and
       "dialog.archivedSessions.error": "לא ניתן לטעון הפעלות בארכיון",
     },
   } as const
+
   for (const [locale, phrases] of Object.entries(checked)) {
-    const dictionary = (await import(`./${locale}.ts`)).dict
-    for (const [key, value] of Object.entries(phrases)) expect(dictionary[key as keyof typeof dictionary]).toBe(value)
-    expect(dictionary["dialog.archivedSessions.empty" as keyof typeof dictionary]).not.toBe(
-      dictionary["dialog.archivedSessions.title" as keyof typeof dictionary],
-    )
+    const dictionary: Record<string, string> = (await import(`./${locale}.ts`)).dict
+
+    for (const [key, value] of Object.entries(phrases)) expect(dictionary[key]).toBe(value)
+    expect(dictionary["dialog.archivedSessions.empty"]).not.toBe(dictionary["dialog.archivedSessions.title"])
   }
 })

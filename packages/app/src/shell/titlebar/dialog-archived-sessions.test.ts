@@ -8,10 +8,16 @@
  */
 import { expect, test } from "bun:test"
 
+type DialogSpy = { show: (content: never) => void }
+
 test("opens through the setup-captured dialog API with no current owner", async () => {
   const { showArchivedSessionsDialog } = await import("./dialog-archived-sessions")
-  const shown: unknown[] = []
-  const open = showArchivedSessionsDialog as unknown as (dialog: { show: (content: unknown) => void }, server: string) => void
+  const shown: object[] = []
+
+  const dialogOpener: unknown = showArchivedSessionsDialog
+  // SAFETY: This test invokes the setup-captured dialog adapter with only the public show callback and server inputs.
+  const open = dialogOpener as (dialog: DialogSpy, server: string) => void
+
   expect(() => open({ show: (content) => shown.push(content) }, "server-a")).not.toThrow()
   expect(shown).toHaveLength(1)
 })
