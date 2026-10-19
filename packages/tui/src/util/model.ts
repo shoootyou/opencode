@@ -1,3 +1,5 @@
+import { formatModelLabel, readModelLabelRef, type ModelLabelRef } from "@opencode/util/model-label"
+
 export function parse(value: string) {
   const [providerID, ...modelID] = value.split("/")
   return { providerID, modelID: modelID.join("/") }
@@ -5,6 +7,40 @@ export function parse(value: string) {
 
 export function formatRef(model: { providerID: string; id: string; variant?: string }) {
   return [model.providerID, model.id, model.variant].filter((value) => value !== undefined).join("/")
+}
+
+export function assistantModelLabel(
+  model: ModelLabelRef | undefined,
+  models: readonly Readonly<{ providerID: string; id: string; name: string }>[] | undefined,
+) {
+  const reference = readModelLabelRef(model)
+  const name =
+    typeof reference?.providerID === "string" && typeof reference.id === "string"
+      ? catalogName(models, reference.providerID, reference.id)
+      : undefined
+  return formatModelLabel(reference, name)
+}
+
+function catalogName(
+  models: readonly Readonly<{ providerID: string; id: string; name: string }>[] | undefined,
+  providerID: string,
+  id: string,
+): string | undefined {
+  try {
+    if (!Array.isArray(models)) return
+
+    for (const item of models) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue
+      const itemProviderID = item.providerID
+      const itemID = item.id
+      if (itemProviderID === providerID && itemID === id) {
+        const name = item.name
+        return typeof name === "string" ? name : undefined
+      }
+    }
+  } catch {
+    return
+  }
 }
 
 export function switchLabel(
