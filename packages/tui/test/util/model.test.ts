@@ -171,13 +171,19 @@ describe("util.model", () => {
     ).toBe("")
   })
 
-  test("pins primitive raw catalog keys and both primitive-string gates at the adapter boundary", async () => {
-    const source = await Bun.file(new URL("../../src/util/model.ts", import.meta.url)).text()
+  test("resolves every raw case, padding, and Unicode key to its own provider and model entry", () => {
+    const decomposed = "cafe\u0301"
+    const composed = "café"
+    const keys = [decomposed, composed, "reviewer", "Reviewer", " reviewer", "reviewer "]
+    const models = [
+      ...keys.map((providerID, index) => ({ providerID, id: "model", name: `Provider ${index}` })),
+      ...keys.map((id, index) => ({ providerID: "team", id, name: `Model ${index}` })),
+    ]
 
-    expect(source).toContain('typeof reference?.providerID === "string" && typeof reference.id === "string"')
-    expect(source).toContain("itemProviderID === providerID && itemID === id")
-    expect(source).not.toContain("String(")
-    expect(source).not.toMatch(/(?:^|[^=!])==(?!=)/)
+    for (const [index, key] of keys.entries()) {
+      expect(assistantModelLabel({ providerID: key, id: "model" }, models)).toBe(`${key.trim()}/Provider ${index}`)
+      expect(assistantModelLabel({ providerID: "team", id: key }, models)).toBe(`team/Model ${index}`)
+    }
   })
 
   test.each([
@@ -341,14 +347,6 @@ describe("util.model", () => {
         { providerID: "team", id: "reviewer", name: "Review Model" },
       ]),
     ).toBe("team/Review Model")
-  })
-
-  test("pins every TUI catalog guard that keeps malformed values fail closed", async () => {
-    const source = await Bun.file(new URL("../../src/util/model.ts", import.meta.url)).text()
-
-    expect(source).toContain("if (!Array.isArray(models)) return")
-    expect(source).toContain('if (!item || typeof item !== "object" || Array.isArray(item)) continue')
-    expect(source).toContain('return typeof name === "string" ? name : undefined')
   })
 
   test.each(["providerID", "id", "variant"])(

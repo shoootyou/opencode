@@ -187,15 +187,31 @@ describe("session-ui assistantModelLabel", () => {
     ).toBe("")
   })
 
-  test("pins primitive raw catalog keys and both primitive-string gates at the adapter boundary", async () => {
-    const source = await Bun.file(new URL("./model-label.ts", import.meta.url)).text()
+  test("resolves every raw case, padding, and Unicode key to its own provider and model entry", () => {
+    const decomposed = "cafe\u0301"
+    const composed = "café"
+    const keys = [decomposed, composed, "reviewer", "Reviewer", " reviewer", "reviewer "]
+    const providerCatalog = new Map(
+      keys.map((providerID, index) => [providerID, { models: { model: { name: `Provider ${index}` } } }]),
+    )
+    const modelCatalog = new Map([
+      [
+        "team",
+        {
+          models: Object.fromEntries(keys.map((id, index) => [id, { name: `Model ${index}` }])),
+        },
+      ],
+    ])
+    const formatVariant = (label: string, variant: string) => `${label} (${variant})`
 
-    expect(source).toContain('typeof reference?.providerID === "string" && typeof reference.id === "string"')
-    expect(source).toContain("providers?.get(providerID)")
-    expect(source).toContain("models[id]")
-    expect(source).not.toContain("String(")
-    expect(source).not.toContain("`${id}`")
-    expect(source).not.toMatch(/(?:^|[^=!])==(?!=)/)
+    for (const [index, key] of keys.entries()) {
+      expect(assistantModelLabel({ providerID: key, id: "model" }, providerCatalog, formatVariant)).toBe(
+        `${key.trim()}/Provider ${index}`,
+      )
+      expect(assistantModelLabel({ providerID: "team", id: key }, modelCatalog, formatVariant)).toBe(
+        `team/Model ${index}`,
+      )
+    }
   })
 
   test.each([
@@ -379,17 +395,6 @@ describe("session-ui assistantModelLabel", () => {
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
       "team/Review Model",
     )
-  })
-
-  test("pins every session catalog guard that keeps malformed values fail closed", async () => {
-    const source = await Bun.file(new URL("./model-label.ts", import.meta.url)).text()
-
-    expect(source).toContain('if (!provider || typeof provider !== "object" || Array.isArray(provider)) return')
-    expect(source).toContain(
-      'if (!models || typeof models !== "object" || Array.isArray(models) || !Object.hasOwn(models, id)) return',
-    )
-    expect(source).toContain('if (!model || typeof model !== "object" || Array.isArray(model)) return')
-    expect(source).toContain('return typeof name === "string" ? name : undefined')
   })
 
   test.each(["providerID", "id", "variant"])(
