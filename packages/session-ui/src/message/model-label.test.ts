@@ -157,32 +157,72 @@ describe("session-ui assistantModelLabel", () => {
     ).toBe("")
   })
 
-  test("does not resolve numeric provider or model IDs through colliding string catalog keys", () => {
-    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
-    const collidingProviders = new Map([
-      ["42", { models: { reviewer: { name: "Wrong Numeric Provider Match" } } }],
-      ["team", { models: { "42": { name: "Wrong Numeric Model Match" }, reviewer: { name: "Review Model" } } }],
-    ])
+  test("pins primitive raw catalog keys and both primitive-string gates at the adapter boundary", async () => {
+    const source = await Bun.file(new URL("./model-label.ts", import.meta.url)).text()
 
-    expect(
-      assistantModelLabel(
-        { providerID: 42, id: "reviewer" } as unknown as Parameters<typeof assistantModelLabel>[0],
-        collidingProviders as Parameters<typeof assistantModelLabel>[1],
-        formatVariant,
-      ),
-    ).toBe("reviewer")
-    expect(
-      assistantModelLabel(
-        { providerID: "team", id: 42 } as unknown as Parameters<typeof assistantModelLabel>[0],
-        collidingProviders as Parameters<typeof assistantModelLabel>[1],
-        formatVariant,
-      ),
-    ).toBe("")
+    expect(source).toContain('typeof reference?.providerID === "string" && typeof reference.id === "string"')
+    expect(source).toContain("providers?.get(providerID)")
+    expect(source).toContain("models[id]")
+    expect(source).not.toContain("String(")
+    expect(source).not.toContain("`${id}`")
+    expect(source).not.toMatch(/(?:^|[^=!])==(?!=)/)
   })
 
   test.each([
-    ["providerID", "team", "reviewer"],
-    ["id", "reviewer", ""],
+    ["number", 42, "7"],
+    ["boolean", true, "7"],
+    ["null", null, "7"],
+    ["undefined", undefined, "7"],
+    ["array", ["a"], "7"],
+    ["String object", new String("team"), "7"],
+  ])("does not coerce a %s provider identity into a colliding catalog key", (_kind, providerID, expected) => {
+    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+    const collidingProviders = new Map([
+      ["42", { models: { "7": { name: "Coerced Match" } } }],
+      ["true", { models: { "7": { name: "Coerced Match" } } }],
+      ["null", { models: { "7": { name: "Coerced Match" } } }],
+      ["undefined", { models: { "7": { name: "Coerced Match" } } }],
+      ["a", { models: { "7": { name: "Coerced Match" } } }],
+      ["team", { models: { "7": { name: "Coerced Match" } } }],
+    ])
+
+    expect(assistantModelLabel({ providerID, id: "7" } as never, collidingProviders as never, formatVariant)).toBe(
+      expected,
+    )
+  })
+
+  test.each([
+    ["number", 7],
+    ["boolean", true],
+    ["null", null],
+    ["undefined", undefined],
+    ["array", ["a"]],
+    ["String object", new String("7")],
+  ])("does not coerce a %s model identity into a colliding catalog key", (_kind, id) => {
+    const formatVariant = (model: string, variant: string) => `${model} (${variant})`
+    const collidingProviders = new Map([
+      [
+        "team",
+        {
+          models: {
+            "7": { name: "Coerced Match" },
+            true: { name: "Coerced Match" },
+            null: { name: "Coerced Match" },
+            undefined: { name: "Coerced Match" },
+            a: { name: "Coerced Match" },
+          },
+        },
+      ],
+    ])
+
+    expect(assistantModelLabel({ providerID: "team", id } as never, collidingProviders as never, formatVariant)).toBe(
+      "",
+    )
+  })
+
+  test.each([
+    ["providerID", "team", "7"],
+    ["id", "7", ""],
   ])("does not convert an object %s lookup identity", (position, existingKey, expected) => {
     let conversions = 0
     const conversionObject = {
@@ -199,9 +239,9 @@ describe("session-ui assistantModelLabel", () => {
         return existingKey
       },
     }
-    const model = { providerID: "team", id: "reviewer" }
+    const model = { providerID: "team", id: "7" }
     model[position as keyof typeof model] = conversionObject as never
-    const collidingProviders = new Map([["team", { models: { reviewer: { name: "Wrong Converted Match" } } }]])
+    const collidingProviders = new Map([["team", { models: { "7": { name: "Coerced Match" } } }]])
 
     expect(assistantModelLabel(model, collidingProviders, (label, variant) => `${label} (${variant})`)).toBe(expected)
     expect(conversions).toBe(0)
@@ -240,20 +280,26 @@ describe("session-ui assistantModelLabel", () => {
     ).toBe("team/reviewer")
   })
 
-  test.each(["providerID", "id", "variant"])("does not throw for a reference %s getter", (field) => {
-    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
-      get() {
-        throw new Error(`${field} getter must not escape`)
-      },
-    })
-    expect(() =>
-      assistantModelLabel(
-        reference as Parameters<typeof assistantModelLabel>[0],
-        providers,
-        (label, variant) => `${label} (${variant})`,
-      ),
-    ).not.toThrow()
-  })
+  test.each(["providerID", "id", "variant"])(
+    "reaches a throwing reference %s getter and returns an empty label",
+    (field) => {
+      let reads = 0
+      const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+        get() {
+          reads += 1
+          throw new Error(`${field} getter must not escape`)
+        },
+      })
+      expect(
+        assistantModelLabel(
+          reference as Parameters<typeof assistantModelLabel>[0],
+          providers,
+          (label, variant) => `${label} (${variant})`,
+        ),
+      ).toBe("")
+      expect(reads).toBe(1)
+    },
+  )
 
   test.each([
     ["null", null],
@@ -275,27 +321,196 @@ describe("session-ui assistantModelLabel", () => {
     ).toBe("")
   })
 
-  test.each(["reference", "provider entry", "model entry", "catalog name"])(
-    "does not throw at a throwing %s Proxy/accessor boundary",
-    (boundary) => {
-      const trap = () => {
-        throw new Error("proxy trap must not escape")
-      }
-      const reference =
-        boundary === "reference"
-          ? new Proxy({}, { getOwnPropertyDescriptor: trap })
-          : { providerID: "team", id: "reviewer" }
-      const dirtyProviders =
-        boundary === "provider entry"
-          ? new Map([["team", new Proxy({}, { get: trap })]])
-          : boundary === "model entry"
-            ? new Map([["team", { models: { reviewer: new Proxy({}, { get: trap }) } }]])
-            : boundary === "catalog name"
-              ? new Map([["team", { models: { reviewer: Object.defineProperty({}, "name", { get: trap }) } }]])
-              : providers
+  test.each([
+    [
+      "reference descriptor Proxy",
+      () => {
+        let hits = 0
+        return {
+          hostile: new Proxy(
+            {},
+            {
+              getOwnPropertyDescriptor: () => (
+                (hits += 1),
+                (() => {
+                  throw new Error("trap")
+                })()
+              ),
+            },
+          ),
+          control: new Proxy(
+            { providerID: "team", id: "reviewer" },
+            { getOwnPropertyDescriptor: (target, key) => ((hits += 1), Reflect.getOwnPropertyDescriptor(target, key)) },
+          ),
+          hits: () => hits,
+        }
+      },
+      "",
+    ],
+    [
+      "provider models Proxy",
+      () => {
+        let hits = 0
+        return {
+          hostile: new Map([
+            [
+              "team",
+              new Proxy(
+                {},
+                {
+                  get: () => (
+                    (hits += 1),
+                    (() => {
+                      throw new Error("trap")
+                    })()
+                  ),
+                },
+              ),
+            ],
+          ]),
+          control: new Map([
+            [
+              "team",
+              new Proxy(
+                { models: { reviewer: { name: "Review Model" } } },
+                { get: (target, key) => ((hits += 1), Reflect.get(target, key)) },
+              ),
+            ],
+          ]),
+          hits: () => hits,
+        }
+      },
+      "team/reviewer",
+    ],
+    [
+      "model entry Proxy",
+      () => {
+        let hits = 0
+        return {
+          hostile: new Map([
+            [
+              "team",
+              {
+                models: {
+                  reviewer: new Proxy(
+                    {},
+                    {
+                      get: () => (
+                        (hits += 1),
+                        (() => {
+                          throw new Error("trap")
+                        })()
+                      ),
+                    },
+                  ),
+                },
+              },
+            ],
+          ]),
+          control: new Map([
+            [
+              "team",
+              {
+                models: {
+                  reviewer: new Proxy(
+                    { name: "Review Model" },
+                    { get: (target, key) => ((hits += 1), Reflect.get(target, key)) },
+                  ),
+                },
+              },
+            ],
+          ]),
+          hits: () => hits,
+        }
+      },
+      "team/reviewer",
+    ],
+    [
+      "catalog name getter",
+      () => {
+        let hits = 0
+        return {
+          hostile: new Map([
+            [
+              "team",
+              {
+                models: {
+                  reviewer: Object.defineProperty({}, "name", {
+                    get: () => (
+                      (hits += 1),
+                      (() => {
+                        throw new Error("getter")
+                      })()
+                    ),
+                  }),
+                },
+              },
+            ],
+          ]),
+          control: new Map([
+            [
+              "team",
+              { models: { reviewer: Object.defineProperty({}, "name", { get: () => ((hits += 1), "Review Model") }) } },
+            ],
+          ]),
+          hits: () => hits,
+        }
+      },
+      "team/reviewer",
+    ],
+  ])(
+    "reaches a throwing %s boundary, degrades exactly, and distinguishes its benign control",
+    (_boundary, build, expected) => {
+      const fixture = build()
       const formatVariant = (label: string, variant: string) => `${label} (${variant})`
 
-      expect(() => assistantModelLabel(reference as never, dirtyProviders as never, formatVariant)).not.toThrow()
+      const model =
+        _boundary === "reference descriptor Proxy" ? fixture.hostile : { providerID: "team", id: "reviewer" }
+      const controlModel =
+        _boundary === "reference descriptor Proxy" ? fixture.control : { providerID: "team", id: "reviewer" }
+      const catalog = _boundary === "reference descriptor Proxy" ? providers : fixture.hostile
+      const controlCatalog = _boundary === "reference descriptor Proxy" ? providers : fixture.control
+
+      expect(assistantModelLabel(model as never, catalog as never, formatVariant)).toBe(expected)
+      expect(fixture.hits()).toBeGreaterThan(0)
+      expect(assistantModelLabel(controlModel as never, controlCatalog as never, formatVariant)).toBe(
+        "team/Review Model",
+      )
     },
   )
+
+  test.each(["reference", "provider entry", "model entry"])(
+    "degrades a revoked %s Proxy to its exact fallback",
+    (boundary) => {
+      const revocable = Proxy.revocable({}, {})
+      revocable.revoke()
+      const catalog =
+        boundary === "provider entry"
+          ? new Map([["team", revocable.proxy]])
+          : boundary === "model entry"
+            ? new Map([["team", { models: { reviewer: revocable.proxy } }]])
+            : providers
+      const reference = boundary === "reference" ? revocable.proxy : { providerID: "team", id: "reviewer" }
+
+      expect(
+        assistantModelLabel(reference as never, catalog as never, (label, variant) => `${label} (${variant})`),
+      ).toBe(boundary === "reference" ? "" : "team/reviewer")
+    },
+  )
+
+  test.each(["providerID", "id", "variant"])("reads a stable %s getter exactly once", (field) => {
+    let reads = 0
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      get() {
+        reads += 1
+        if (reads > 1) throw new Error(`${field} was read more than once`)
+        return field === "providerID" ? "team" : field === "id" ? "reviewer" : "thinking"
+      },
+    })
+
+    expect(assistantModelLabel(reference as never, providers, (label, variant) => `${label} (${variant})`)).toBe(
+      "team/Review Model (Thinking)",
+    )
+    expect(reads).toBe(1)
+  })
 })

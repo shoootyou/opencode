@@ -299,30 +299,54 @@ describe("formatModelLabel", () => {
     expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
   })
 
-  test.each(["providerID", "id", "variant"])("treats a throwing %s reference getter as missing", (field) => {
-    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
-      enumerable: true,
-      get() {
-        throw new Error(`${field} getter must not escape`)
-      },
-    })
+  test.each(["providerID", "id", "variant"])(
+    "reads a throwing %s reference getter once and returns an empty label",
+    (field) => {
+      let reads = 0
+      const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+        enumerable: true,
+        get() {
+          reads += 1
+          throw new Error(`${field} getter must not escape`)
+        },
+      })
 
-    expect(() => formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).not.toThrow()
-    expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
-  })
+      expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
+      expect(reads).toBe(1)
+    },
+  )
 
-  test("treats a throwing reference Proxy trap as missing", () => {
+  test("reaches a throwing reference Proxy descriptor trap and returns an empty label", () => {
+    let traps = 0
     const reference = new Proxy(
       {},
       {
         getOwnPropertyDescriptor() {
+          traps += 1
           throw new Error("reference proxy trap must not escape")
         },
       },
     )
 
-    expect(() => formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).not.toThrow()
     expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0])).toBe("")
+    expect(traps).toBe(1)
+  })
+
+  test.each(["providerID", "id", "variant"])("reads each stable %s reference getter exactly once", (field) => {
+    let reads = 0
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      enumerable: true,
+      get() {
+        reads += 1
+        if (reads > 1) throw new Error(`${field} was read more than once`)
+        return field === "providerID" ? "team" : field === "id" ? "reviewer" : "thinking"
+      },
+    })
+
+    expect(formatModelLabel(reference as Parameters<typeof formatModelLabel>[0], "Review Model")).toBe(
+      "team/Review Model (Thinking)",
+    )
+    expect(reads).toBe(1)
   })
 
   test("propagates errors from the caller-supplied variant formatter", () => {

@@ -144,44 +144,77 @@ describe("util.model", () => {
     ).toBe("")
   })
 
-  test("does not resolve numeric provider or model IDs through colliding string catalog keys", () => {
-    const models = [
-      { providerID: "42", id: "reviewer", name: "Wrong Numeric Provider Match" },
-      { providerID: "team", id: "42", name: "Wrong Numeric Model Match" },
-      { providerID: "team", id: "reviewer", name: "Review Model" },
-    ]
+  test("pins primitive raw catalog keys and both primitive-string gates at the adapter boundary", async () => {
+    const source = await Bun.file(new URL("../../src/util/model.ts", import.meta.url)).text()
 
-    expect(assistantModelLabel({ providerID: 42, id: "reviewer" } as never, models)).toBe("reviewer")
-    expect(assistantModelLabel({ providerID: "team", id: 42 } as never, models)).toBe("")
+    expect(source).toContain('typeof reference?.providerID === "string" && typeof reference.id === "string"')
+    expect(source).toContain("itemProviderID === providerID && itemID === id")
+    expect(source).not.toContain("String(")
+    expect(source).not.toMatch(/(?:^|[^=!])==(?!=)/)
   })
 
   test.each([
-    ["provider", "reviewer"],
+    ["number", 42, "7"],
+    ["boolean", true, "7"],
+    ["null", null, "7"],
+    ["undefined", undefined, "7"],
+    ["array", ["a"], "7"],
+    ["String object", new String("team"), "7"],
+  ])("does not coerce a %s provider identity into a colliding catalog key", (_kind, providerID, expected) => {
+    const models = [
+      { providerID: "42", id: "7", name: "Coerced Match" },
+      { providerID: "true", id: "7", name: "Coerced Match" },
+      { providerID: "null", id: "7", name: "Coerced Match" },
+      { providerID: "undefined", id: "7", name: "Coerced Match" },
+      { providerID: "a", id: "7", name: "Coerced Match" },
+      { providerID: "team", id: "7", name: "Coerced Match" },
+    ]
+
+    expect(assistantModelLabel({ providerID, id: "7" } as never, models)).toBe(expected)
+  })
+
+  test.each([
+    ["number", 7],
+    ["boolean", true],
+    ["null", null],
+    ["undefined", undefined],
+    ["array", ["a"]],
+    ["String object", new String("7")],
+  ])("does not coerce a %s model identity into a colliding catalog key", (_kind, id) => {
+    const models = [
+      { providerID: "team", id: "7", name: "Coerced Match" },
+      { providerID: "team", id: "true", name: "Coerced Match" },
+      { providerID: "team", id: "null", name: "Coerced Match" },
+      { providerID: "team", id: "undefined", name: "Coerced Match" },
+      { providerID: "team", id: "a", name: "Coerced Match" },
+    ]
+
+    expect(assistantModelLabel({ providerID: "team", id } as never, models)).toBe("")
+  })
+
+  test.each([
+    ["provider", "7"],
     ["id", ""],
   ])("does not convert an object %s lookup identity", (position, expected) => {
     let conversions = 0
     const conversionObject = {
       toString: () => {
         conversions += 1
-        return position === "provider" ? "team" : "reviewer"
+        return position === "provider" ? "team" : "7"
       },
       valueOf: () => {
         conversions += 1
-        return position === "provider" ? "team" : "reviewer"
+        return position === "provider" ? "team" : "7"
       },
       [Symbol.toPrimitive]: () => {
         conversions += 1
-        return position === "provider" ? "team" : "reviewer"
+        return position === "provider" ? "team" : "7"
       },
     }
     const model =
-      position === "provider"
-        ? { providerID: conversionObject, id: "reviewer" }
-        : { providerID: "team", id: conversionObject }
+      position === "provider" ? { providerID: conversionObject, id: "7" } : { providerID: "team", id: conversionObject }
 
-    expect(
-      assistantModelLabel(model as never, [{ providerID: "team", id: "reviewer", name: "Wrong Converted Match" }]),
-    ).toBe(expected)
+    expect(assistantModelLabel(model as never, [{ providerID: "team", id: "7", name: "Coerced Match" }])).toBe(expected)
     expect(conversions).toBe(0)
   })
 
@@ -213,14 +246,20 @@ describe("util.model", () => {
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/reviewer")
   })
 
-  test.each(["providerID", "id", "variant"])("does not throw for a reference %s getter", (field) => {
-    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
-      get() {
-        throw new Error(`${field} getter must not escape`)
-      },
-    })
-    expect(() => assistantModelLabel(reference as never, [])).not.toThrow()
-  })
+  test.each(["providerID", "id", "variant"])(
+    "reaches a throwing reference %s getter and returns an empty label",
+    (field) => {
+      let reads = 0
+      const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+        get() {
+          reads += 1
+          throw new Error(`${field} getter must not escape`)
+        },
+      })
+      expect(assistantModelLabel(reference as never, [])).toBe("")
+      expect(reads).toBe(1)
+    },
+  )
 
   test.each([
     ["null", null],
@@ -230,20 +269,86 @@ describe("util.model", () => {
     expect(assistantModelLabel(reference as never, [])).toBe("")
   })
 
-  test("does not throw for throwing reference, catalog-entry, or field Proxy/accessor boundaries", () => {
-    const trap = () => {
-      throw new Error("proxy trap must not escape")
-    }
-    const throwingReference = new Proxy({}, { getOwnPropertyDescriptor: trap })
-    const throwingEntry = new Proxy({}, { get: trap })
-    const providerGetter = Object.defineProperty({}, "providerID", { get: trap })
-    const idGetter = Object.defineProperty({}, "id", { get: trap })
-    const nameGetter = Object.defineProperty({}, "name", { get: trap })
+  test("reaches a throwing reference Proxy descriptor trap and returns an empty label", () => {
+    let hits = 0
+    const reference = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor: () => {
+          hits += 1
+          throw new Error("trap")
+        },
+      },
+    )
+    expect(assistantModelLabel(reference as never, [])).toBe("")
+    expect(hits).toBeGreaterThan(0)
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, [
+        { providerID: "team", id: "reviewer", name: "Review Model" },
+      ]),
+    ).toBe("team/Review Model")
+  })
 
-    expect(() => assistantModelLabel(throwingReference as never, [])).not.toThrow()
-    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [throwingEntry] as never)).not.toThrow()
-    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [providerGetter] as never)).not.toThrow()
-    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [idGetter] as never)).not.toThrow()
-    expect(() => assistantModelLabel({ providerID: "team", id: "reviewer" }, [nameGetter] as never)).not.toThrow()
+  test.each(["providerID", "id", "name"])("reaches a throwing catalog %s getter and falls back exactly", (field) => {
+    let hits = 0
+    const entry = Object.defineProperty({ providerID: "team", id: "reviewer", name: "Review Model" }, field, {
+      get() {
+        hits += 1
+        throw new Error("getter")
+      },
+    })
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [entry] as never)).toBe("team/reviewer")
+    expect(hits).toBeGreaterThan(0)
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, [
+        { providerID: "team", id: "reviewer", name: "Review Model" },
+      ]),
+    ).toBe("team/Review Model")
+  })
+
+  test("reaches a throwing catalog entry Proxy trap and falls back exactly", () => {
+    let hits = 0
+    const entry = new Proxy(
+      {},
+      {
+        get: () => {
+          hits += 1
+          throw new Error("trap")
+        },
+      },
+    )
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [entry] as never)).toBe("team/reviewer")
+    expect(hits).toBeGreaterThan(0)
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, [
+        { providerID: "team", id: "reviewer", name: "Review Model" },
+      ]),
+    ).toBe("team/Review Model")
+  })
+
+  test.each(["reference", "entry"])("degrades a revoked %s Proxy to its exact fallback", (boundary) => {
+    const revocable = Proxy.revocable({}, {})
+    revocable.revoke()
+    expect(
+      assistantModelLabel(
+        boundary === "reference" ? (revocable.proxy as never) : { providerID: "team", id: "reviewer" },
+        boundary === "entry" ? ([revocable.proxy] as never) : [],
+      ),
+    ).toBe(boundary === "reference" ? "" : "team/reviewer")
+  })
+
+  test.each(["providerID", "id", "variant"])("reads a stable %s getter exactly once", (field) => {
+    let reads = 0
+    const reference = Object.defineProperty({ providerID: "team", id: "reviewer", variant: "thinking" }, field, {
+      get() {
+        reads += 1
+        if (reads > 1) throw new Error(`${field} was read more than once`)
+        return field === "providerID" ? "team" : field === "id" ? "reviewer" : "thinking"
+      },
+    })
+    expect(
+      assistantModelLabel(reference as never, [{ providerID: "team", id: "reviewer", name: "Review Model" }]),
+    ).toBe("team/Review Model (Thinking)")
+    expect(reads).toBe(1)
   })
 })
