@@ -2,7 +2,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { Button } from "@opencode/ui/button"
 import { useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, on } from "solid-js"
+import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Option, Predicate, Schema } from "effect"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
@@ -24,6 +24,9 @@ import { createTimelineProjection } from "./projection"
 import { useServer } from "@/runtime/server/current"
 import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui/timeline/projection"
+import { useGlobal } from "@/runtime/server/runtime"
+import { archiveLabelKey, createArchiveLandingEffects, runTimelineArchive } from "./archive-model"
+import { useLayout } from "@/shell/state/layout"
 
 const emptyMessages: SessionMessageInfo[] = []
 
@@ -57,6 +60,8 @@ export type TimelineSessionSource = {
 }
 
 export function createTimelineController(input: { session: TimelineSessionSource }) {
+  let alive = true
+  onCleanup(() => (alive = false))
   const navigate = useNavigate()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
@@ -67,6 +72,8 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
+  const global = useGlobal()
+  const layout = useLayout()
 
   const visibleMessages = createMemo(() => {
     const id = input.session.identity.sessionID()
@@ -182,7 +189,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
     queuedCompactionIDs,
   })
 
-  const [pending, setPending] = createStore({ rename: false })
+  const [pending, setPending] = createStore({ rename: false, archive: false })
 
   const errorMessage = (cause: unknown) =>
     Option.match(decodeErrorData(cause), {
@@ -248,6 +255,44 @@ export function createTimelineController(input: { session: TimelineSessionSource
         title: language.t("toast.session.export.failed.title"),
         description: error instanceof Error ? error.message : language.t("toast.session.export.failed.description"),
       })
+    }
+  }
+
+  const archive = async () => {
+    const session = input.session.data.info()
+    const sessionID = input.session.identity.sessionID()
+    if (!session || !sessionID || pending.archive) return false
+    const ctx = global.serverCtx(server.key)
+    if (!ctx || ctx !== server.ctx) return false
+    setPending("archive", true)
+    try {
+      return await runTimelineArchive(
+        { target: { server: server.key, sessionID }, session, sessions: data.session.list() },
+        {
+          setArchive: global.sessionArchive.setSessionArchive,
+          now: Date.now,
+          isActive: () => alive && global.serverCtx(server.key) === ctx,
+          currentRoute: () => {
+            const route = layout.route()
+            return route.type === "session" ? { server: route.server, sessionID: route.sessionId } : undefined
+          },
+          navigate: async (landing) => {
+            if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+            await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
+          },
+          removeTabs: createArchiveLandingEffects({
+            removeSessions: (detail, options) =>
+              tabs.removeSessions({ ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] }, options),
+            navigate: async (landing) => {
+              if (landing.type === "session") return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
+              await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
+            },
+          }).removeTabs,
+          toast: ({ kind, error }) => showToast({ title: language.t("common.requestFailed"), description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error) }),
+        },
+      )
+    } finally {
+      setPending("archive", false)
     }
   }
 
@@ -334,12 +379,15 @@ export function createTimelineController(input: { session: TimelineSessionSource
       shellToolPartsExpanded,
       editToolPartsExpanded,
     },
-    pending: {
-      rename: () => pending.rename,
+      pending: {
+        rename: () => pending.rename,
+        archive: () => pending.archive,
     },
     action: {
       rename,
       export: exportSession,
+      archive,
+      archiveLabel: () => archiveLabelKey(input.session.data.info()),
       showDelete: (id: string) => dialog.show(() => <DeleteDialog sessionID={id} />),
       navigateParent: () => {
         const id = input.session.data.parentID()

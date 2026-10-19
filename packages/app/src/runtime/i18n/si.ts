@@ -3,6 +3,23 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
+  "common.unarchive": "සංරක්ෂිතයෙන් ඉවත් කරන්න",
+  "command.session.archive": "සංරක්ෂිත කරන්න සැසිය",
+  "command.session.archive.description": "සංරක්ෂිත කරන්න සැසිය",
+  "command.session.unarchive": "සංරක්ෂිතයෙන් ඉවත් කරන්න සැසිය",
+  "command.session.unarchive.description": "සැසිය ප්‍රතිසාධනය කරන්න",
+  "command.session.archivedBrowse": "සංරක්ෂිත සැසි",
+  "command.session.archivedBrowse.description": "සැසිය ප්‍රතිසාධනය කරන්න සැසිය",
+  "dialog.archivedSessions.title": "සංරක්ෂිත සැසි",
+  "dialog.archivedSessions.description": "සැසිය ප්‍රතිසාධනය කරන්න සැසිය",
+  "dialog.archivedSessions.empty": "සංරක්ෂිත සැසි",
+  "dialog.archivedSessions.noMatches": "සංරක්ෂිත සැසි",
+  "dialog.archivedSessions.error": "සංරක්ෂිත සැසි පූරණය කළ නොහැක",
+  "dialog.archivedSessions.loading": "සංරක්ෂිත සැසි පූරණය වෙමින් පවතී…",
+  "session.archive.refreshFailed": "සැසිය යාවත්කාලීන විය, නමුත් විස්තර නැවුම් කළ නොහැකි විය.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "ගොනුව",
   "desktop.menu.edit": "සංස්කරණය කරන්න",

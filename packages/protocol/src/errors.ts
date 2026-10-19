@@ -53,6 +53,17 @@ export class ConflictError extends Schema.TaggedError<ConflictError>()(
   { httpApiStatus: 409 },
 ) {}
 
+export class SessionArchiveLimitError extends Schema.TaggedError<SessionArchiveLimitError>()(
+  "SessionArchiveLimitError",
+  {
+    sessionID: Schema.String,
+    kind: Schema.Literals(["rate", "retention"]),
+    retryAfterMillis: Schema.optional(Schema.Number),
+    message: Schema.String,
+  },
+  { httpApiStatus: 429 },
+) {}
+
 export class SessionBusyError extends Schema.TaggedError<SessionBusyError>()(
   "SessionBusyError",
   {

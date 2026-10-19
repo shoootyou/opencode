@@ -34,6 +34,7 @@ import { rootSession } from "@/shell/routes/session"
 import { TitlebarItem } from "@opencode/gui-extensions/sdk"
 import { useExtensionHost } from "@/runtime/extension/host"
 import { TitlebarItems, useTitlebarItems } from "@/runtime/extension/titlebar-items"
+import { useTitlebarArchiveCommands } from "./session-archive-commands"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
 
@@ -65,6 +66,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
   const mobile = createMediaQuery("(max-width: 767px)")
   const bottom = createMemo(() => mobile() && settings.general.mobileTitlebarPosition() === "bottom")
   const mobileTop = createMemo(() => platform.platform === "web" && mobile() && !bottom())
+  useTitlebarArchiveCommands()
 
   const mac = createMemo(() => platform.platform === "desktop" && platform.os === "macos")
   const windows = createMemo(() => platform.platform === "desktop" && platform.os === "windows")

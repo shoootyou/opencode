@@ -3,6 +3,23 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
+  "common.unarchive": "Arşivden çıkar",
+  "command.session.archive": "Arşivle oturumu",
+  "command.session.archive.description": "Arşivle oturumu",
+  "command.session.unarchive": "Arşivden çıkar oturumu",
+  "command.session.unarchive.description": "Oturumu geri yükle",
+  "command.session.archivedBrowse": "Arşivlenmiş oturumlar",
+  "command.session.archivedBrowse.description": "Oturumu geri yükle oturumu",
+  "dialog.archivedSessions.title": "Arşivlenmiş oturumlar",
+  "dialog.archivedSessions.description": "Oturumu geri yükle oturumu",
+  "dialog.archivedSessions.empty": "Arşivlenmiş oturumlar",
+  "dialog.archivedSessions.noMatches": "Arşivlenmiş oturumlar",
+  "dialog.archivedSessions.error": "Arşivlenmiş oturumlar yüklenemedi",
+  "dialog.archivedSessions.loading": "Arşivlenmiş oturumlar yükleniyor…",
+  "session.archive.refreshFailed": "Oturum güncellendi, ancak ayrıntıları yenilenemedi.",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Dosya",
   "desktop.menu.edit": "Düzen",

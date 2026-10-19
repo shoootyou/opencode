@@ -295,6 +295,7 @@ export function configured(options?: Options) {
           return Effect.gen(function* () {
             const durable = definition.durable
             if (!durable) return yield* Effect.void
+            const retained = persist || durable.retain === true
             const aggregateID = (event.data as Record<string, unknown>)[durable.aggregate]
             if (typeof aggregateID !== "string")
               return yield* Effect.die(
@@ -335,7 +336,7 @@ export function configured(options?: Options) {
                           )
                         }
                         if (input && input.seq <= latest) {
-                          if (!persist) return
+                           if (!retained) return
                           const stored = yield* db
                             .select()
                             .from(EventTable)
@@ -377,7 +378,7 @@ export function configured(options?: Options) {
                             }),
                           )
                         }
-                        if (persist) {
+                         if (retained) {
                           const stored = yield* db
                             .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
                             .from(EventTable)
@@ -413,7 +414,7 @@ export function configured(options?: Options) {
                           })
                           .run()
                           .pipe(Effect.orDie)
-                        if (persist)
+                         if (retained)
                           yield* db
                             .insert(EventTable)
                             .values([
@@ -600,7 +601,8 @@ export function configured(options?: Options) {
                               string,
                               unknown
                             >
-                            if (persist) {
+                            const retained = persist || item.definition.durable.retain === true
+                            if (retained) {
                               if (ids.has(item.event.id))
                                 yield* Effect.die(
                                   new InvalidDurableEventError({
@@ -630,7 +632,7 @@ export function configured(options?: Options) {
                               yield* projector(event)
                             }
                             if (item.commit) yield* item.commit(seq)
-                            if (persist)
+                            if (retained)
                               rows.push({
                                 id: event.id,
                                 aggregate_id: aggregateID,
@@ -646,7 +648,7 @@ export function configured(options?: Options) {
                             .onConflictDoUpdate({ target: EventSequenceTable.aggregate_id, set: { seq: finalSeq } })
                             .run()
                             .pipe(Effect.orDie)
-                          if (persist) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
+                           if (rows.length > 0) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
                           return { events: queued, route }
                         }),
                       { behavior: "immediate" },

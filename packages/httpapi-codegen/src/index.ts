@@ -1887,7 +1887,14 @@ function renderEffectRequestPart(
   if (fields.length === 0) return present ? `${source}: { }` : undefined
   const access = (name: string) => `input${mode === "optional" ? "?." : ""}[${JSON.stringify(name)}]`
   if (opaquePayload && source === "payload") return `${source}: ${access(fields[0].name)}`
-  return `${source}: { ${fields.map((field) => `${JSON.stringify(field.name)}: ${access(field.name)}`).join(", ")} }`
+  const properties = fields
+    .map((field) => {
+      const value = access(field.name)
+      if (!field.optional) return `${JSON.stringify(field.name)}: ${value}`
+      return `...(${value} === undefined ? { } : { ${JSON.stringify(field.name)}: ${value} })`
+    })
+    .join(", ")
+  return `${source}: { ${properties} }`
 }
 
 function renderSchemas(slots: ReadonlyArray<Slot>) {

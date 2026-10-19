@@ -703,6 +703,18 @@ export function createData(config: CreateDataInput) {
         })
         return
       }
+      case "session.archive.changed": {
+        refresh(() => {
+          const family = sync.pending(`session.family:${event.data.sessionID}`)
+            ? result.session.sync(event.data.sessionID, { children: true })
+            : Promise.resolve()
+          return Promise.all([result.session.sync(event.data.sessionID), family]).then(() => {
+            if (store.session.info[event.data.sessionID])
+              setStore("session", "info", event.data.sessionID, "time", "archived", event.data.archived ?? undefined)
+          })
+        })
+        return
+      }
       case "session.permissions":
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "permissions", event.data.permissions)
@@ -1618,7 +1630,7 @@ export function createData(config: CreateDataInput) {
             api().session.get({ sessionID }),
             options?.children
               ? api()
-                  .session.list({ parentID: sessionID, order: "desc" })
+                  .session.list({ parentID: sessionID, order: "desc", archived: true })
                   .then((response) => response.data)
               : [],
           ])

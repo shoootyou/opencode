@@ -108,6 +108,20 @@ export const Renamed = Event.durable({
 })
 export type Renamed = typeof Renamed.Type
 
+export const ArchiveChanged = Event.durable({
+  type: "session.archive.changed",
+  durable: {
+    aggregate: "sessionID",
+    version: 1,
+    retain: true,
+  },
+  schema: {
+    ...Base,
+    archived: Schema.NullOr(Schema.Finite),
+  },
+})
+export type ArchiveChanged = typeof ArchiveChanged.Type
+
 export const MetadataUpdated = Event.durable({
   type: "session.metadata.updated",
   ...options,
@@ -655,6 +669,7 @@ export const Definitions = Event.inventory(
   ModelSelected,
   Moved,
   Renamed,
+  ArchiveChanged,
   MetadataUpdated,
   Permissions,
   Viewed,

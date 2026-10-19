@@ -3,6 +3,23 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "dialog.archivedSessions.search.placeholder": "Search this page",
+  "dialog.archivedSessions.previousPage": "Previous page",
+  "dialog.archivedSessions.nextPage": "Next page",
+  "common.unarchive": "अभिलेखबाट हटाउनुहोस्",
+  "command.session.archive": "अभिलेखमा राख्नुहोस् सत्र",
+  "command.session.archive.description": "अभिलेखमा राख्नुहोस् सत्र",
+  "command.session.unarchive": "अभिलेखबाट हटाउनुहोस् सत्र",
+  "command.session.unarchive.description": "सत्र पुनर्स्थापना गर्नुहोस्",
+  "command.session.archivedBrowse": "अभिलेखित सत्रहरू",
+  "command.session.archivedBrowse.description": "सत्र पुनर्स्थापना गर्नुहोस् सत्र",
+  "dialog.archivedSessions.title": "अभिलेखित सत्रहरू",
+  "dialog.archivedSessions.description": "सत्र पुनर्स्थापना गर्नुहोस् सत्र",
+  "dialog.archivedSessions.empty": "अभिलेखित सत्रहरू",
+  "dialog.archivedSessions.noMatches": "अभिलेखित सत्रहरू",
+  "dialog.archivedSessions.error": "अभिलेखित सत्रहरू लोड गर्न सकिएन",
+  "dialog.archivedSessions.loading": "अभिलेखित सत्रहरू लोड हुँदैछन्…",
+  "session.archive.refreshFailed": "सत्र अद्यावधिक भयो, तर यसको विवरण ताजा गर्न सकिएन।",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "फाइल",
   "desktop.menu.edit": "सम्पादन गर्नुहोस्",

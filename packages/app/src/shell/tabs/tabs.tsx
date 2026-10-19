@@ -472,7 +472,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
 
         for (const draftID of drafts) removeDraftPersisted(draftID)
       },
-      removeSessions: (input: SessionTabsRemovedDetail) => {
+      removeSessions: (input: SessionTabsRemovedDetail, options?: Readonly<{ navigate?: boolean }>) => {
         const targetServer = input.server
         updateClosed((stack) => removeClosedTabs(stack, targetServer, input.sessionIDs))
 
@@ -482,7 +482,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           )
           .map(tabKey)
 
-        void startTransition(() => {
+        const remove = () => {
           setStore(
             produce((tabs) => {
               const sessionIDs = new Set(input.sessionIDs)
@@ -516,7 +516,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
                 tabs.splice(i, 1)
               }
 
-              if (!removedCurrent) return
+              if (!removedCurrent || options?.navigate === false) return
 
               const nextTab =
                 tabs.slice(currentIndex).find((tab) => tab.type === "session") ??
@@ -528,7 +528,12 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           )
 
           if (recent.key && removed.includes(recent.key)) setRecentKey(undefined)
-        })
+        }
+
+        // Archive finalization chooses its own landing synchronously. Other callers keep
+        // the upstream deferred removal and automatic navigation behavior.
+        if (options?.navigate === false) remove()
+        else void startTransition(remove)
 
         for (const key of removed) memory.remove(key)
 

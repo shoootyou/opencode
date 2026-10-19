@@ -16,6 +16,7 @@ import { resolveProjectForSession } from "@/shell/layout/helpers"
 import { useExtensionHost } from "@/runtime/extension/host"
 import { useExtensionAttachment } from "@/runtime/extension/host-apis"
 import { looksLikeSessionID } from "@/session/search"
+import { isSessionVisibleInPalette } from "@/session/archive"
 
 export type CommandPaletteEntry = {
   id: string
@@ -278,7 +279,7 @@ export function createServerSessionEntries(props: {
     ]).then(([listed, exact]) =>
       [...new Map([...exact, ...listed].map((session) => [session.id, session] as const)).values()].flatMap(
         (session) => {
-          if (session.time.archived) return []
+          if (!isSessionVisibleInPalette(session)) return []
 
           const project = resolveProjectForSession(session, opened, stored)
 

@@ -12,6 +12,7 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { readLocalImage } from "@/runtime/server/image"
 import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
+import { canOpenReferencedSession } from "@/session/archive"
 
 export function SessionUIProvider(
   props: ParentProps<{
@@ -53,7 +54,7 @@ export function SessionUIProvider(
     // Resolve it on this server before touching tabs or the current route.
     const session = await serverSDK.api.session.get({ sessionID }).catch(() => undefined)
 
-    if (!session || session.time.archived) {
+    if (!canOpenReferencedSession(session)) {
       showToast({ title: language.t("session.error.notFound") })
 
       return
