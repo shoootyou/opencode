@@ -226,6 +226,62 @@ describe("util.model", () => {
   })
 
   test.each([
+    ["number", 42, "Numeric Provider Catalog Entry", "reviewer"],
+    ["boolean", true, "Boolean Provider Catalog Entry", "reviewer"],
+    ["null", null, "Null Provider Catalog Entry", "reviewer"],
+    ["bigint", 1n, "Bigint Provider Catalog Entry", "reviewer"],
+  ])(
+    "does not resolve a %s provider identity even when a catalog entry strictly matches it",
+    (_kind, providerID, _name, expected) => {
+      const objectIdentity = {}
+      const models = [
+        { providerID: 42, id: "reviewer", name: "Numeric Provider Catalog Entry" },
+        { providerID: true, id: "reviewer", name: "Boolean Provider Catalog Entry" },
+        { providerID: null, id: "reviewer", name: "Null Provider Catalog Entry" },
+        { providerID: 1n, id: "reviewer", name: "Bigint Provider Catalog Entry" },
+        { providerID: objectIdentity, id: "reviewer", name: "Object Provider Catalog Entry" },
+      ]
+
+      expect(assistantModelLabel({ providerID, id: "reviewer" } as never, models as never)).toBe(expected)
+      expect(assistantModelLabel({ providerID: objectIdentity, id: "reviewer" } as never, models as never)).toBe(
+        "reviewer",
+      )
+    },
+  )
+
+  test("does not resolve a null provider identity even when a catalog entry strictly matches it", () => {
+    const models = [{ providerID: null, id: "reviewer", name: "Null Provider Catalog Entry" }]
+
+    expect(assistantModelLabel({ providerID: null, id: "reviewer" } as never, models as never)).toBe("reviewer")
+  })
+
+  test.each([
+    ["number", 7, "Numeric Model Catalog Entry", ""],
+    ["boolean", true, "Boolean Model Catalog Entry", ""],
+    ["bigint", 1n, "Bigint Model Catalog Entry", ""],
+  ])(
+    "does not resolve a %s model identity even when a catalog entry strictly matches it",
+    (_kind, id, _name, expected) => {
+      const objectIdentity = {}
+      const models = [
+        { providerID: "team", id: 7, name: "Numeric Model Catalog Entry" },
+        { providerID: "team", id: true, name: "Boolean Model Catalog Entry" },
+        { providerID: "team", id: 1n, name: "Bigint Model Catalog Entry" },
+        { providerID: "team", id: objectIdentity, name: "Object Model Catalog Entry" },
+      ]
+
+      expect(assistantModelLabel({ providerID: "team", id } as never, models as never)).toBe(expected)
+      expect(assistantModelLabel({ providerID: "team", id: objectIdentity } as never, models as never)).toBe("")
+    },
+  )
+
+  test("does not resolve a null model identity even when a catalog entry strictly matches it", () => {
+    const models = [{ providerID: "team", id: null, name: "Null Model Catalog Entry" }]
+
+    expect(assistantModelLabel({ providerID: "team", id: null } as never, models as never)).toBe("")
+  })
+
+  test.each([
     ["provider", "7"],
     ["id", ""],
   ])("does not convert an object %s lookup identity", (position, expected) => {

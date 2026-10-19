@@ -267,6 +267,59 @@ describe("session-ui assistantModelLabel", () => {
   })
 
   test.each([
+    ["number", 42, "Numeric Provider Catalog Entry", "reviewer"],
+    ["boolean", true, "Boolean Provider Catalog Entry", "reviewer"],
+    ["null", null, "Null Provider Catalog Entry", "reviewer"],
+    ["undefined", undefined, "Undefined Provider Catalog Entry", "reviewer"],
+  ])(
+    "does not resolve a %s provider Map key when the reference identity is not a primitive string",
+    (_kind, providerID, _catalogName, expected) => {
+      const catalog = new Map<unknown, { models: { reviewer: { name: string } } }>([
+        [42, { models: { reviewer: { name: "Numeric Provider Catalog Entry" } } }],
+        ["42", { models: { reviewer: { name: "String Provider Catalog Entry" } } }],
+        [true, { models: { reviewer: { name: "Boolean Provider Catalog Entry" } } }],
+        ["true", { models: { reviewer: { name: "String Boolean Provider Catalog Entry" } } }],
+        [null, { models: { reviewer: { name: "Null Provider Catalog Entry" } } }],
+        ["null", { models: { reviewer: { name: "String Null Provider Catalog Entry" } } }],
+        [undefined, { models: { reviewer: { name: "Undefined Provider Catalog Entry" } } }],
+        ["undefined", { models: { reviewer: { name: "String Undefined Provider Catalog Entry" } } }],
+      ])
+
+      expect(assistantModelLabel({ providerID, id: "reviewer" } as never, catalog as never, (label) => label)).toBe(
+        expected,
+      )
+    },
+  )
+
+  test.each([
+    ["number", 7, "Numeric Model Catalog Entry", ""],
+    ["boolean", true, "Boolean Model Catalog Entry", ""],
+    ["null", null, "Null Model Catalog Entry", ""],
+    ["undefined", undefined, "Undefined Model Catalog Entry", ""],
+  ])(
+    "does not resolve a %s model record key when the reference identity is not a primitive string",
+    (_kind, id, _catalogName, expected) => {
+      const catalog = new Map([
+        [
+          "team",
+          {
+            models: {
+              7: { name: "Numeric Model Catalog Entry" },
+              true: { name: "Boolean Model Catalog Entry" },
+              null: { name: "Null Model Catalog Entry" },
+              undefined: { name: "Undefined Model Catalog Entry" },
+            },
+          },
+        ],
+      ])
+
+      expect(assistantModelLabel({ providerID: "team", id } as never, catalog as never, (label) => label)).toBe(
+        expected,
+      )
+    },
+  )
+
+  test.each([
     ["providerID", "team", "7"],
     ["id", "7", ""],
   ])("does not convert an object %s lookup identity", (position, existingKey, expected) => {

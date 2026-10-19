@@ -233,6 +233,46 @@ describe("formatModelLabel", () => {
   })
 
   test.each([
+    ["U+202A", "\u202a", "provider"],
+    ["U+202A", "\u202a", "model name"],
+    ["U+202A", "\u202a", "model ID fallback"],
+    ["U+202A", "\u202a", "variant"],
+    ["U+202B", "\u202b", "provider"],
+    ["U+202B", "\u202b", "model name"],
+    ["U+202B", "\u202b", "model ID fallback"],
+    ["U+202B", "\u202b", "variant"],
+    ["U+202C", "\u202c", "provider"],
+    ["U+202C", "\u202c", "model name"],
+    ["U+202C", "\u202c", "model ID fallback"],
+    ["U+202C", "\u202c", "variant"],
+    ["U+202D", "\u202d", "provider"],
+    ["U+202D", "\u202d", "model name"],
+    ["U+202D", "\u202d", "model ID fallback"],
+    ["U+202D", "\u202d", "variant"],
+  ])("removes %s from the %s display component", (codePoint, forbidden, component) => {
+    const model =
+      component === "provider"
+        ? { providerID: `pro${forbidden}vider`, id: "model" }
+        : component === "model ID fallback"
+          ? { providerID: "team", id: `mo${forbidden}del` }
+          : component === "variant"
+            ? { providerID: "team", id: "model", variant: `thin${forbidden}king` }
+            : { providerID: "team", id: "model" }
+    const name =
+      component === "model name" ? `Mo${forbidden}del` : component === "model ID fallback" ? undefined : "Model"
+
+    expect(formatModelLabel(model, name), `${codePoint} ${component}`).toBe(
+      component === "provider"
+        ? "provider/Model"
+        : component === "model name"
+          ? "team/Model"
+          : component === "model ID fallback"
+            ? "team/model"
+            : "team/Model (Thinking)",
+    )
+  })
+
+  test.each([
     ["provider", { providerID: "p".repeat(64), id: "model" }, "Model", `${"p".repeat(64)}/Model`],
     ["name", { providerID: "team", id: "model" }, "n".repeat(64), `team/${"n".repeat(64)}`],
     [
