@@ -5,6 +5,7 @@
  *   - Resolves the exact message (providerID, id) only when both identities are primitive strings.
  *   - Returns a control-free display label while looking up catalog entries by raw providerID/id.
  *   - Adds a parenthesized, first-code-unit-capitalized non-default variant to the complete label.
+ *   - Traverses only array catalogs and plain object entries, skipping malformed items.
  * @edge-cases
  *   - Missing or empty reference identities return an empty label.
  *   - Catalog modelID is never a lookup key; aliases sharing an API ID retain their own display names.
@@ -270,6 +271,84 @@ describe("util.model", () => {
     ["non-array catalog", {}],
   ])("treats a %s as a missing catalog", (_kind, models) => {
     expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/reviewer")
+  })
+
+  test.each([
+    ["null", () => [null]],
+    ["undefined", () => [undefined]],
+    ["primitive", () => [42]],
+    ["sparse hole", () => new Array(1)],
+  ])("skips a %s item before a later valid catalog entry", (_kind, buildPrefix) => {
+    const models = buildPrefix() as unknown[]
+    const valid = { providerID: "team", id: "reviewer", name: "Review Model" }
+    models.push(valid)
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/Review Model")
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [valid])).toBe("team/Review Model")
+  })
+
+  test("rejects non-array and hostile-find catalogs without dispatching their find methods", () => {
+    let nonArrayFindCalls = 0
+    let decoratedArrayFindCalls = 0
+    const nonArrayCatalog = {
+      find() {
+        nonArrayFindCalls += 1
+        return { providerID: "team", id: "reviewer", name: "Wrong Non-Array Find" }
+      },
+    }
+    const decoratedArray = Object.assign([{ providerID: "team", id: "reviewer", name: "Review Model" }], {
+      find() {
+        decoratedArrayFindCalls += 1
+        return { providerID: "team", id: "reviewer", name: "Wrong Decorated Find" }
+      },
+    })
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, nonArrayCatalog as never)).toBe("team/reviewer")
+    expect(nonArrayFindCalls).toBe(0)
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, decoratedArray)).toBe("team/Review Model")
+    expect(decoratedArrayFindCalls).toBe(0)
+  })
+
+  test("rejects a non-array iterator without dispatching it", () => {
+    let iteratorCalls = 0
+    const catalog = {
+      [Symbol.iterator]() {
+        iteratorCalls += 1
+        return [{ providerID: "team", id: "reviewer", name: "Wrong Iterator" }][Symbol.iterator]()
+      },
+    }
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never)).toBe("team/reviewer")
+    expect(iteratorCalls).toBe(0)
+  })
+
+  test.each([
+    ["array entry", Object.assign([], { providerID: "team", id: "reviewer", name: "Wrong Array Entry" })],
+    ["function entry", Object.assign(function wrongFunction() {}, { providerID: "team", id: "reviewer" })],
+  ])("rejects a %s even when it carries matching primitive fields", (_kind, malformed) => {
+    const models = [malformed, { providerID: "team", id: "reviewer", name: "Review Model" }]
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/Review Model")
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, [malformed] as never)).toBe("team/reviewer")
+  })
+
+  test("falls back when the matching entry has a non-string name", () => {
+    const models = [{ providerID: "team", id: "reviewer", name: function builtInName() {} }]
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, models as never)).toBe("team/reviewer")
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, [
+        { providerID: "team", id: "reviewer", name: "Review Model" },
+      ]),
+    ).toBe("team/Review Model")
+  })
+
+  test("pins every TUI catalog guard that keeps malformed values fail closed", async () => {
+    const source = await Bun.file(new URL("../../src/util/model.ts", import.meta.url)).text()
+
+    expect(source).toContain("if (!Array.isArray(models)) return")
+    expect(source).toContain('if (!item || typeof item !== "object" || Array.isArray(item)) continue')
+    expect(source).toContain('return typeof name === "string" ? name : undefined')
   })
 
   test.each(["providerID", "id", "variant"])(

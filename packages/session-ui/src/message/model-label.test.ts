@@ -4,6 +4,7 @@
  * @behavior
  *   - Resolves model display names only when message providerID and id are primitive strings.
  *   - Delegates one sanitized shared label, including its variant, to the app formatter.
+ *   - Rejects malformed provider, models-map, and model-entry shapes before their fields are read.
  * @edge-cases
  *   - Missing catalog entries preserve raw provider/model IDs.
  *   - Dirty catalogs and unreadable references degrade to a missing display name without throwing.
@@ -307,6 +308,88 @@ describe("session-ui assistantModelLabel", () => {
         (label, variant) => `${label} (${variant})`,
       ),
     ).toBe("team/reviewer")
+  })
+
+  test.each([
+    ["array provider", Object.assign([], { models: { reviewer: { name: "Wrong Provider" } } })],
+    [
+      "function provider",
+      Object.assign(function namedProvider() {}, { models: { reviewer: { name: "Wrong Provider" } } }),
+    ],
+    ["string provider", "provider"],
+    ["number provider", 42],
+  ])("fails closed for a %s instead of using its model fields", (_kind, provider) => {
+    const formatVariant = (label: string, variant: string) => `${label} (${variant})`
+    const catalog = new Map([["team", provider]])
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
+      "team/reviewer",
+    )
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
+      "team/Review Model",
+    )
+  })
+
+  test.each([
+    ["populated array", Object.assign([], { reviewer: { name: "Wrong Array Map" } })],
+    ["function", Object.assign(function namedModelsMap() {}, { reviewer: { name: "Wrong Function Map" } })],
+    ["string", "reviewer"],
+    ["number", 42],
+  ])("fails closed for a %s models map instead of built-in or own fields", (_kind, models) => {
+    const formatVariant = (label: string, variant: string) => `${label} (${variant})`
+    const catalog = new Map([["team", { models }]])
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
+      "team/reviewer",
+    )
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
+      "team/Review Model",
+    )
+  })
+
+  test.each([
+    ["array", Object.assign([], { name: "Wrong Array Entry" })],
+    ["function with a built-in name", function wrongFunction() {}],
+    ["string", "entry"],
+    ["number", 42],
+  ])("fails closed for a %s model entry instead of its primitive fields", (_kind, entry) => {
+    const formatVariant = (label: string, variant: string) => `${label} (${variant})`
+    const catalog = new Map([["team", { models: { reviewer: entry } }]])
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, catalog as never, formatVariant)).toBe(
+      "team/reviewer",
+    )
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
+      "team/Review Model",
+    )
+  })
+
+  test("requires an own model-map key and a primitive-string name before resolving the display label", () => {
+    const formatVariant = (label: string, variant: string) => `${label} (${variant})`
+    const inheritedModels = Object.create({ reviewer: { name: "Wrong Inherited Entry" } })
+    const inheritedCatalog = new Map([["team", { models: inheritedModels }]])
+    const nonStringNameCatalog = new Map([["team", { models: { reviewer: { name: function builtInName() {} } } }]])
+
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, inheritedCatalog, formatVariant)).toBe(
+      "team/reviewer",
+    )
+    expect(
+      assistantModelLabel({ providerID: "team", id: "reviewer" }, nonStringNameCatalog as never, formatVariant),
+    ).toBe("team/reviewer")
+    expect(assistantModelLabel({ providerID: "team", id: "reviewer" }, providers, formatVariant)).toBe(
+      "team/Review Model",
+    )
+  })
+
+  test("pins every session catalog guard that keeps malformed values fail closed", async () => {
+    const source = await Bun.file(new URL("./model-label.ts", import.meta.url)).text()
+
+    expect(source).toContain('if (!provider || typeof provider !== "object" || Array.isArray(provider)) return')
+    expect(source).toContain(
+      'if (!models || typeof models !== "object" || Array.isArray(models) || !Object.hasOwn(models, id)) return',
+    )
+    expect(source).toContain('if (!model || typeof model !== "object" || Array.isArray(model)) return')
+    expect(source).toContain('return typeof name === "string" ? name : undefined')
   })
 
   test.each(["providerID", "id", "variant"])(
