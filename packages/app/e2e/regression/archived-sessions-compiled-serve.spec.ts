@@ -1,0 +1,333 @@
+/**
+ * @spec-handoff
+ * @interface compiledArchivedSessionsDialog(binaryPath: string): Promise<void>
+ * @behavior
+ *   - Shows each archived row's real title (or the localized untitled label), truncated directory, and relative archived time.
+ *   - Keeps rows inset by 12px and readable without horizontal overflow at 320px, 375px, and desktop widths.
+ *   - Restores the keyboard-selected archived session and retains paging and search controls.
+ * @edge-cases
+ *   - A timestamp of 0 remains a row but intentionally has no date.
+ *   - The displayed date derives from time.archived, not time.updated or time.created.
+ * @rerun PLAYWRIGHT_BASE_URL=http://127.0.0.1:9 OPENCODE_COMPILED_BINARY=<rebuilt binary> playwright test archived-sessions-compiled-serve.spec.ts
+ * @see ./dialog-archived-sessions.tsx
+ */
+import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test"
+import { randomBytes, randomUUID } from "node:crypto"
+import { spawn, type ChildProcess } from "node:child_process"
+import { mkdir, rm } from "node:fs/promises"
+import path from "node:path"
+
+test.use({ serviceWorkers: "block" })
+
+const repo = path.resolve(import.meta.dirname, "../../../..")
+
+const binary = process.env.OPENCODE_COMPILED_BINARY
+
+const artifacts = process.env.OPENCODE_ARCHIVE_E2E_ARTIFACTS ?? path.join(repo, ".debug", "plan373-e8-red")
+
+const browserRuntime = path.join(repo, ".debug", "browser-runtime")
+
+const executablePath = path.join(
+  repo,
+  ".debug",
+  "20261023-archive-web-ui-browser-e7-shin",
+  "browsers",
+  "chromium_headless_shell-1217",
+  "chrome-headless-shell-linux64",
+  "chrome-headless-shell",
+)
+
+const port = 43173
+
+const origin = `http://127.0.0.1:${port}`
+
+const password = randomBytes(32).toString("hex")
+
+const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
+
+let server: ChildProcess
+
+let browser: Browser
+
+let context: BrowserContext
+
+let page: Page
+
+test.skip(!binary, "set OPENCODE_COMPILED_BINARY to a rebuilt local opencode binary")
+
+test.beforeAll(async () => {
+  await rm(artifacts, { recursive: true, force: true })
+  await mkdir(path.join(artifacts, "workspace"), { recursive: true })
+
+  server = spawn(binary!, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+    cwd: path.join(artifacts, "workspace"),
+    env: {
+      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      HOME: path.join(artifacts, "server-home"),
+      XDG_DATA_HOME: path.join(artifacts, "server-state"),
+      XDG_CONFIG_HOME: path.join(artifacts, "server-config"),
+      XDG_CACHE_HOME: path.join(artifacts, "server-cache"),
+      XDG_STATE_HOME: path.join(artifacts, "server-state"),
+      XDG_RUNTIME_DIR: path.join(artifacts, "server-runtime"),
+      TMPDIR: path.join(artifacts, "server-tmp"),
+      OPENCODE_CONFIG_DIR: path.join(artifacts, "server-config", "opencode"),
+      OPENCODE_CONFIG_PROJECT_DISABLE: "1",
+      OPENCODE_DB: path.join(artifacts, "server-state", "opencode.db"),
+      OPENCODE_PASSWORD: password,
+      LANG: "C.UTF-8",
+    },
+    stdio: "ignore",
+  })
+
+  await expect
+    .poll(
+      async () => {
+        try {
+          return (await fetch(origin)).ok
+        } catch {
+          return false
+        }
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
+
+  browser = await chromium.launch({
+    headless: true,
+    chromiumSandbox: false,
+    executablePath,
+    env: {
+      HOME: path.join(browserRuntime, "home"),
+      TMPDIR: path.join(browserRuntime, "tmp"),
+      XDG_CACHE_HOME: path.join(browserRuntime, "home", ".cache"),
+      XDG_CONFIG_HOME: path.join(browserRuntime, "home", ".config"),
+      XDG_RUNTIME_DIR: path.join(browserRuntime, "runtime"),
+      FONTCONFIG_FILE: path.join(browserRuntime, "fontconfig", "fonts.conf"),
+      FONTCONFIG_PATH: path.join(browserRuntime, "fontconfig"),
+      LD_LIBRARY_PATH: path.join(browserRuntime, "libs", "usr", "lib", "x86_64-linux-gnu"),
+      LANG: "C.UTF-8",
+    },
+  })
+})
+
+test.afterAll(async () => {
+  await browser?.close()
+
+  if (server?.exitCode === null) server.kill("SIGTERM")
+})
+
+test.beforeEach(async () => {
+  context = await browser.newContext({
+    locale: "es-ES",
+    viewport: { width: 1440, height: 1000 },
+    serviceWorkers: "block",
+  })
+  await context.route("**/*", async (route) => {
+    if (new URL(route.request().url()).origin === origin) return route.continue()
+
+    return route.abort("blockedbyclient")
+  })
+  page = await context.newPage()
+  await connect(page)
+})
+
+test.afterEach(async () => context.close())
+
+test("uses archived time and an untitled label in rendered Spanish rows", async () => {
+  const archived = {
+    id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+    title: "",
+    directory: "/workspace/" + "directory-with-a-deliberately-long-name/".repeat(12),
+    archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    updated: Date.now(),
+  }
+
+  await mockArchivedPage(page, [archived])
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator('[data-slot="list-item"]')
+
+  await expect(row).toContainText("Nueva sesión")
+})
+
+test("uses archived rather than updated time for a visible localized timestamp", async () => {
+  const archived = {
+    id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+    title: "Archived timestamp source",
+    directory: "/workspace/archive-time",
+    archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    updated: Date.now(),
+  }
+
+  await mockArchivedPage(page, [archived])
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator('[data-slot="list-item"]')
+
+  await expect(row).toContainText("hace 2 d")
+  await expect(row).not.toContainText("Justo ahora")
+})
+
+test("keeps the archived list inset and its row contents within narrow and desktop dialogs", async () => {
+  const archived = {
+    id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+    title: "Archived session with a sufficiently descriptive title",
+    directory: "/workspace/" + "overflow-sensitive-directory/".repeat(16),
+    archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+  }
+
+  await mockArchivedPage(page, [archived])
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator('[data-slot="list-item"]').filter({ hasText: archived.title })
+
+  for (const width of [320, 375, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(row).toBeVisible()
+
+    const geometry = await row.evaluate((element) => {
+      const row = element.getBoundingClientRect()
+      const dialog = element.closest('[role="dialog"]')!.getBoundingClientRect()
+      const overflow = document.documentElement.scrollWidth > document.documentElement.clientWidth
+
+      return { inset: row.left - dialog.left, right: dialog.right - row.right, overflow }
+    })
+
+    expect(geometry.inset).toBeGreaterThanOrEqual(12)
+    expect(geometry.right).toBeGreaterThanOrEqual(12)
+    expect(geometry.overflow).toBe(false)
+  }
+})
+
+test("retains epoch-zero rows without a fabricated archived date", async () => {
+  const archived = {
+    id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+    title: "Epoch zero archive",
+    directory: "/workspace/epoch-zero",
+    archived: 0,
+  }
+
+  await mockArchivedPage(page, [archived])
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator('[data-slot="list-item"]').filter({ hasText: archived.title })
+
+  await expect(row).toBeVisible()
+  await expect(row).not.toContainText(/hace \d+ [mhd]/)
+})
+
+test("restores the keyboard-selected real archived session while search and pager remain available", async () => {
+  const session = await createSession(page, "Keyboard restore archive")
+  await openSession(page, session.id, session.title)
+  await archiveThroughMenu(page, session.id)
+
+  const dialog = await openArchivedSessions(page)
+  const search = dialog.getByPlaceholder("Buscar en esta página")
+  await expect(search).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Página anterior" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Página siguiente" })).toBeVisible()
+  await search.fill("Keyboard restore archive")
+
+  const row = dialog.locator('[data-slot="list-item"]').filter({ hasText: session.title })
+  await search.press("ArrowDown")
+  await expect(row).toHaveAttribute("data-active", "true")
+  await search.press("Enter")
+  await expect(page).toHaveURL(new RegExp(`/session/${session.id}$`))
+  await expect(dialog).toBeHidden()
+  await expect.poll(async () => (await getSession(page, session.id)).time?.archived ?? null).toBeNull()
+})
+
+async function connect(page: Page) {
+  await page.goto(origin, { waitUntil: "domcontentloaded" })
+  await page.locator("#server-connect-link").click()
+  await page.locator('[data-component="server-connect-method"] button').click()
+  await page.locator("#server-connect-url").fill(origin)
+  await page.locator("#server-connect-password").fill(password)
+  await page.locator('[data-component="connect-server"] button[type="submit"]').click()
+  await expect(page.locator('[data-component="connect-server"]')).toBeHidden()
+}
+
+async function createSession(page: Page, title: string, directory = path.join(artifacts, "workspace")) {
+  return page.evaluate(
+    async ({ authorization, title, directory }) => {
+      const response = await fetch("/api/session", {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ title, location: { directory } }),
+      })
+
+      const payload = await response.json()
+
+      return payload.data ?? payload
+    },
+    { authorization, title, directory },
+  )
+}
+
+async function openSession(page: Page, id: string, title: string) {
+  await page.goto(origin, { waitUntil: "domcontentloaded" })
+  await page.locator('[data-component="home-session-row"]').filter({ hasText: title }).click()
+  await expect(page).toHaveURL(new RegExp(`/session/${id}$`))
+  await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
+}
+
+async function archiveThroughMenu(page: Page, sessionID: string) {
+  const trigger = page.locator("[data-session-title]").getByRole("button", { name: /opciones|more options/i })
+  await trigger.click()
+  await page.locator(".session-options-menu").getByRole("menuitem", { name: "Archivar", exact: true }).click()
+  await expect(page).not.toHaveURL(new RegExp(`/session/${sessionID}$`))
+}
+
+async function openArchivedSessions(page: Page) {
+  if (!new URL(page.url()).pathname.includes("/session/")) {
+    const session = await createSession(page, `archive-command-host-${randomUUID()}`)
+    await openSession(page, session.id, session.title)
+  }
+
+  await page.keyboard.press("ControlOrMeta+Shift+P")
+  const palette = page.locator(".command-palette")
+  await expect(palette).toBeVisible()
+  await palette.locator("input").fill("archi")
+  await palette.getByText("Explorar sesiones archivadas", { exact: true }).click()
+  await expect(palette).toBeHidden()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+
+  return dialog
+}
+
+async function getSession(page: Page, id: string) {
+  return page.evaluate(
+    async ({ authorization, id }) => {
+      const response = await fetch(`/api/session/${id}`, { headers: { Authorization: authorization } })
+
+      return (await response.json()).data
+    },
+    { authorization, id },
+  )
+}
+
+async function mockArchivedPage(
+  page: Page,
+  sessions: Array<{ id: string; title: string; directory: string; archived: number; updated?: number }>,
+) {
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      return route.fulfill({
+        json: {
+          data: sessions.map((session) => ({
+            id: session.id,
+            title: session.title,
+            location: { directory: session.directory },
+            time: { archived: session.archived, updated: session.updated ?? session.archived },
+          })),
+          cursor: {},
+        },
+      })
+    },
+  )
+}

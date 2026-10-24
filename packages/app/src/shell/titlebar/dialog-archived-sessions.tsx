@@ -6,6 +6,7 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
+import { getRelativeTime } from "@/shell/time"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
 import { selectArchivedSessionsView } from "./archived-sessions-view"
 
@@ -96,6 +97,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
           }
         >
           <List
+            class="px-3"
             items={(filter) => [...model.search(filter)]}
             key={(session) => session.id}
             filterKeys={["title", "location.directory"]}
@@ -106,9 +108,29 @@ function ArchivedSessionsDialog(props: { server: string }) {
               if (session) void model.restore(session.id)
             }}
           >
-            {(session) => (
-              <span aria-disabled={restoringID() === session.id}>{session.title ?? session.location.directory}</span>
-            )}
+            {(session) => {
+              const archived = session.time.archived ?? 0
+
+              return (
+                <span class="flex w-full min-w-0 flex-col gap-1 md:flex-row md:items-center">
+                  <span class="min-w-0 flex-1">
+                    <span class="block min-w-0 truncate text-v2-text-text-base [font-weight:530]">
+                      {session.title || language.t("command.session.new")}
+                    </span>
+                    <span class="block min-w-0 truncate text-v2-text-text-muted [font-weight:440]" dir="ltr">
+                      {session.location.directory}
+                    </span>
+                  </span>
+                  <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
+                    {(archived) => (
+                      <span class="shrink-0 whitespace-nowrap text-v2-text-text-muted [font-weight:440] md:text-right">
+                        {getRelativeTime(new Date(archived()).toISOString(), language.t)}
+                      </span>
+                    )}
+                  </Show>
+                </span>
+              )
+            }}
           </List>
           <div class="mt-3 flex justify-end gap-2">
             <Button
