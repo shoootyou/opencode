@@ -2,6 +2,7 @@ import { createSignal, onCleanup, Show } from "solid-js"
 import { Dialog, DialogBody, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
 import { List } from "@opencode/ui/list"
 import { Button } from "@opencode/ui/button"
+import { Icon } from "@opencode/ui/icon"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -110,18 +111,19 @@ function ArchivedSessionsDialog(props: { server: string }) {
             const archived = session.time.archived ?? 0
 
             return (
-              <span class="flex w-full min-w-0 flex-col gap-1 md:flex-row md:items-center">
-                <span class="min-w-0 flex-1">
-                  <span class="block min-w-0 truncate text-v2-text-text-base [font-weight:530]">
+              <span class="flex w-full min-w-0 items-center gap-2 text-start">
+                <Icon name="bubble-5" size="small" class="shrink-0 text-v2-text-text-muted" aria-hidden="true" />
+                <span class="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
+                  <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530]">
                     {session.title || language.t("command.session.new")}
                   </span>
-                  <span class="block min-w-0 truncate text-v2-text-text-muted [font-weight:440]" dir="ltr">
+                  <span class="min-w-0 flex-1 truncate leading-4 text-v2-text-text-muted [font-weight:440]" dir="ltr">
                     {session.location.directory}
                   </span>
                 </span>
                 <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
                   {(archived) => (
-                    <span class="shrink-0 whitespace-nowrap text-v2-text-text-muted [font-weight:440] md:text-right">
+                    <span class="shrink-0 whitespace-nowrap text-end text-v2-text-text-muted [font-weight:440]">
                       {getRelativeTime(new Date(archived()).toISOString(), language.t)}
                     </span>
                   )}

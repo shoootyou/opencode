@@ -4,10 +4,13 @@
  * @behavior
  *   - Shows each archived row's real title (or the localized untitled label), truncated directory, and relative archived time.
  *   - Keeps rows inset by 12px and readable without horizontal overflow at 320px, 375px, and desktop widths.
+ *   - Renders a decorative native session icon, start-aligned title/path text, and an independently right-aligned date.
+ *   - Keeps icon, title, directory, and date on one desktop row; narrow rows stack only title/path in the left column.
  *   - Restores the keyboard-selected archived session and retains paging and search controls.
  * @edge-cases
  *   - A timestamp of 0 remains a row but intentionally has no date.
  *   - The displayed date derives from time.archived, not time.updated or time.created.
+ *   - Long titles and directories truncate without viewport overflow while the date remains a separate right column.
  * @rerun PLAYWRIGHT_BASE_URL=http://127.0.0.1:9 OPENCODE_COMPILED_BINARY=<rebuilt binary> playwright test archived-sessions-compiled-serve.spec.ts
  * @see ./dialog-archived-sessions.tsx
  */
@@ -302,6 +305,145 @@ test("keeps the archived list inset and its row contents within narrow and deskt
     expect(geometry.right).toBeGreaterThanOrEqual(12)
     expect(geometry.overflow).toBe(false)
   }
+})
+
+test("aligns archived-session icon, text, and date as a left-led list row at every viewport", async () => {
+  const archived = [
+    {
+      id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+      title: "Short archive",
+      directory: "/workspace/short",
+      archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    },
+    {
+      id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+      title:
+        "An intentionally long archived session title that must truncate instead of centering or pushing the date away",
+      directory: "/workspace/" + "long-directory-segment/".repeat(18),
+      archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    },
+  ]
+
+  await mockArchivedPage(page, archived)
+
+  const dialog = await openArchivedSessions(page)
+  const rows = archived.map((session) => dialog.locator(`[data-slot="list-item"][data-key="${session.id}"]`))
+
+  for (const row of rows) await expect(row).toBeVisible()
+
+  const measurements = []
+
+  for (const width of [1440, 375, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    measurements.push(
+      await Promise.all(
+        rows.map((row, index) =>
+          row.evaluate((element, session) => {
+            const leaf = (value: string) =>
+              [...element.querySelectorAll<HTMLElement>("span")].find(
+                (candidate) =>
+                  candidate.textContent === value &&
+                  ![...candidate.children].some((child) => child.textContent === value),
+              )
+
+            const box = (target: HTMLElement | SVGElement | undefined) => {
+              if (!target)
+                return { bottom: Number.NaN, left: Number.NaN, present: false, right: Number.NaN, top: Number.NaN }
+
+              const { bottom, left, right, top } = target.getBoundingClientRect()
+
+              return { bottom, left, present: true, right, top }
+            }
+
+            const title = leaf(session.title)!
+
+            const directory = leaf(session.directory)!
+
+            const time = [...element.querySelectorAll<HTMLElement>("span")].find((candidate) =>
+              /^hace \d+ d$/.test(candidate.textContent ?? ""),
+            )!
+
+            const row = element.getBoundingClientRect()
+
+            return {
+              row: { left: row.left, right: row.right },
+              icon: box(element.querySelector<SVGElement>('svg[aria-hidden="true"]') ?? undefined),
+              title: {
+                ...box(title),
+                textAlign: getComputedStyle(title).textAlign,
+                truncated: title.scrollWidth > title.clientWidth,
+              },
+              directory: {
+                ...box(directory),
+                textAlign: getComputedStyle(directory).textAlign,
+                truncated: directory.scrollWidth > directory.clientWidth,
+              },
+              time: box(time),
+              overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            }
+          }, archived[index]),
+        ),
+      ),
+    )
+  }
+
+  // Keep the failing current-layout evidence after all geometry probes, even when an assertion below fails.
+  await page.screenshot({ path: path.join(artifactRoot, "baseline-centered-current.png"), fullPage: true })
+
+  const [desktop, mobile375, mobile320] = measurements
+  const violations: string[] = []
+
+  for (const [index, viewport] of measurements.entries()) {
+    const label = ["desktop", "mobile-375", "mobile-320"][index]
+
+    if (viewport.length !== archived.length) violations.push(`${label}: missing archived rows`)
+
+    if (!viewport.every((row) => row.icon.present && row.icon.left < row.title.left))
+      violations.push(`${label}: missing left icon`)
+
+    if (!viewport.every((row) => row.title.textAlign === "start" && row.directory.textAlign === "start")) {
+      violations.push(`${label}: centered text (${viewport.map((row) => row.title.textAlign).join(", ")})`)
+    }
+
+    if (!viewport.every((row) => !row.overflow)) violations.push(`${label}: viewport overflow`)
+  }
+
+  if (Math.abs(desktop[0].title.left - desktop[1].title.left) > 1) violations.push("desktop: title left edges differ")
+
+  if (!desktop.every((row) => Math.abs(row.title.top - row.directory.top) <= 4)) {
+    violations.push("desktop: title and directory are stacked")
+  }
+
+  if (!desktop.every((row) => Math.abs(row.title.top - row.time.top) <= 8)) {
+    violations.push("desktop: date is not on the text row")
+  }
+
+  if (!desktop.every((row) => row.time.left >= row.directory.right && row.time.right <= row.row.right)) {
+    violations.push("desktop: date is not fixed right of text")
+  }
+
+  if (Math.abs(desktop[0].time.right - desktop[1].time.right) > 1) violations.push("desktop: date right edges differ")
+
+  for (const mobile of [mobile375, mobile320]) {
+    const label = mobile === mobile375 ? "mobile-375" : "mobile-320"
+
+    if (!mobile.every((row) => row.title.bottom <= row.directory.top))
+      violations.push(`${label}: title/path do not stack`)
+
+    if (!mobile.every((row) => row.directory.left === row.title.left))
+      violations.push(`${label}: title/path left edges differ`)
+
+    if (!mobile.every((row) => row.time.left >= row.directory.right && row.time.right <= row.row.right)) {
+      violations.push(`${label}: date is centered or overlaps text`)
+    }
+
+    if (Math.abs(mobile[0].time.right - mobile[1].time.right) > 1) violations.push(`${label}: date right edges differ`)
+
+    if (!mobile[1].title.truncated || !mobile[1].directory.truncated)
+      violations.push(`${label}: long text does not truncate`)
+  }
+
+  expect(violations).toEqual([])
 })
 
 test("retains epoch-zero rows without a fabricated archived date", async () => {
