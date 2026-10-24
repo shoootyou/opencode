@@ -114,7 +114,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
               <span class="flex w-full min-w-0 items-center gap-2 text-start">
                 <Icon name="bubble-5" size="small" class="shrink-0 text-v2-text-text-muted" aria-hidden="true" />
                 <span class="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
-                  <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530]">
+                  <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530] md:max-w-[50%]">
                     {session.title || language.t("command.session.new")}
                   </span>
                   <span class="min-w-0 flex-1 truncate leading-4 text-v2-text-text-muted [font-weight:440]" dir="ltr">

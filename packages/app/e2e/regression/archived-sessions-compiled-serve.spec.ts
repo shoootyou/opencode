@@ -11,6 +11,7 @@
  *   - A timestamp of 0 remains a row but intentionally has no date.
  *   - The displayed date derives from time.archived, not time.updated or time.created.
  *   - Long titles and directories truncate without viewport overflow while the date remains a separate right column.
+ *   - An extremely long unbroken title cannot collapse a non-empty directory below a readable 48px allocation.
  * @rerun PLAYWRIGHT_BASE_URL=http://127.0.0.1:9 OPENCODE_COMPILED_BINARY=<rebuilt binary> playwright test archived-sessions-compiled-serve.spec.ts
  * @see ./dialog-archived-sessions.tsx
  */
@@ -444,6 +445,67 @@ test("aligns archived-session icon, text, and date as a left-led list row at eve
   }
 
   expect(violations).toEqual([])
+})
+
+test("keeps title and directory legible when an unbroken title competes for desktop row space", async () => {
+  const archived = {
+    id: `ses_archive_${randomUUID().replaceAll("-", "")}`,
+    title: `Archived${"\u00a0title".repeat(40)}`,
+    directory: "/workspace/" + "nonempty-directory-segment/".repeat(12),
+    archived: Date.now() - 2 * 24 * 60 * 60 * 1000,
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockArchivedPage(page, [archived])
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator(`[data-slot="list-item"][data-key="${archived.id}"]`)
+  await expect(row).toBeVisible()
+
+  const geometry = await row.evaluate((element, session) => {
+    const leaf = (value: string) =>
+      [...element.querySelectorAll<HTMLElement>("span")].find(
+        (candidate) =>
+          candidate.textContent === value && ![...candidate.children].some((child) => child.textContent === value),
+      )!
+
+    const title = leaf(session.title)
+
+    const directory = leaf(session.directory)
+
+    const time = [...element.querySelectorAll<HTMLElement>("span")].find((candidate) =>
+      /^hace \d+ d$/.test(candidate.textContent ?? ""),
+    )!
+
+    const icon = element.querySelector<SVGElement>('svg[aria-hidden="true"]')!
+
+    const box = (target: Element) => {
+      const { bottom, left, right, top, width } = target.getBoundingClientRect()
+
+      return { bottom, left, right, top, width }
+    }
+
+    return {
+      date: box(time),
+      directory: { ...box(directory), truncated: directory.scrollWidth > directory.clientWidth },
+      icon: box(icon),
+      row: box(element),
+      title: { ...box(title), truncated: title.scrollWidth > title.clientWidth },
+    }
+  }, archived)
+
+  // 48px is the minimum useful allocation for a path fragment, not a proportional layout target.
+  expect(geometry.title.width).toBeGreaterThanOrEqual(48)
+  expect(
+    geometry.directory.width,
+    `title=${geometry.title.width}px directory=${geometry.directory.width}px`,
+  ).toBeGreaterThanOrEqual(48)
+  expect(geometry.title.truncated).toBe(true)
+  expect(geometry.directory.truncated).toBe(true)
+  expect(geometry.icon.left).toBeLessThan(geometry.title.left)
+  expect(geometry.title.right).toBeLessThanOrEqual(geometry.directory.left)
+  expect(geometry.directory.right).toBeLessThanOrEqual(geometry.date.left)
+  expect(geometry.date.right).toBeLessThanOrEqual(geometry.row.right)
 })
 
 test("retains epoch-zero rows without a fabricated archived date", async () => {
