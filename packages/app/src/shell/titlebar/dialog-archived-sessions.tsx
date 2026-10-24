@@ -73,6 +73,14 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const emptyMessage = () =>
     language.t(view().message === "no-match" ? "dialog.archivedSessions.noMatches" : "dialog.archivedSessions.empty")
 
+  const listMessage = () => {
+    if (view().message === "loading") return language.t("dialog.archivedSessions.loading")
+
+    if (view().message === "error") return language.t("dialog.archivedSessions.error")
+
+    return emptyMessage()
+  }
+
   return (
     <Dialog size="large">
       <DialogHeader>
@@ -82,56 +90,52 @@ function ArchivedSessionsDialog(props: { server: string }) {
         />
       </DialogHeader>
       <DialogBody>
-        <Show
-          when={state().status === "ready"}
-          fallback={
-            <div>
-              <Show when={view().message === "loading"}>{language.t("dialog.archivedSessions.loading")}</Show>
-              <Show when={view().message === "error"}>
-                <div>{language.t("dialog.archivedSessions.error")}</div>
-                <button type="button" onClick={() => void model.load()}>
-                  {language.t("common.retry")}
-                </button>
-              </Show>
-            </div>
-          }
-        >
-          <List
-            class="px-3"
-            items={(filter) => [...model.search(filter)]}
-            key={(session) => session.id}
-            filterKeys={["title", "location.directory"]}
-            search={{ placeholder: language.t("dialog.archivedSessions.search.placeholder"), autofocus: true }}
-            emptyMessage={emptyMessage()}
-            onFilter={setFilter}
-            onSelect={(session) => {
-              if (session) void model.restore(session.id)
-            }}
-          >
-            {(session) => {
-              const archived = session.time.archived ?? 0
+        <List
+          class="px-3"
+          items={(filter) => {
+            version()
 
-              return (
-                <span class="flex w-full min-w-0 flex-col gap-1 md:flex-row md:items-center">
-                  <span class="min-w-0 flex-1">
-                    <span class="block min-w-0 truncate text-v2-text-text-base [font-weight:530]">
-                      {session.title || language.t("command.session.new")}
-                    </span>
-                    <span class="block min-w-0 truncate text-v2-text-text-muted [font-weight:440]" dir="ltr">
-                      {session.location.directory}
-                    </span>
+            return [...model.search(filter)]
+          }}
+          key={(session) => session.id}
+          filterKeys={["title", "location.directory"]}
+          search={{ placeholder: language.t("dialog.archivedSessions.search.placeholder"), autofocus: true }}
+          emptyMessage={listMessage()}
+          onFilter={setFilter}
+          onSelect={(session) => {
+            if (session) void model.restore(session.id)
+          }}
+        >
+          {(session) => {
+            const archived = session.time.archived ?? 0
+
+            return (
+              <span class="flex w-full min-w-0 flex-col gap-1 md:flex-row md:items-center">
+                <span class="min-w-0 flex-1">
+                  <span class="block min-w-0 truncate text-v2-text-text-base [font-weight:530]">
+                    {session.title || language.t("command.session.new")}
                   </span>
-                  <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
-                    {(archived) => (
-                      <span class="shrink-0 whitespace-nowrap text-v2-text-text-muted [font-weight:440] md:text-right">
-                        {getRelativeTime(new Date(archived()).toISOString(), language.t)}
-                      </span>
-                    )}
-                  </Show>
+                  <span class="block min-w-0 truncate text-v2-text-text-muted [font-weight:440]" dir="ltr">
+                    {session.location.directory}
+                  </span>
                 </span>
-              )
-            }}
-          </List>
+                <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
+                  {(archived) => (
+                    <span class="shrink-0 whitespace-nowrap text-v2-text-text-muted [font-weight:440] md:text-right">
+                      {getRelativeTime(new Date(archived()).toISOString(), language.t)}
+                    </span>
+                  )}
+                </Show>
+              </span>
+            )
+          }}
+        </List>
+        <Show when={view().message === "error"}>
+          <button type="button" onClick={() => void model.load()}>
+            {language.t("common.retry")}
+          </button>
+        </Show>
+        <Show when={state().status === "ready"}>
           <div class="mt-3 flex justify-end gap-2">
             <Button
               variant="ghost"

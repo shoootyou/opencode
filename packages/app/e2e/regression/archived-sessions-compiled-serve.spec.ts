@@ -12,9 +12,10 @@
  * @see ./dialog-archived-sessions.tsx
  */
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test"
+import { Schema } from "effect"
 import { randomBytes, randomUUID } from "node:crypto"
 import { spawn, type ChildProcess } from "node:child_process"
-import { mkdir, rm } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import path from "node:path"
 
 test.use({ serviceWorkers: "block" })
@@ -23,7 +24,7 @@ const repo = path.resolve(import.meta.dirname, "../../../..")
 
 const binary = process.env.OPENCODE_COMPILED_BINARY
 
-const artifacts = process.env.OPENCODE_ARCHIVE_E2E_ARTIFACTS ?? path.join(repo, ".debug", "plan373-e8-red")
+const artifactRoot = process.env.OPENCODE_ARCHIVE_E2E_ARTIFACTS ?? path.join(repo, ".debug", "plan373-e9")
 
 const browserRuntime = path.join(repo, ".debug", "browser-runtime")
 
@@ -37,15 +38,17 @@ const executablePath = path.join(
   "chrome-headless-shell",
 )
 
-const port = 43173
-
-const origin = `http://127.0.0.1:${port}`
-
 const password = randomBytes(32).toString("hex")
 
 const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
 
+const ServerIdentity = Schema.Struct({ pid: Schema.Int })
+
 let server: ChildProcess
+
+let serverState: string
+
+let origin: string
 
 let browser: Browser
 
@@ -56,43 +59,129 @@ let page: Page
 test.skip(!binary, "set OPENCODE_COMPILED_BINARY to a rebuilt local opencode binary")
 
 test.beforeAll(async () => {
-  await rm(artifacts, { recursive: true, force: true })
-  await mkdir(path.join(artifacts, "workspace"), { recursive: true })
+  try {
+    serverState = await createServerState()
+    await mkdir(path.join(serverState, "workspace"), { recursive: true })
+    server = spawn(binary!, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
+      cwd: path.join(serverState, "workspace"),
+      env: serverEnvironment(serverState),
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    origin = await serverOrigin(server)
+    await expect.poll(() => ownedServerReady(server, origin), { timeout: 30_000 }).toBe(true)
+    browser = await launchBrowser()
+  } catch (cause) {
+    await cleanup()
+    throw cause
+  }
+})
 
-  server = spawn(binary!, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-    cwd: path.join(artifacts, "workspace"),
-    env: {
-      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-      HOME: path.join(artifacts, "server-home"),
-      XDG_DATA_HOME: path.join(artifacts, "server-state"),
-      XDG_CONFIG_HOME: path.join(artifacts, "server-config"),
-      XDG_CACHE_HOME: path.join(artifacts, "server-cache"),
-      XDG_STATE_HOME: path.join(artifacts, "server-state"),
-      XDG_RUNTIME_DIR: path.join(artifacts, "server-runtime"),
-      TMPDIR: path.join(artifacts, "server-tmp"),
-      OPENCODE_CONFIG_DIR: path.join(artifacts, "server-config", "opencode"),
-      OPENCODE_CONFIG_PROJECT_DISABLE: "1",
-      OPENCODE_DB: path.join(artifacts, "server-state", "opencode.db"),
-      OPENCODE_PASSWORD: password,
-      LANG: "C.UTF-8",
-    },
-    stdio: "ignore",
+test.afterAll(cleanup)
+
+async function cleanup() {
+  try {
+    await browser?.close()
+  } finally {
+    await stopServer(server)
+
+    if (serverState) await rm(serverState, { recursive: true, force: true })
+  }
+}
+
+async function createServerState() {
+  if (!process.env.OPENCODE_ARCHIVE_E2E_ARTIFACTS) await mkdir(artifactRoot, { recursive: true })
+
+  const debugRoot = await realpath(path.join(repo, ".debug"))
+  const requestedRoot = path.resolve(artifactRoot)
+  const resolvedRoot = await realpath(requestedRoot)
+  const rootStat = await lstat(requestedRoot)
+
+  if (
+    rootStat.isSymbolicLink() ||
+    !rootStat.isDirectory() ||
+    resolvedRoot === debugRoot ||
+    !resolvedRoot.startsWith(`${debugRoot}${path.sep}`)
+  )
+    throw new Error("OPENCODE_ARCHIVE_E2E_ARTIFACTS must be a non-symlink directory below .debug")
+
+  return mkdtemp(path.join(resolvedRoot, "compiled-serve-"))
+}
+
+function serverEnvironment(state: string) {
+  return {
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    HOME: path.join(state, "server-home"),
+    XDG_DATA_HOME: path.join(state, "server-state"),
+    XDG_CONFIG_HOME: path.join(state, "server-config"),
+    XDG_CACHE_HOME: path.join(state, "server-cache"),
+    XDG_STATE_HOME: path.join(state, "server-state"),
+    XDG_RUNTIME_DIR: path.join(state, "server-runtime"),
+    TMPDIR: path.join(state, "server-tmp"),
+    OPENCODE_CONFIG_DIR: path.join(state, "server-config", "opencode"),
+    OPENCODE_CONFIG_PROJECT_DISABLE: "1",
+    OPENCODE_DB: path.join(state, "server-state", "opencode.db"),
+    OPENCODE_PASSWORD: password,
+    LANG: "C.UTF-8",
+  }
+}
+
+async function serverOrigin(child: ChildProcess) {
+  return new Promise<string>((resolve, reject) => {
+    const timeout = AbortSignal.timeout(30_000)
+    let output = ""
+
+    const finish = (callback: () => void) => {
+      child.stdout?.off("data", onData)
+      child.off("error", onError)
+      child.off("exit", onExit)
+      timeout.removeEventListener("abort", onTimeout)
+      callback()
+    }
+
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString()
+
+      const match = output.match(/server listening on (http:\/\/\S+)/)
+
+      if (!match) return
+
+      const url = new URL(match[1])
+
+      if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port || url.pathname !== "/")
+        return finish(() => reject(new Error("Compiled server announced a non-loopback URL")))
+
+      finish(() => resolve(url.origin))
+    }
+
+    const onError = (cause: Error) => finish(() => reject(cause))
+
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+      finish(() => reject(new Error(`Compiled server exited before listening (${code ?? signal ?? "unknown"})`)))
+
+    const onTimeout = () => finish(() => reject(new Error("Compiled server did not announce a listener")))
+
+    child.stdout?.on("data", onData)
+    child.once("error", onError)
+    child.once("exit", onExit)
+    timeout.addEventListener("abort", onTimeout, { once: true })
   })
+}
 
-  await expect
-    .poll(
-      async () => {
-        try {
-          return (await fetch(origin)).ok
-        } catch {
-          return false
-        }
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(true)
+async function ownedServerReady(child: ChildProcess, url: string) {
+  const response = await fetch(new URL("/api/info", url), {
+    headers: { Authorization: authorization },
+    signal: AbortSignal.timeout(1_000),
+  }).catch(() => undefined)
 
-  browser = await chromium.launch({
+  if (!response?.ok) return false
+
+  const info = await Schema.decodeUnknownPromise(ServerIdentity)(await response.json()).catch(() => undefined)
+
+  return info?.pid === child.pid
+}
+
+async function launchBrowser() {
+  return chromium.launch({
     headless: true,
     chromiumSandbox: false,
     executablePath,
@@ -108,13 +197,29 @@ test.beforeAll(async () => {
       LANG: "C.UTF-8",
     },
   })
-})
+}
 
-test.afterAll(async () => {
-  await browser?.close()
+async function stopServer(child: ChildProcess | undefined) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
 
-  if (server?.exitCode === null) server.kill("SIGTERM")
-})
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()))
+  child.kill("SIGTERM")
+
+  if (await exitsWithin(exited, 5_000)) return
+
+  child.kill("SIGKILL")
+
+  if (!(await exitsWithin(exited, 5_000))) throw new Error("Compiled server did not exit after SIGKILL")
+}
+
+async function exitsWithin(exited: Promise<void>, milliseconds: number) {
+  const timeout = AbortSignal.timeout(milliseconds)
+
+  return Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolve) => timeout.addEventListener("abort", () => resolve(false), { once: true })),
+  ])
+}
 
 test.beforeEach(async () => {
   context = await browser.newContext({
@@ -221,17 +326,26 @@ test("restores the keyboard-selected real archived session while search and page
   await openSession(page, session.id, session.title)
   await archiveThroughMenu(page, session.id)
 
-  const dialog = await openArchivedSessions(page)
+  let dialog = await openArchivedSessions(page)
   const search = dialog.getByPlaceholder("Buscar en esta página")
-  await expect(search).toBeVisible()
+  await expect(search).toBeFocused()
+  await search.press("Escape")
+  await expect(dialog).toBeHidden()
+
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
+  dialog = await openArchivedSessions(page)
+  const reopenedSearch = dialog.getByPlaceholder("Buscar en esta página")
+  await expect(reopenedSearch).toBeFocused()
+  await expect(reopenedSearch).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Página anterior" })).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Página siguiente" })).toBeVisible()
-  await search.fill("Keyboard restore archive")
+  await reopenedSearch.fill("Keyboard restore archive")
 
   const row = dialog.locator('[data-slot="list-item"]').filter({ hasText: session.title })
-  await search.press("ArrowDown")
+  await reopenedSearch.press("ArrowDown")
   await expect(row).toHaveAttribute("data-active", "true")
-  await search.press("Enter")
+  await reopenedSearch.press("Enter")
   await expect(page).toHaveURL(new RegExp(`/session/${session.id}$`))
   await expect(dialog).toBeHidden()
   await expect.poll(async () => (await getSession(page, session.id)).time?.archived ?? null).toBeNull()
@@ -247,7 +361,7 @@ async function connect(page: Page) {
   await expect(page.locator('[data-component="connect-server"]')).toBeHidden()
 }
 
-async function createSession(page: Page, title: string, directory = path.join(artifacts, "workspace")) {
+async function createSession(page: Page, title: string, directory = path.join(serverState, "workspace")) {
   return page.evaluate(
     async ({ authorization, title, directory }) => {
       const response = await fetch("/api/session", {
