@@ -55,7 +55,7 @@ test("preserves the active key and group object for opted-in unchanged-filter ap
     dispose = rootDispose
     const [items, set] = createSignal([{ id: "first" }, { id: "third" }])
     setItems = set
-    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
+    list = useFilteredList({ items, key: (item: { id: string }) => item.id, preserveActiveKey: true } as unknown as Parameters<
       typeof useFilteredList<{ id: string }>
     >[0])
   })

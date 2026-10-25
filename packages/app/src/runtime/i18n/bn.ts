@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "আর্কাইভ থেকে সরান",
   "command.session.archive": "আর্কাইভ করুন সেশন",
   "command.session.archive.description": "আর্কাইভ করুন সেশন",
@@ -14,9 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "আর্কাইভ করা সেশন",
   "command.session.archivedBrowse.description": "সেশন পুনরুদ্ধার করুন সেশন",
   "dialog.archivedSessions.title": "আর্কাইভ করা সেশন",
-  "dialog.archivedSessions.description": "সেশন পুনরুদ্ধার করুন সেশন",
-  "dialog.archivedSessions.empty": "আর্কাইভ করা সেশন",
-  "dialog.archivedSessions.noMatches": "আর্কাইভ করা সেশন",
   "dialog.archivedSessions.error": "আর্কাইভ করা সেশন লোড করা যায়নি",
   "dialog.archivedSessions.loading": "আর্কাইভ করা সেশন লোড হচ্ছে…",
   "session.archive.refreshFailed": "সেশন আপডেট হয়েছে, কিন্তু এর বিবরণ রিফ্রেশ করা যায়নি।",

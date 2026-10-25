@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ນຳອອກຈາກຄັງ",
   "command.session.archive": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",
   "command.session.archive.description": "ເກັບເຂົ້າຄັງ ເຊສຊັນ",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
   "command.session.archivedBrowse.description": "ກູ້ຄືນເຊສຊັນ ເຊສຊັນ",
   "dialog.archivedSessions.title": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
-  "dialog.archivedSessions.description": "ກູ້ຄືນເຊສຊັນ ເຊສຊັນ",
-  "dialog.archivedSessions.empty": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
-  "dialog.archivedSessions.noMatches": "ເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
   "dialog.archivedSessions.error": "ບໍ່ສາມາດໂຫຼດເຊສຊັນທີ່ເກັບເຂົ້າຄັງ",
   "dialog.archivedSessions.loading": "ກຳລັງໂຫຼດເຊສຊັນທີ່ເກັບເຂົ້າຄັງ…",
   "session.archive.refreshFailed": "ເຊສຊັນຖືກອັບເດດແລ້ວ ແຕ່ບໍ່ສາມາດໂຫຼດລາຍລະອຽດໃໝ່ໄດ້។",

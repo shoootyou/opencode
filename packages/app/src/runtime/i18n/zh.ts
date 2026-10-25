@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "搜索此页面",
-  "dialog.archivedSessions.previousPage": "上一页",
-  "dialog.archivedSessions.nextPage": "下一页",
   "common.unarchive": "取消归档",
   "command.session.archive": "归档会话",
   "command.session.archive.description": "归档当前会话",
@@ -14,9 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "浏览已归档会话",
   "command.session.archivedBrowse.description": "查找并恢复已归档会话",
   "dialog.archivedSessions.title": "已归档会话",
-  "dialog.archivedSessions.description": "选择一个会话以恢复并打开其标签页。",
-  "dialog.archivedSessions.empty": "未找到已归档会话",
-  "dialog.archivedSessions.noMatches": "没有已归档会话与您的搜索匹配",
   "dialog.archivedSessions.error": "无法加载已归档会话",
   "dialog.archivedSessions.loading": "正在加载已归档会话…",
   "session.archive.refreshFailed": "会话已更新，但无法刷新其详细信息。",

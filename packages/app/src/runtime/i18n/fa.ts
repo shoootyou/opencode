@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "خارج کردن از بایگانی",
   "command.session.archive": "بایگانی نشست",
   "command.session.archive.description": "بایگانی نشست",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "نشست‌های بایگانی‌شده",
   "command.session.archivedBrowse.description": "بازیابی نشست نشست",
   "dialog.archivedSessions.title": "نشست‌های بایگانی‌شده",
-  "dialog.archivedSessions.description": "بازیابی نشست نشست",
-  "dialog.archivedSessions.empty": "نشست‌های بایگانی‌شده",
-  "dialog.archivedSessions.noMatches": "نشست‌های بایگانی‌شده",
   "dialog.archivedSessions.error": "نشست‌های بایگانی‌شده بارگیری نشدند",
   "dialog.archivedSessions.loading": "در حال بارگیری نشست‌های بایگانی‌شده…",
   "session.archive.refreshFailed": "نشست به‌روزرسانی شد، اما جزئیات آن تازه‌سازی نشد.",

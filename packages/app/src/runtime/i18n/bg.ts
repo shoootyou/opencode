@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Възстанови от архив",
   "command.session.archive": "Архивирай сесия",
   "command.session.archive.description": "Архивирай сесия",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Архивирани сесии",
   "command.session.archivedBrowse.description": "Възстанови сесия сесия",
   "dialog.archivedSessions.title": "Архивирани сесии",
-  "dialog.archivedSessions.description": "Възстанови сесия сесия",
-  "dialog.archivedSessions.empty": "Архивирани сесии",
-  "dialog.archivedSessions.noMatches": "Архивирани сесии",
   "dialog.archivedSessions.error": "Архивираните сесии не могат да се заредят",
   "dialog.archivedSessions.loading": "Зареждане на архивирани сесии…",
   "session.archive.refreshFailed": "Сесията е обновена, но подробностите не могат да се опреснят.",

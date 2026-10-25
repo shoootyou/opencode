@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Arhiwden dikelt",
   "command.session.archive": "Arhiwle sessiýany",
   "command.session.archive.description": "Arhiwle sessiýany",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arhiwlenen sessiýalar",
   "command.session.archivedBrowse.description": "Sessiýany dikelt sessiýany",
   "dialog.archivedSessions.title": "Arhiwlenen sessiýalar",
-  "dialog.archivedSessions.description": "Sessiýany dikelt sessiýany",
-  "dialog.archivedSessions.empty": "Arhiwlenen sessiýalar",
-  "dialog.archivedSessions.noMatches": "Arhiwlenen sessiýalar",
   "dialog.archivedSessions.error": "Arhiwlenen sessiýalary ýüklemek bolmady",
   "dialog.archivedSessions.loading": "Arhiwlenen sessiýalar ýüklenýär…",
   "session.archive.refreshFailed": "Sessiýa täzelendi, ýöne maglumatlary täzelenmedi.",

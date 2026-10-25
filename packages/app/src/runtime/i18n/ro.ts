@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Restaurează din arhivă",
   "command.session.archive": "Arhivează sesiunea",
   "command.session.archive.description": "Arhivează sesiunea",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Sesiuni arhivate",
   "command.session.archivedBrowse.description": "Restaurează sesiunea sesiunea",
   "dialog.archivedSessions.title": "Sesiuni arhivate",
-  "dialog.archivedSessions.description": "Restaurează sesiunea sesiunea",
-  "dialog.archivedSessions.empty": "Sesiuni arhivate",
-  "dialog.archivedSessions.noMatches": "Sesiuni arhivate",
   "dialog.archivedSessions.error": "Nu s-au putut încărca sesiunile arhivate",
   "dialog.archivedSessions.loading": "Se încarcă sesiunile arhivate…",
   "session.archive.refreshFailed": "Sesiunea a fost actualizată, dar detaliile nu au putut fi reîmprospătate.",

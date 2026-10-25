@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "このページを検索",
-  "dialog.archivedSessions.previousPage": "前のページ",
-  "dialog.archivedSessions.nextPage": "次のページ",
   "common.unarchive": "アーカイブ解除",
   "command.session.archive": "セッションをアーカイブ",
   "command.session.archive.description": "現在のセッションをアーカイブ",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "アーカイブ済みセッションを参照",
   "command.session.archivedBrowse.description": "アーカイブ済みセッションを見つけて復元",
   "dialog.archivedSessions.title": "アーカイブ済みセッション",
-  "dialog.archivedSessions.description": "セッションを選択して復元し、タブを開きます。",
-  "dialog.archivedSessions.empty": "アーカイブ済みセッションが見つかりません",
-  "dialog.archivedSessions.noMatches": "検索に一致するアーカイブ済みセッションがありません",
   "dialog.archivedSessions.error": "アーカイブ済みセッションを読み込めませんでした",
   "dialog.archivedSessions.loading": "アーカイブ済みセッションを読み込み中…",
   "session.archive.refreshFailed": "セッションは更新されましたが、詳細を更新できませんでした。",

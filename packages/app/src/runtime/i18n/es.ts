@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Buscar en esta página",
-  "dialog.archivedSessions.previousPage": "Página anterior",
-  "dialog.archivedSessions.nextPage": "Página siguiente",
   "common.unarchive": "Desarchivar",
   "command.session.archive": "Archivar sesión",
   "command.session.archive.description": "Archivar la sesión actual",
@@ -10,9 +7,10 @@ export const dict = {
   "command.session.archivedBrowse": "Explorar sesiones archivadas",
   "command.session.archivedBrowse.description": "Buscar y restaurar una sesión archivada",
   "dialog.archivedSessions.title": "Sesiones archivadas",
-  "dialog.archivedSessions.description": "Selecciona una sesión de esta página para restaurarla y abrir su pestaña.",
-  "dialog.archivedSessions.empty": "No hay sesiones archivadas en esta página",
-  "dialog.archivedSessions.noMatches": "Ninguna sesión archivada de esta página coincide con tu búsqueda",
+  "dialog.archivedSessions.loadedDescription":
+    "Selecciona una sesión para restaurarla y abrir su pestaña. La búsqueda solo incluye las sesiones cargadas; desplázate hacia abajo o carga más para explorar sesiones anteriores.",
+  "dialog.archivedSessions.loadedEmpty": "No hay sesiones archivadas",
+  "dialog.archivedSessions.loadedNoMatches": "Ninguna sesión archivada cargada coincide con tu búsqueda",
   "dialog.archivedSessions.error": "No se pudieron cargar las sesiones archivadas",
   "dialog.archivedSessions.loading": "Cargando sesiones archivadas…",
   "session.archive.refreshFailed": "La sesión se actualizó, pero no se pudieron actualizar sus detalles.",

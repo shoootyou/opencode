@@ -1,7 +1,7 @@
 import fuzzysort from "fuzzysort"
 import { entries, flatMap, groupBy, map, pipe } from "remeda"
 import { createEffect, createMemo, createResource, on } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createMutable, createStore } from "solid-js/store"
 import { createList } from "solid-list"
 
 export interface FilteredListProps<T> {
@@ -15,18 +15,22 @@ export interface FilteredListProps<T> {
   skipFilter?: (item: T) => boolean
   onSelect?: (value: T | undefined, index: number) => void
   noInitialSelection?: boolean
+  preserveActiveKey?: boolean
 }
 
 export function useFilteredList<T>(props: FilteredListProps<T>) {
   const [store, setStore] = createStore<{ filter: string }>({ filter: "" })
 
-  type Group = { category: string; items: [T, ...T[]] }
+  type Group = { category: string; items: T[] }
 
   const empty: Group[] = []
+  const stableGroups = new Map<string, Group>()
+  let previousFilter: string | undefined
 
   const [grouped, { refetch }] = createResource(
     () => ({
       filter: store.filter,
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- SAFETY: items is this hook's typed synchronous-or-async source union.
       items: typeof props.items === "function" ? props.items(store.filter) : props.items,
     }),
     async ({ filter, items }) => {
@@ -42,8 +46,12 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
           const filterable = skipFilter ? x.filter((item) => !skipFilter(item)) : x
           const skipped = skipFilter ? x.filter(skipFilter) : []
 
+          // oxlint-disable-next-line anti-slop/no-runtime-typeof -- SAFETY: the string-array branch is selected only after every source item is verified as a string.
+          const stringItems = !props.filterKeys && Array.isArray(filterable) && filterable.every((item) => typeof item === "string")
+
+          // SAFETY: stringItems verifies fuzzysort receives string targets before their typed items are restored.
           const filtered =
-            !props.filterKeys && Array.isArray(filterable) && filterable.every((e) => typeof e === "string")
+            stringItems
               ? (fuzzysort.go(needle, filterable).map((x) => x.target) as T[])
               : fuzzysort.go(needle, filterable, { keys: props.filterKeys! }).map((x) => x.obj)
 
@@ -55,7 +63,31 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
         (groups) => (props.sortGroupsBy ? groups.sort(props.sortGroupsBy) : groups),
       )
 
-      return result
+      if (!props.preserveActiveKey) return result
+
+      if (previousFilter !== undefined && previousFilter !== filter) stableGroups.clear()
+
+      previousFilter = filter
+
+      const categories = new Set(result.map((group) => group.category))
+
+      for (const category of stableGroups.keys()) if (!categories.has(category)) stableGroups.delete(category)
+
+      return result.map((group) => {
+        const existing = stableGroups.get(group.category)
+
+        if (existing) {
+          existing.items = group.items
+
+          return existing
+        }
+
+        const stable = createMutable(group)
+
+        stableGroups.set(group.category, stable)
+
+        return stable
+      })
     },
     { initialValue: empty },
   )
@@ -124,7 +156,9 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
   }
 
   createEffect(
-    on(grouped, () => {
+    on(grouped, (next, previous) => {
+      if (props.preserveActiveKey && previous && previousFilter === store.filter && list.active()) return
+
       reset()
     }),
   )

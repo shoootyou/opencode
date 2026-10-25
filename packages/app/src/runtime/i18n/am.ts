@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ከማህደር አውጣ",
   "command.session.archive": "ማህደር አስቀምጥ ክፍለ ጊዜ",
   "command.session.archive.description": "ማህደር አስቀምጥ ክፍለ ጊዜ",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "የተመዘገቡ ክፍለ ጊዜዎች",
   "command.session.archivedBrowse.description": "ክፍለ ጊዜ መልስ ክፍለ ጊዜ",
   "dialog.archivedSessions.title": "የተመዘገቡ ክፍለ ጊዜዎች",
-  "dialog.archivedSessions.description": "ክፍለ ጊዜ መልስ ክፍለ ጊዜ",
-  "dialog.archivedSessions.empty": "የተመዘገቡ ክፍለ ጊዜዎች",
-  "dialog.archivedSessions.noMatches": "የተመዘገቡ ክፍለ ጊዜዎች",
   "dialog.archivedSessions.error": "የተመዘገቡ ክፍለ ጊዜዎችን መጫን አልተቻለም",
   "dialog.archivedSessions.loading": "የተመዘገቡ ክፍለ ጊዜዎችን በመጫን ላይ…",
   "session.archive.refreshFailed": "ክፍለ ጊዜው ተዘምኗል፣ ግን ዝርዝሮቹን ማደስ አልተቻለም።",

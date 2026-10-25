@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Palauta arkistosta",
   "command.session.archive": "Arkistoi istunto",
   "command.session.archive.description": "Arkistoi istunto",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arkistoidut istunnot",
   "command.session.archivedBrowse.description": "Palauta istunto istunto",
   "dialog.archivedSessions.title": "Arkistoidut istunnot",
-  "dialog.archivedSessions.description": "Palauta istunto istunto",
-  "dialog.archivedSessions.empty": "Arkistoidut istunnot",
-  "dialog.archivedSessions.noMatches": "Arkistoidut istunnot",
   "dialog.archivedSessions.error": "Arkistoituja istuntoja ei voitu ladata",
   "dialog.archivedSessions.loading": "Ladataan arkistoituja istuntoja…",
   "session.archive.refreshFailed": "Istunto päivitettiin, mutta sen tietoja ei voitu päivittää.",

@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Rimuovi dall'archivio",
   "command.session.archive": "Archivia sessione",
   "command.session.archive.description": "Archivia sessione",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Sessioni archiviate",
   "command.session.archivedBrowse.description": "Ripristina sessione sessione",
   "dialog.archivedSessions.title": "Sessioni archiviate",
-  "dialog.archivedSessions.description": "Ripristina sessione sessione",
-  "dialog.archivedSessions.empty": "Sessioni archiviate",
-  "dialog.archivedSessions.noMatches": "Sessioni archiviate",
   "dialog.archivedSessions.error": "Impossibile caricare le sessioni archiviate",
   "dialog.archivedSessions.loading": "Caricamento delle sessioni archiviate…",
   "session.archive.refreshFailed": "La sessione è stata aggiornata, ma non è stato possibile aggiornare i dettagli.",

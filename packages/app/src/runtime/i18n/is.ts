@@ -72,9 +72,6 @@ const desktop = [
 ]
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Endurheimta úr safni",
   "command.session.archive": "Setja í safn setu",
   "command.session.archive.description": "Setja í safn setu",
@@ -83,9 +80,6 @@ export const dict = {
   "command.session.archivedBrowse": "Geymdar setur",
   "command.session.archivedBrowse.description": "Endurheimta setu setu",
   "dialog.archivedSessions.title": "Geymdar setur",
-  "dialog.archivedSessions.description": "Endurheimta setu setu",
-  "dialog.archivedSessions.empty": "Geymdar setur",
-  "dialog.archivedSessions.noMatches": "Geymdar setur",
   "dialog.archivedSessions.error": "Ekki tókst að hlaða geymdum setum",
   "dialog.archivedSessions.loading": "Hleður geymdum setum…",
   "session.archive.refreshFailed": "Setan var uppfærð, en ekki tókst að uppfæra upplýsingarnar.",

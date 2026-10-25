@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "البحث في هذه الصفحة",
-  "dialog.archivedSessions.previousPage": "الصفحة السابقة",
-  "dialog.archivedSessions.nextPage": "الصفحة التالية",
   "common.unarchive": "إلغاء الأرشفة",
   "command.session.archive": "أرشفة الجلسة",
   "command.session.archive.description": "أرشف الجلسة الحالية",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "استعراض الجلسات المؤرشفة",
   "command.session.archivedBrowse.description": "ابحث عن جلسة مؤرشفة واستعدها",
   "dialog.archivedSessions.title": "الجلسات المؤرشفة",
-  "dialog.archivedSessions.description": "اختر جلسة لاستعادتها وفتح علامة التبويب الخاصة بها.",
-  "dialog.archivedSessions.empty": "لم يتم العثور على جلسات مؤرشفة",
-  "dialog.archivedSessions.noMatches": "لا توجد جلسات مؤرشفة تطابق بحثك",
   "dialog.archivedSessions.error": "تعذر تحميل الجلسات المؤرشفة",
   "dialog.archivedSessions.loading": "جارٍ تحميل الجلسات المؤرشفة…",
   "session.archive.refreshFailed": "تم تحديث الجلسة، لكن تعذر تحديث تفاصيلها.",

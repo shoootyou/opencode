@@ -72,9 +72,6 @@ const desktop = [
 ]
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Visszaállítás az archívumból",
   "command.session.archive": "Archiválás munkamenet",
   "command.session.archive.description": "Archiválás munkamenet",
@@ -83,9 +80,6 @@ export const dict = {
   "command.session.archivedBrowse": "Archivált munkamenetek",
   "command.session.archivedBrowse.description": "Munkamenet visszaállítása munkamenet",
   "dialog.archivedSessions.title": "Archivált munkamenetek",
-  "dialog.archivedSessions.description": "Munkamenet visszaállítása munkamenet",
-  "dialog.archivedSessions.empty": "Archivált munkamenetek",
-  "dialog.archivedSessions.noMatches": "Archivált munkamenetek",
   "dialog.archivedSessions.error": "Az archivált munkamenetek nem tölthetők be",
   "dialog.archivedSessions.loading": "Archivált munkamenetek betöltése…",
   "session.archive.refreshFailed": "A munkamenet frissült, de a részletei nem frissíthetők.",

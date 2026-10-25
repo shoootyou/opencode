@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "އާކައިވް ނުކުރާ",
   "command.session.archive": "އާކައިވް ސެޝަން",
   "command.session.archive.description": "އާކައިވް ސެޝަން",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "އާކައިވް ސެޝަންތައް",
   "command.session.archivedBrowse.description": "ސެޝަން ރިސްޓޯ ސެޝަން",
   "dialog.archivedSessions.title": "އާކައިވް ސެޝަންތައް",
-  "dialog.archivedSessions.description": "ސެޝަން ރިސްޓޯ ސެޝަން",
-  "dialog.archivedSessions.empty": "އާކައިވް ސެޝަންތައް",
-  "dialog.archivedSessions.noMatches": "އާކައިވް ސެޝަންތައް",
   "dialog.archivedSessions.error": "އާކައިވް ސެޝަންތައް ލޯޑް ނުކުރެވުނު",
   "dialog.archivedSessions.loading": "އާކައިވް ސެޝަންތައް ލޯޑްކުރަނީ…",
   "session.archive.refreshFailed": "ސެޝަން އަޕްޑޭޓްވެފައި، ތަފްސީލް ރިފްރެޝް ނުކުރެވުނު۔",

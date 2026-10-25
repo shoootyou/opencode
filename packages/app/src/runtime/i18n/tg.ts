@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Аз бойгонӣ барқарор кардан",
   "command.session.archive": "Бойгонӣ кардан нишаст",
   "command.session.archive.description": "Бойгонӣ кардан нишаст",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Нишастҳои бойгонӣ",
   "command.session.archivedBrowse.description": "Барқарор кардани нишаст нишаст",
   "dialog.archivedSessions.title": "Нишастҳои бойгонӣ",
-  "dialog.archivedSessions.description": "Барқарор кардани нишаст нишаст",
-  "dialog.archivedSessions.empty": "Нишастҳои бойгонӣ",
-  "dialog.archivedSessions.noMatches": "Нишастҳои бойгонӣ",
   "dialog.archivedSessions.error": "Нишастҳои бойгонӣ бор нашуданд",
   "dialog.archivedSessions.loading": "Нишастҳои бойгонӣ бор мешаванд…",
   "session.archive.refreshFailed": "Нишаст нав шуд, аммо тафсилоташ нав карда нашуд.",

@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Atjaunot no arhīva",
   "command.session.archive": "Arhivēt sesiju",
   "command.session.archive.description": "Arhivēt sesiju",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arhivētās sesijas",
   "command.session.archivedBrowse.description": "Atjaunot sesiju sesiju",
   "dialog.archivedSessions.title": "Arhivētās sesijas",
-  "dialog.archivedSessions.description": "Atjaunot sesiju sesiju",
-  "dialog.archivedSessions.empty": "Arhivētās sesijas",
-  "dialog.archivedSessions.noMatches": "Arhivētās sesijas",
   "dialog.archivedSessions.error": "Neizdevās ielādēt arhivētās sesijas",
   "dialog.archivedSessions.loading": "Ielādē arhivētās sesijas…",
   "session.archive.refreshFailed": "Sesija ir atjaunināta, bet tās informāciju neizdevās atsvaidzināt.",

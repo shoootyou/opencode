@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Разархивировать",
   "command.session.archive": "Архивировать сеанс",
   "command.session.archive.description": "Архивировать сеанс",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Архивные сеансы",
   "command.session.archivedBrowse.description": "Восстановить сеанс сеанс",
   "dialog.archivedSessions.title": "Архивные сеансы",
-  "dialog.archivedSessions.description": "Восстановить сеанс сеанс",
-  "dialog.archivedSessions.empty": "Архивные сеансы",
-  "dialog.archivedSessions.noMatches": "Архивные сеансы",
   "dialog.archivedSessions.error": "Не удалось загрузить архивные сеансы",
   "dialog.archivedSessions.loading": "Загрузка архивных сеансов…",
   "session.archive.refreshFailed": "Сеанс обновлён, но не удалось обновить его сведения.",

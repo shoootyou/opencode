@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Gjenopprett",
   "command.session.archive": "Arkiver økt",
   "command.session.archive.description": "Arkiver økt",
@@ -14,9 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arkiverte økter",
   "command.session.archivedBrowse.description": "Gjenopprett økt økt",
   "dialog.archivedSessions.title": "Arkiverte økter",
-  "dialog.archivedSessions.description": "Gjenopprett økt økt",
-  "dialog.archivedSessions.empty": "Arkiverte økter",
-  "dialog.archivedSessions.noMatches": "Arkiverte økter",
   "dialog.archivedSessions.error": "Kunne ikke laste inn arkiverte økter",
   "dialog.archivedSessions.loading": "Laster inn arkiverte økter…",
   "session.archive.refreshFailed": "Økten ble oppdatert, men detaljene kunne ikke oppdateres.",

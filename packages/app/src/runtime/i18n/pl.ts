@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Przywróć z archiwum",
   "command.session.archive": "Archiwizuj sesję",
   "command.session.archive.description": "Archiwizuj sesję",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Zarchiwizowane sesje",
   "command.session.archivedBrowse.description": "Przywróć sesję sesję",
   "dialog.archivedSessions.title": "Zarchiwizowane sesje",
-  "dialog.archivedSessions.description": "Przywróć sesję sesję",
-  "dialog.archivedSessions.empty": "Zarchiwizowane sesje",
-  "dialog.archivedSessions.noMatches": "Zarchiwizowane sesje",
   "dialog.archivedSessions.error": "Nie można załadować zarchiwizowanych sesji",
   "dialog.archivedSessions.loading": "Ładowanie zarchiwizowanych sesji…",
   "session.archive.refreshFailed": "Sesja została zaktualizowana, ale nie można było odświeżyć jej szczegółów.",

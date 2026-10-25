@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "보관 해제",
   "command.session.archive": "보관 세션",
   "command.session.archive.description": "보관 세션",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "보관된 세션",
   "command.session.archivedBrowse.description": "복원 세션",
   "dialog.archivedSessions.title": "보관된 세션",
-  "dialog.archivedSessions.description": "복원 세션",
-  "dialog.archivedSessions.empty": "보관된 세션",
-  "dialog.archivedSessions.noMatches": "보관된 세션",
   "dialog.archivedSessions.error": "보관된 세션을 불러올 수 없습니다",
   "dialog.archivedSessions.loading": "보관된 세션 불러오는 중…",
   "session.archive.refreshFailed": "세션이 업데이트되었지만 세부 정보를 새로 고칠 수 없습니다.",

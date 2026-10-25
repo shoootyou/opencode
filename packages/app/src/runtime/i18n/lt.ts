@@ -72,9 +72,6 @@ const desktop = [
 ]
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Atkurti iš archyvo",
   "command.session.archive": "Archyvuoti seansą",
   "command.session.archive.description": "Archyvuoti seansą",
@@ -83,9 +80,6 @@ export const dict = {
   "command.session.archivedBrowse": "Archyvuoti seansai",
   "command.session.archivedBrowse.description": "Atkurti seansą seansą",
   "dialog.archivedSessions.title": "Archyvuoti seansai",
-  "dialog.archivedSessions.description": "Atkurti seansą seansą",
-  "dialog.archivedSessions.empty": "Archyvuoti seansai",
-  "dialog.archivedSessions.noMatches": "Archyvuoti seansai",
   "dialog.archivedSessions.error": "Nepavyko įkelti archyvuotų seansų",
   "dialog.archivedSessions.loading": "Įkeliami archyvuoti seansai…",
   "session.archive.refreshFailed": "Seansas atnaujintas, bet nepavyko atnaujinti jo informacijos.",

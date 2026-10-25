@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Arxivdən çıxar",
   "command.session.archive": "Arxivlə sessiyanı",
   "command.session.archive.description": "Arxivlə sessiyanı",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arxivləşdirilmiş sessiyalar",
   "command.session.archivedBrowse.description": "Sessiyanı bərpa et sessiyanı",
   "dialog.archivedSessions.title": "Arxivləşdirilmiş sessiyalar",
-  "dialog.archivedSessions.description": "Sessiyanı bərpa et sessiyanı",
-  "dialog.archivedSessions.empty": "Arxivləşdirilmiş sessiyalar",
-  "dialog.archivedSessions.noMatches": "Arxivləşdirilmiş sessiyalar",
   "dialog.archivedSessions.error": "Arxivləşdirilmiş sessiyalar yüklənə bilmədi",
   "dialog.archivedSessions.loading": "Arxivləşdirilmiş sessiyalar yüklənir…",
   "session.archive.refreshFailed": "Sessiya yeniləndi, lakin təfərrüatlar yenilənə bilmədi.",

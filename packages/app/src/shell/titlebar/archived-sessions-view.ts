@@ -1,10 +1,9 @@
 import type { ArchivedSessionsState } from "./archived-sessions-model"
 
 export type ArchivedSessionsView = Readonly<{
-  message: "loading" | "error" | "no-match" | "page-empty" | undefined
-  previousEnabled: boolean
-  nextEnabled: boolean
-  resetEnabled: boolean
+  message: "loading" | "error" | "loaded-no-match" | "loaded-empty" | undefined
+  loadMoreEnabled: boolean
+  retryEnabled: boolean
 }>
 
 export function selectArchivedSessionsView(
@@ -12,13 +11,14 @@ export function selectArchivedSessionsView(
     status: ArchivedSessionsState["status"]
     visibleSessionCount: number
     filter: string
-    previousCursor?: string
     nextCursor?: string
     restoringID?: string
+    continuationError?: unknown
+    continuationPending?: boolean
   }>,
 ): ArchivedSessionsView {
   const ready = input.status === "ready"
-  const canChangePage = ready && !input.restoringID
+  const canContinue = ready && !!input.nextCursor && !input.restoringID && !input.continuationPending
 
   const message =
     input.status === "loading"
@@ -27,14 +27,13 @@ export function selectArchivedSessionsView(
         ? "error"
         : ready && input.visibleSessionCount === 0
           ? input.filter.trim()
-            ? "no-match"
-            : "page-empty"
+            ? "loaded-no-match"
+            : "loaded-empty"
           : undefined
 
   return {
     message,
-    previousEnabled: canChangePage && !!input.previousCursor,
-    nextEnabled: canChangePage && !!input.nextCursor,
-    resetEnabled: canChangePage,
+    loadMoreEnabled: canContinue && !input.continuationError,
+    retryEnabled: input.status === "error" || (canContinue && !!input.continuationError),
   }
 }

@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "གཏན་མཛོད་ནས་ཕྱིར་འདོན",
   "command.session.archive": "གཏན་མཛོད ལཱ་ཡུན",
   "command.session.archive.description": "གཏན་མཛོད ལཱ་ཡུན",
@@ -14,9 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "གཏན་མཛོད་ལཱ་ཡུན",
   "command.session.archivedBrowse.description": "ལཱ་ཡུན་སླར་གསོ ལཱ་ཡུན",
   "dialog.archivedSessions.title": "གཏན་མཛོད་ལཱ་ཡུན",
-  "dialog.archivedSessions.description": "ལཱ་ཡུན་སླར་གསོ ལཱ་ཡུན",
-  "dialog.archivedSessions.empty": "གཏན་མཛོད་ལཱ་ཡུན",
-  "dialog.archivedSessions.noMatches": "གཏན་མཛོད་ལཱ་ཡུན",
   "dialog.archivedSessions.error": "གཏན་མཛོད་ལཱ་ཡུན་འདེབས་མི་ཚུགས",
   "dialog.archivedSessions.loading": "གཏན་མཛོད་ལཱ་ཡུན་འདེབས་བཞིན…",
   "session.archive.refreshFailed": "ལཱ་ཡུན་དུས་མཐུན་བྱས་ཡོད་རུང་ རྒྱས་བཤད་དུས་མཐུན་མི་ཚུགས།",

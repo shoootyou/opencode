@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Taasta arhiivist",
   "command.session.archive": "Arhiveeri seanss",
   "command.session.archive.description": "Arhiveeri seanss",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arhiveeritud seansid",
   "command.session.archivedBrowse.description": "Taasta seanss seanss",
   "dialog.archivedSessions.title": "Arhiveeritud seansid",
-  "dialog.archivedSessions.description": "Taasta seanss seanss",
-  "dialog.archivedSessions.empty": "Arhiveeritud seansid",
-  "dialog.archivedSessions.noMatches": "Arhiveeritud seansid",
   "dialog.archivedSessions.error": "Arhiveeritud seansse ei saanud laadida",
   "dialog.archivedSessions.loading": "Arhiveeritud seansside laadimine…",
   "session.archive.refreshFailed": "Seanss värskendati, kuid selle üksikasju ei saanud värskendada.",

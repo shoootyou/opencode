@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Obnoviť z archívu",
   "command.session.archive": "Archivovať reláciu",
   "command.session.archive.description": "Archivovať reláciu",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Archivované relácie",
   "command.session.archivedBrowse.description": "Obnoviť reláciu reláciu",
   "dialog.archivedSessions.title": "Archivované relácie",
-  "dialog.archivedSessions.description": "Obnoviť reláciu reláciu",
-  "dialog.archivedSessions.empty": "Archivované relácie",
-  "dialog.archivedSessions.noMatches": "Archivované relácie",
   "dialog.archivedSessions.error": "Archivované relácie sa nepodarilo načítať",
   "dialog.archivedSessions.loading": "Načítavajú sa archivované relácie…",
   "session.archive.refreshFailed": "Relácia bola aktualizovaná, ale jej podrobnosti sa nepodarilo obnoviť.",

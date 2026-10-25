@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Desarquivar",
   "command.session.archive": "Arquivar sessão",
   "command.session.archive.description": "Arquivar sessão",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Sessões arquivadas",
   "command.session.archivedBrowse.description": "Restaurar sessão sessão",
   "dialog.archivedSessions.title": "Sessões arquivadas",
-  "dialog.archivedSessions.description": "Restaurar sessão sessão",
-  "dialog.archivedSessions.empty": "Sessões arquivadas",
-  "dialog.archivedSessions.noMatches": "Sessões arquivadas",
   "dialog.archivedSessions.error": "Não foi possível carregar sessões arquivadas",
   "dialog.archivedSessions.loading": "Carregando sessões arquivadas…",
   "session.archive.refreshFailed": "A sessão foi atualizada, mas os detalhes não puderam ser atualizados.",

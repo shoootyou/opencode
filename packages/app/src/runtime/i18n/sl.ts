@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Obnovi iz arhiva",
   "command.session.archive": "Arhiviraj sejo",
   "command.session.archive.description": "Arhiviraj sejo",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arhivirane seje",
   "command.session.archivedBrowse.description": "Obnovi sejo sejo",
   "dialog.archivedSessions.title": "Arhivirane seje",
-  "dialog.archivedSessions.description": "Obnovi sejo sejo",
-  "dialog.archivedSessions.empty": "Arhivirane seje",
-  "dialog.archivedSessions.noMatches": "Arhivirane seje",
   "dialog.archivedSessions.error": "Arhiviranih sej ni bilo mogoče naložiti",
   "dialog.archivedSessions.loading": "Nalaganje arhiviranih sej…",
   "session.archive.refreshFailed": "Seja je bila posodobljena, vendar podrobnosti ni bilo mogoče osvežiti.",

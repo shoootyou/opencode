@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Återställ från arkiv",
   "command.session.archive": "Arkivera session",
   "command.session.archive.description": "Arkivera session",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arkiverade sessioner",
   "command.session.archivedBrowse.description": "Återställ session session",
   "dialog.archivedSessions.title": "Arkiverade sessioner",
-  "dialog.archivedSessions.description": "Återställ session session",
-  "dialog.archivedSessions.empty": "Arkiverade sessioner",
-  "dialog.archivedSessions.noMatches": "Arkiverade sessioner",
   "dialog.archivedSessions.error": "Kunde inte läsa in arkiverade sessioner",
   "dialog.archivedSessions.loading": "Läser in arkiverade sessioner…",
   "session.archive.refreshFailed": "Sessionen uppdaterades, men informationen kunde inte uppdateras.",

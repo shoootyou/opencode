@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "取消封存",
   "command.session.archive": "封存 工作階段",
   "command.session.archive.description": "封存 工作階段",
@@ -14,9 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "已封存的工作階段",
   "command.session.archivedBrowse.description": "還原 工作階段",
   "dialog.archivedSessions.title": "已封存的工作階段",
-  "dialog.archivedSessions.description": "還原 工作階段",
-  "dialog.archivedSessions.empty": "已封存的工作階段",
-  "dialog.archivedSessions.noMatches": "已封存的工作階段",
   "dialog.archivedSessions.error": "無法載入已封存的工作階段",
   "dialog.archivedSessions.loading": "正在載入已封存的工作階段…",
   "session.archive.refreshFailed": "工作階段已更新，但無法重新整理詳細資料。",

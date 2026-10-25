@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "ยกเลิกการเก็บถาวร",
   "command.session.archive": "เก็บถาวร เซสชัน",
   "command.session.archive.description": "เก็บถาวร เซสชัน",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "เซสชันที่เก็บถาวร",
   "command.session.archivedBrowse.description": "กู้คืนเซสชัน เซสชัน",
   "dialog.archivedSessions.title": "เซสชันที่เก็บถาวร",
-  "dialog.archivedSessions.description": "กู้คืนเซสชัน เซสชัน",
-  "dialog.archivedSessions.empty": "เซสชันที่เก็บถาวร",
-  "dialog.archivedSessions.noMatches": "เซสชันที่เก็บถาวร",
   "dialog.archivedSessions.error": "ไม่สามารถโหลดเซสชันที่เก็บถาวรได้",
   "dialog.archivedSessions.loading": "กำลังโหลดเซสชันที่เก็บถาวร…",
   "session.archive.refreshFailed": "อัปเดตเซสชันแล้ว แต่ไม่สามารถรีเฟรชรายละเอียดได้",

@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Endurstovna",
   "command.session.archive": "Goym setu",
   "command.session.archive.description": "Goym setu",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Goymdar setur",
   "command.session.archivedBrowse.description": "Endurstovna setu setu",
   "dialog.archivedSessions.title": "Goymdar setur",
-  "dialog.archivedSessions.description": "Endurstovna setu setu",
-  "dialog.archivedSessions.empty": "Goymdar setur",
-  "dialog.archivedSessions.noMatches": "Goymdar setur",
   "dialog.archivedSessions.error": "Kundi ikki lesa goymdar setur",
   "dialog.archivedSessions.loading": "Lesur goymdar setur…",
   "session.archive.refreshFailed": "Setan varð dagførd, men smálutirnir kundu ikki dagførast.",

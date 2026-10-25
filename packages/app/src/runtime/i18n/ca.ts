@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Desarxiva",
   "command.session.archive": "Arxiva sessió",
   "command.session.archive.description": "Arxiva sessió",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Sessions arxivades",
   "command.session.archivedBrowse.description": "Restaura la sessió sessió",
   "dialog.archivedSessions.title": "Sessions arxivades",
-  "dialog.archivedSessions.description": "Restaura la sessió sessió",
-  "dialog.archivedSessions.empty": "Sessions arxivades",
-  "dialog.archivedSessions.noMatches": "Sessions arxivades",
   "dialog.archivedSessions.error": "No s'han pogut carregar les sessions arxivades",
   "dialog.archivedSessions.loading": "S'estan carregant les sessions arxivades…",
   "session.archive.refreshFailed": "La sessió s'ha actualitzat, però no se n'han pogut actualitzar els detalls.",

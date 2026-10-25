@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Batalkan pengarsipan",
   "command.session.archive": "Arsipkan sesi",
   "command.session.archive.description": "Arsipkan sesi",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Sesi yang diarsipkan",
   "command.session.archivedBrowse.description": "Pulihkan sesi sesi",
   "dialog.archivedSessions.title": "Sesi yang diarsipkan",
-  "dialog.archivedSessions.description": "Pulihkan sesi sesi",
-  "dialog.archivedSessions.empty": "Sesi yang diarsipkan",
-  "dialog.archivedSessions.noMatches": "Sesi yang diarsipkan",
   "dialog.archivedSessions.error": "Tidak dapat memuat sesi yang diarsipkan",
   "dialog.archivedSessions.loading": "Memuat sesi yang diarsipkan…",
   "session.archive.refreshFailed": "Sesi diperbarui, tetapi detailnya tidak dapat disegarkan.",

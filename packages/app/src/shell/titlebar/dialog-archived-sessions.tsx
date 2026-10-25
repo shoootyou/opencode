@@ -1,5 +1,5 @@
-import { createSignal, onCleanup, Show } from "solid-js"
-import { Dialog, DialogBody, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
+import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js"
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
 import { List } from "@opencode/ui/list"
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
@@ -8,6 +8,7 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
+import { type ArchiveSession } from "@/session/archive"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
 import { selectArchivedSessionsView } from "./archived-sessions-view"
 
@@ -22,6 +23,15 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const tabs = useTabs()
   const [version, setVersion] = createSignal(0)
   const [filter, setFilter] = createSignal("")
+  let scroller: HTMLDivElement | undefined
+  let demand = false
+  let previousScrollTop = 0
+  let underfillFrame: number | undefined
+  let underfillProbed = false
+  let removeWheel: (() => void) | undefined
+  let listRoot: HTMLDivElement | undefined
+  let actionButton: HTMLButtonElement | undefined
+  let restoreSearchFocus = false
   // SAFETY: the dialog is opened only from the registered archive command with a current server key.
   const ctx = global.serverCtx(props.server as never)
 
@@ -55,24 +65,26 @@ function ArchivedSessionsDialog(props: { server: string }) {
     return model.restoringID()
   }
 
-  const page = () => {
+  const view = () => {
     const current = state()
 
-    return current.status === "ready" ? current.page : undefined
-  }
-
-  const view = () =>
-    selectArchivedSessionsView({
-      status: state().status,
+    return selectArchivedSessionsView({
+      status: current.status,
       visibleSessionCount: model.search(filter()).length,
       filter: filter(),
-      previousCursor: page()?.cursor.previous,
-      nextCursor: page()?.cursor.next,
+      nextCursor: current.status === "ready" ? current.nextCursor : undefined,
+      continuationError: current.status === "ready" ? current.continuationError : undefined,
+      continuationPending: current.status === "ready" ? current.continuationPending : false,
       restoringID: restoringID(),
     })
+  }
 
   const emptyMessage = () =>
-    language.t(view().message === "no-match" ? "dialog.archivedSessions.noMatches" : "dialog.archivedSessions.empty")
+    language.t(
+      view().message === "loaded-no-match"
+        ? "dialog.archivedSessions.loadedNoMatches"
+        : "dialog.archivedSessions.loadedEmpty",
+    )
 
   const listMessage = () => {
     if (view().message === "loading") return language.t("dialog.archivedSessions.loading")
@@ -82,6 +94,124 @@ function ArchivedSessionsDialog(props: { server: string }) {
     return emptyMessage()
   }
 
+  const continueLoading = () => {
+    const current = state()
+
+    return current.status === "ready" && current.continuationPending
+  }
+
+  const canLoadMore = () => view().loadMoreEnabled
+  const canRetry = () => view().retryEnabled
+
+  const loadMore = () => {
+    if (canLoadMore()) void model.loadMore()
+  }
+
+  const retry = () => {
+    restoreSearchFocus = document.activeElement === actionButton
+
+    if (canRetry()) void model.retryMore()
+  }
+
+  const onScroll: JSX.EventHandler<HTMLDivElement, Event> = (event) => {
+    const current = event.currentTarget
+
+    scroller = current
+    const movedDown = current.scrollTop > previousScrollTop
+    previousScrollTop = current.scrollTop
+
+    if (!demand || !movedDown || current.clientHeight <= 0) return
+
+    if (current.scrollHeight - current.clientHeight - current.scrollTop > 96) return
+
+    demand = false
+
+    loadMore()
+  }
+
+  const onWheel = (event: WheelEvent) => {
+    if (event.deltaY <= 0) return
+
+    demand = true
+
+    if (!scroller || scroller.clientHeight <= 0) return
+
+    if (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 96) return
+
+    demand = false
+    loadMore()
+  }
+
+  const hasContinuationAction = () => {
+    const current = state()
+
+    return current.status === "error" || (current.status === "ready" && !!current.nextCursor)
+  }
+
+  const actionPending = () => continueLoading() || restoringID() !== undefined
+
+  const activateContinuation = () => {
+    if (actionPending()) return
+
+    restoreSearchFocus = document.activeElement === actionButton
+
+    const current = state()
+
+    if (current.status === "error" || (current.status === "ready" && current.continuationError)) {
+      retry()
+
+      return
+    }
+
+    loadMore()
+  }
+
+  createEffect(() => {
+    const current = state()
+
+    if (current.status === "loading") underfillProbed = false
+
+    if (
+      current.status !== "ready" ||
+      underfillProbed ||
+      filter().trim() ||
+      !current.nextCursor ||
+      current.continuationPending ||
+      current.continuationError ||
+      restoringID() ||
+      !scroller
+    )
+      return
+
+    underfillProbed = true
+    underfillFrame = requestAnimationFrame(() => {
+      if (
+        state().status !== "ready" ||
+        filter().trim() ||
+        !scroller ||
+        scroller.clientHeight <= 0 ||
+        scroller.scrollHeight - scroller.clientHeight > 1
+      )
+        return
+      loadMore()
+    })
+  })
+
+  createEffect(() => {
+    const current = state()
+
+    if (current.status !== "ready" || current.nextCursor || !restoreSearchFocus) return
+
+    restoreSearchFocus = false
+
+    queueMicrotask(() => listRoot?.querySelector<HTMLInputElement>('[data-slot="list-search"] input')?.focus())
+  })
+
+  onCleanup(() => {
+    if (underfillFrame !== undefined) cancelAnimationFrame(underfillFrame)
+    removeWheel?.()
+  })
+
   return (
     <Dialog size="large">
       <DialogHeader>
@@ -90,9 +220,24 @@ function ArchivedSessionsDialog(props: { server: string }) {
           description={language.t("dialog.archivedSessions.description")}
         />
       </DialogHeader>
-      <DialogBody>
-        <List
-          class="px-3"
+      <DialogBody class="flex min-h-0 flex-1 flex-col">
+        <div
+          class="flex min-h-0 flex-1 flex-col"
+          ref={(element) => {
+            listRoot = element
+            queueMicrotask(() => {
+              scroller = element.querySelector<HTMLDivElement>('[data-slot="list-scroll"]') ?? undefined
+              previousScrollTop = scroller?.scrollTop ?? 0
+              scroller?.addEventListener("wheel", onWheel, { passive: true })
+              removeWheel = () => scroller?.removeEventListener("wheel", onWheel)
+            })
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End") demand = true
+          }}
+        >
+          <List<ArchiveSession>
+            class="flex min-h-0 flex-1 flex-col px-3"
           items={(filter) => {
             version()
 
@@ -100,9 +245,11 @@ function ArchivedSessionsDialog(props: { server: string }) {
           }}
           key={(session) => session.id}
           filterKeys={["title", "location.directory"]}
-          search={{ placeholder: language.t("dialog.archivedSessions.search.placeholder"), autofocus: true }}
+          search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}
           emptyMessage={listMessage()}
           onFilter={setFilter}
+          onScroll={onScroll}
+          preserveActiveKey
           onSelect={(session) => {
             if (session) void model.restore(session.id)
           }}
@@ -131,44 +278,35 @@ function ArchivedSessionsDialog(props: { server: string }) {
               </span>
             )
           }}
-        </List>
-        <Show when={view().message === "error"}>
-          <button type="button" onClick={() => void model.load()}>
-            {language.t("common.retry")}
-          </button>
-        </Show>
-        <Show when={state().status === "ready"}>
-          <div class="mt-3 flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              disabled={!view().previousEnabled}
-              onClick={() => {
-                if (view().previousEnabled) void model.previous()
-              }}
-            >
-              {language.t("dialog.archivedSessions.previousPage")}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!view().nextEnabled}
-              onClick={() => {
-                if (view().nextEnabled) void model.next()
-              }}
-            >
-              {language.t("dialog.archivedSessions.nextPage")}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!view().resetEnabled}
-              onClick={() => {
-                if (view().resetEnabled) void model.load()
-              }}
-            >
-              {language.t("common.reset")}
-            </Button>
-          </div>
-        </Show>
+          </List>
+        </div>
       </DialogBody>
+      <DialogFooter>
+        <div class="flex w-full items-center justify-end gap-2">
+          <Show when={continueLoading()}>
+            <span aria-live="polite">{language.t("dialog.archivedSessions.loading")}</span>
+          </Show>
+          <Show when={hasContinuationAction()}>
+            <Button
+              variant="ghost"
+              ref={(element: HTMLButtonElement) => {
+                actionButton = element
+              }}
+              aria-disabled={actionPending() ? "true" : undefined}
+              onBlur={() => {
+                if (continueLoading()) restoreSearchFocus = false
+              }}
+              onClick={activateContinuation}
+            >
+              {continueLoading()
+                ? language.t("dialog.archivedSessions.loading")
+                : view().message === "error" || canRetry()
+                  ? language.t("common.retry")
+                  : language.t("common.loadMore")}
+            </Button>
+          </Show>
+        </div>
+      </DialogFooter>
     </Dialog>
   )
 }

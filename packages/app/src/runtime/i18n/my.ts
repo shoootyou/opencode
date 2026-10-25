@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "မှတ်တမ်းမှ ပြန်ယူ",
   "command.session.archive": "မှတ်တမ်းတင် စက်ရှင်",
   "command.session.archive.description": "မှတ်တမ်းတင် စက်ရှင်",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "မှတ်တမ်းတင်ထားသော စက်ရှင်များ",
   "command.session.archivedBrowse.description": "စက်ရှင် ပြန်ယူ စက်ရှင်",
   "dialog.archivedSessions.title": "မှတ်တမ်းတင်ထားသော စက်ရှင်များ",
-  "dialog.archivedSessions.description": "စက်ရှင် ပြန်ယူ စက်ရှင်",
-  "dialog.archivedSessions.empty": "မှတ်တမ်းတင်ထားသော စက်ရှင်များ",
-  "dialog.archivedSessions.noMatches": "မှတ်တမ်းတင်ထားသော စက်ရှင်များ",
   "dialog.archivedSessions.error": "မှတ်တမ်းတင်ထားသော စက်ရှင်များကို မဖွင့်နိုင်ပါ",
   "dialog.archivedSessions.loading": "မှတ်တမ်းတင်ထားသော စက်ရှင်များကို ဖွင့်နေသည်…",
   "session.archive.refreshFailed": "စက်ရှင်ကို အပ်ဒိတ်လုပ်ပြီးသော်လည်း အသေးစိတ်ကို ပြန်လည်စတင်မရပါ။",

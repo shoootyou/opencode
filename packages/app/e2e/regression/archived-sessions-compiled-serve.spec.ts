@@ -607,6 +607,12 @@ test("keeps a bounded continuous archive list: programmatic movement cannot dema
   await dialog.getByPlaceholder("Buscar").fill("")
   await expect.poll(() => cursors).toEqual([null])
 
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  await expect.poll(() => cursors).toEqual([null])
+
   await scroller.hover()
   await page.mouse.wheel(0, 800)
   await expect.poll(() => cursors).toEqual([null, "cursor-2"])
@@ -716,10 +722,12 @@ test("preserves connected archive group and row nodes, native focus, active sele
   )
 
   const dialog = await openArchivedSessions(page)
-  const row = dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_0"]')
+  const row = dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_49"]')
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
   await row.focus()
   const group = row.locator("xpath=../..")
-  const scrollTop = await dialog.locator('[data-slot="list-scroll"]').evaluate((node) => (node.scrollTop = 17))
+  await scroller.evaluate((node) => (node.scrollTop = node.scrollHeight))
+  const scrollTop = await scroller.evaluate((node) => node.scrollTop)
   const rowHandle = await row.elementHandle()
   const groupHandle = await group.elementHandle()
   await row.evaluate((node) => {
@@ -734,8 +742,14 @@ test("preserves connected archive group and row nodes, native focus, active sele
     })
     Object.defineProperty(node, "archiveFocusCalls", { configurable: true, get: () => calls })
   })
-  await dialog.getByRole("button", { name: /cargar más/i }).press("Enter")
-  await expect(dialog.getByRole("button", { name: /reintentar/i })).toBeVisible()
+  await expect(row).toBeFocused()
+  await scroller.hover()
+  const activeKey = await dialog.locator('[data-slot="list-item"][data-active="true"]').getAttribute("data-key")
+  if (!activeKey) throw new Error("Expected one active archived session")
+  const active = dialog.locator(`[data-slot="list-item"][data-key="${activeKey}"]`)
+  await page.mouse.wheel(0, 800)
+  const retry = dialog.getByRole("button", { name: "Try again" })
+  await expect(retry).toBeVisible()
 
   for (const handle of [rowHandle, groupHandle]) expect(await handle?.evaluate((node) => node.isConnected)).toBe(true)
   // SAFETY: this test-owned property counts only forced focus calls on the retained native row.
@@ -743,34 +757,42 @@ test("preserves connected archive group and row nodes, native focus, active sele
     await rowHandle?.evaluate((node) => (node as HTMLElement & { archiveFocusCalls: number }).archiveFocusCalls),
   ).toBe(0)
   await expect(row).toBeFocused()
-  await expect(row).toHaveAttribute("data-active", "true")
-  await expect(dialog.locator('[data-slot="list-scroll"]')).toHaveJSProperty("scrollTop", scrollTop)
+  await expect(active).toHaveAttribute("data-active", "true")
+  await expect(scroller).toHaveJSProperty("scrollTop", scrollTop)
 
-  await dialog.getByRole("button", { name: /reintentar/i }).press("Enter")
+  const focusableCount = await dialog.locator('button:not([disabled]), input:not([disabled]), [href]').count()
+  for (let index = 0; index <= focusableCount; index++) {
+    if (await retry.evaluate((node) => node === document.activeElement)) break
+    await page.keyboard.press("Tab")
+  }
+  await expect(retry).toBeFocused()
+  const scrollBeforeRetry = await scroller.evaluate((node) => node.scrollTop)
+  await page.keyboard.press("Enter")
   await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_50"]')).toBeVisible()
 
   expect(await rowHandle?.evaluate((node) => node.isConnected)).toBe(true)
   expect(await groupHandle?.evaluate((node) => node.isConnected)).toBe(true)
   expect(
-    await rowHandle?.evaluate((node) => node === document.querySelector('[data-key="ses_archive_identity_0"]')),
+    await rowHandle?.evaluate((node) => node === document.querySelector('[data-key="ses_archive_identity_49"]')),
   ).toBe(true)
   expect(await groupHandle?.evaluate((node) => node === document.querySelector('[data-slot="list-group"]'))).toBe(true)
   // SAFETY: this test-owned property remains on the same retained native row after Retry appends.
   expect(
     await rowHandle?.evaluate((node) => (node as HTMLElement & { archiveFocusCalls: number }).archiveFocusCalls),
   ).toBe(0)
-  await expect(row).toBeFocused()
-  await expect(row).toHaveAttribute("data-active", "true")
-  await expect(dialog.locator('[data-slot="list-scroll"]')).toHaveJSProperty("scrollTop", scrollTop)
+  await expect(dialog.getByPlaceholder("Buscar")).toBeFocused()
+  await expect(active).toHaveAttribute("data-active", "true")
+  await expect(scroller).toHaveJSProperty("scrollTop", scrollBeforeRetry)
 })
 
-for (const [action, key] of [
-  ["Load more", "Enter"],
-  ["Load more", " "],
-  ["Retry", "Enter"],
-  ["Retry", " "],
+for (const [action, key, userLeavesPendingAction] of [
+  ["Load more", "Enter", false],
+  ["Load more", " ", false],
+  ["Retry", "Enter", false],
+  ["Retry", " ", false],
+  ["Load more", "Enter", true],
 ] as const) {
-  test(`reaches ${action} by Tab and Shift+Tab and activates it once with ${key}`, async () => {
+  test(`reaches ${action} by Tab and Shift+Tab and activates it once with ${key}${userLeavesPendingAction ? " without stealing user-moved focus" : ""}`, async () => {
     const continuation = Promise.withResolvers<void>()
     const cursors: Array<string | null> = []
     const expectedCursor = action === "Retry" ? "retry-cursor" : "load-cursor"
@@ -811,33 +833,57 @@ for (const [action, key] of [
       },
     )
     const dialog = await openArchivedSessions(page)
-    await page.keyboard.press("Tab")
-    const loadMore = dialog.getByRole("button", { name: /cargar más/i })
+    const search = dialog.getByPlaceholder("Buscar")
+    const loadMore = dialog.getByRole("button", { name: "Cargar más" })
+    await expect(search).toBeFocused()
+    const focusableCount = await dialog.locator('button:not([disabled]), input:not([disabled]), [href]').count()
+    for (let index = 0; index <= focusableCount; index++) {
+      if (await loadMore.evaluate((node) => node === document.activeElement)) break
+      await page.keyboard.press("Tab")
+    }
     await expect(loadMore).toBeFocused()
 
     if (action === "Retry") {
       await page.keyboard.press("Enter")
-      await expect(dialog.getByRole("button", { name: /reintentar/i })).toBeVisible()
+      await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible()
       await expect.poll(() => cursors).toEqual([null, "retry-cursor"])
     }
 
-    const button = action === "Retry" ? dialog.getByRole("button", { name: /reintentar/i }) : loadMore
+    const button = action === "Retry" ? dialog.getByRole("button", { name: "Try again" }) : loadMore
+    for (let index = 0; index <= focusableCount; index++) {
+      if (await button.evaluate((node) => node === document.activeElement)) break
+      await page.keyboard.press("Tab")
+    }
+    await expect(button).toBeFocused()
     await page.keyboard.press("Tab")
     await page.keyboard.press("Shift+Tab")
     await expect(button).toBeFocused()
-    await page.keyboard.press("Shift+Tab")
-    await page.keyboard.press("Tab")
-    await expect(button).toBeFocused()
+    const buttonHandle = await button.elementHandle()
+    if (!buttonHandle) throw new Error("Expected continuation action handle")
     await page.keyboard.press(key)
     await expect
       .poll(() => cursors)
       .toEqual(action === "Retry" ? [null, "retry-cursor", "retry-cursor"] : [null, "load-cursor"])
+    expect(await buttonHandle.evaluate((node) => node.isConnected)).toBe(true)
+    expect(await buttonHandle.evaluate((node) => node === document.activeElement)).toBe(true)
+    expect(
+      await buttonHandle.evaluate(
+        (node) => (node instanceof HTMLButtonElement && node.disabled) || node.getAttribute("aria-disabled") === "true",
+      ),
+    ).toBe(true)
     await page.keyboard.press(key)
     await expect
       .poll(() => cursors)
       .toEqual(action === "Retry" ? [null, "retry-cursor", "retry-cursor"] : [null, "load-cursor"])
+    expect(await buttonHandle.evaluate((node) => node.isConnected && node === document.activeElement)).toBe(true)
+    if (userLeavesPendingAction) {
+      await page.keyboard.press("Tab")
+      await expect(dialog.locator('[data-slot="dialog-close-button"]')).toBeFocused()
+    }
     continuation.resolve()
     await expect(dialog.getByText("Keyboard more", { exact: true })).toBeVisible()
+    if (userLeavesPendingAction) await expect(dialog.locator('[data-slot="dialog-close-button"]')).toBeFocused()
+    else await expect(search).toBeFocused()
   })
 }
 

@@ -3,9 +3,6 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Diese Seite durchsuchen",
-  "dialog.archivedSessions.previousPage": "Vorherige Seite",
-  "dialog.archivedSessions.nextPage": "Nächste Seite",
   "common.unarchive": "Wiederherstellen",
   "command.session.archive": "Sitzung archivieren",
   "command.session.archive.description": "Die aktuelle Sitzung archivieren",
@@ -14,10 +11,6 @@ export const dict = {
   "command.session.archivedBrowse": "Archivierte Sitzungen durchsuchen",
   "command.session.archivedBrowse.description": "Eine archivierte Sitzung suchen und wiederherstellen",
   "dialog.archivedSessions.title": "Archivierte Sitzungen",
-  "dialog.archivedSessions.description":
-    "Wählen Sie eine Sitzung aus, um sie wiederherzustellen und ihre Registerkarte zu öffnen.",
-  "dialog.archivedSessions.empty": "Keine archivierten Sitzungen gefunden",
-  "dialog.archivedSessions.noMatches": "Keine archivierten Sitzungen entsprechen Ihrer Suche",
   "dialog.archivedSessions.error": "Archivierte Sitzungen konnten nicht geladen werden",
   "dialog.archivedSessions.loading": "Archivierte Sitzungen werden geladen…",
   "session.archive.refreshFailed":

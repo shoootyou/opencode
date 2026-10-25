@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Επαναφορά από αρχείο",
   "command.session.archive": "Αρχειοθέτηση συνεδρία",
   "command.session.archive.description": "Αρχειοθέτηση συνεδρία",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Αρχειοθετημένες συνεδρίες",
   "command.session.archivedBrowse.description": "Επαναφορά συνεδρίας συνεδρία",
   "dialog.archivedSessions.title": "Αρχειοθετημένες συνεδρίες",
-  "dialog.archivedSessions.description": "Επαναφορά συνεδρίας συνεδρία",
-  "dialog.archivedSessions.empty": "Αρχειοθετημένες συνεδρίες",
-  "dialog.archivedSessions.noMatches": "Αρχειοθετημένες συνεδρίες",
   "dialog.archivedSessions.error": "Δεν ήταν δυνατή η φόρτωση αρχειοθετημένων συνεδριών",
   "dialog.archivedSessions.loading": "Φόρτωση αρχειοθετημένων συνεδριών…",
   "session.archive.refreshFailed": "Η συνεδρία ενημερώθηκε, αλλά δεν ήταν δυνατή η ανανέωση των λεπτομερειών της.",

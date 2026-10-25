@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Arxivdan tiklash",
   "command.session.archive": "Arxivlash sessiyani",
   "command.session.archive.description": "Arxivlash sessiyani",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arxivlangan sessiyalar",
   "command.session.archivedBrowse.description": "Sessiyani tiklash sessiyani",
   "dialog.archivedSessions.title": "Arxivlangan sessiyalar",
-  "dialog.archivedSessions.description": "Sessiyani tiklash sessiyani",
-  "dialog.archivedSessions.empty": "Arxivlangan sessiyalar",
-  "dialog.archivedSessions.noMatches": "Arxivlangan sessiyalar",
   "dialog.archivedSessions.error": "Arxivlangan sessiyalarni yuklab bo‘lmadi",
   "dialog.archivedSessions.loading": "Arxivlangan sessiyalar yuklanmoqda…",
   "session.archive.refreshFailed": "Sessiya yangilandi, ammo tafsilotlarini yangilab bo‘lmadi.",

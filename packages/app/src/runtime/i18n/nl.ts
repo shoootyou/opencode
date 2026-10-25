@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Uit archief halen",
   "command.session.archive": "Archiveren sessie",
   "command.session.archive.description": "Archiveren sessie",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Gearchiveerde sessies",
   "command.session.archivedBrowse.description": "Sessie herstellen sessie",
   "dialog.archivedSessions.title": "Gearchiveerde sessies",
-  "dialog.archivedSessions.description": "Sessie herstellen sessie",
-  "dialog.archivedSessions.empty": "Gearchiveerde sessies",
-  "dialog.archivedSessions.noMatches": "Gearchiveerde sessies",
   "dialog.archivedSessions.error": "Gearchiveerde sessies konden niet worden geladen",
   "dialog.archivedSessions.loading": "Gearchiveerde sessies laden…",
   "session.archive.refreshFailed": "De sessie is bijgewerkt, maar de details konden niet worden vernieuwd.",

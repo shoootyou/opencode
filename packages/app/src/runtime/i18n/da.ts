@@ -1,7 +1,4 @@
 export const dict = {
-  "dialog.archivedSessions.search.placeholder": "Search this page",
-  "dialog.archivedSessions.previousPage": "Previous page",
-  "dialog.archivedSessions.nextPage": "Next page",
   "common.unarchive": "Gendan",
   "command.session.archive": "Arkivér session",
   "command.session.archive.description": "Arkivér session",
@@ -10,9 +7,6 @@ export const dict = {
   "command.session.archivedBrowse": "Arkiverede sessioner",
   "command.session.archivedBrowse.description": "Gendan session session",
   "dialog.archivedSessions.title": "Arkiverede sessioner",
-  "dialog.archivedSessions.description": "Gendan session session",
-  "dialog.archivedSessions.empty": "Arkiverede sessioner",
-  "dialog.archivedSessions.noMatches": "Arkiverede sessioner",
   "dialog.archivedSessions.error": "Kunne ikke indlæse arkiverede sessioner",
   "dialog.archivedSessions.loading": "Indlæser arkiverede sessioner…",
   "session.archive.refreshFailed": "Sessionen blev opdateret, men dens oplysninger kunne ikke opdateres.",

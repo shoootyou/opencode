@@ -43,6 +43,11 @@ const retained = [
   "session.archive.refreshFailed",
 ]
 
+const genericLabelOwners = {
+  "common.loadMore": DESKTOP_NATIVE_LOCALES,
+  "common.retry": ["en"],
+} as const
+
 const slots = (value: string) => [...value.matchAll(/{{([^{}]+)}}/g)].map((match) => match[1]).sort()
 
 test("defines exact English loaded-only archive copy and exact Spanish translations", async () => {
@@ -62,12 +67,22 @@ test("removes only the obsolete archive pager keys from all 63 dictionaries", as
   for (const locale of DESKTOP_NATIVE_LOCALES) {
     const dictionary: Record<string, string> = locale === "en" ? en : (await import(`./${locale}.ts`)).dict
     for (const key of retired) expect(Object.hasOwn(dictionary, key)).toBe(false)
-    expect(dictionary["common.loadMore"]).toBeTruthy()
-    expect(dictionary["common.retry"]).toBeTruthy()
     for (const key of retained) {
       expect(Object.hasOwn(dictionary, key)).toBe(true)
       expect(dictionary[key]?.trim()).not.toBe("")
       expect(slots(dictionary[key])).toEqual(slots((en as Record<string, string>)[key]))
     }
   }
+})
+
+test("keeps generic continuation labels in their baseline-owning dictionaries", async () => {
+  for (const [key, owners] of Object.entries(genericLabelOwners)) {
+    for (const locale of owners) {
+      const dictionary: Record<string, string> = locale === "en" ? en : (await import(`./${locale}.ts`)).dict
+      expect(Object.hasOwn(dictionary, key)).toBe(true)
+      expect(dictionary[key]?.trim()).not.toBe("")
+    }
+  }
+
+  expect(en["common.retry"]).toBe("Try again")
 })
