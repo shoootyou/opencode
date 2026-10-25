@@ -132,7 +132,7 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
     }
 
     if (items.length === 0) {
-      list.setActive("")
+      if (props.preserveActiveKey) list.setActive("")
       return
     }
     list.setActive(props.key(items[0]))

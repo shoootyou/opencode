@@ -27,6 +27,8 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const [filter, setFilter] = createSignal("")
   let scroller: HTMLDivElement | undefined
   let demand = false
+  let keyboardDemandFrame: number | undefined
+  let keyboardDemandGeneration = 0
   let previousScrollTop = 0
   let underfillFrame: number | undefined
   let underfillProbed = false
@@ -108,6 +110,26 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const canLoadMore = () => view().loadMoreEnabled
   const canRetry = () => view().retryEnabled
 
+  const clearKeyboardDemand = () => {
+    demand = false
+    keyboardDemandGeneration++
+    if (keyboardDemandFrame !== undefined) cancelAnimationFrame(keyboardDemandFrame)
+    keyboardDemandFrame = undefined
+  }
+
+  const setKeyboardDemand = () => {
+    demand = true
+    keyboardDemandGeneration++
+    if (keyboardDemandFrame !== undefined) cancelAnimationFrame(keyboardDemandFrame)
+    const generation = keyboardDemandGeneration
+    keyboardDemandFrame = requestAnimationFrame(() => {
+      keyboardDemandFrame = requestAnimationFrame(() => {
+        if (keyboardDemandGeneration !== generation) return
+        clearKeyboardDemand()
+      })
+    })
+  }
+
   const loadMore = () => {
     if (canLoadMore()) void model.loadMore()
   }
@@ -127,7 +149,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
     previousScrollTop = current.scrollTop
 
     if (!demand) return
-    demand = false
+    clearKeyboardDemand()
     if (!movedDown || current.clientHeight <= 0) return
     if (current.scrollHeight - current.clientHeight - current.scrollTop > 96) return
 
@@ -135,7 +157,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
   }
 
   const onWheel = (event: WheelEvent) => {
-    demand = false
+    clearKeyboardDemand()
     if (event.deltaY <= 0) return
 
     if (!scroller || scroller.clientHeight <= 0) return
@@ -178,6 +200,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
     const current = state()
 
     if (current.status === "loading") {
+      clearKeyboardDemand()
       underfillProbed = false
       underfillEligible = false
       underfillDecided = false
@@ -241,6 +264,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
 
   onCleanup(() => {
     if (underfillFrame !== undefined) cancelAnimationFrame(underfillFrame)
+    clearKeyboardDemand()
     removeWheel?.()
   })
 
@@ -265,7 +289,11 @@ function ArchivedSessionsDialog(props: { server: string }) {
             })
           }}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End") demand = true
+            if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End") {
+              setKeyboardDemand()
+              return
+            }
+            clearKeyboardDemand()
           }}
         >
           <List<ArchiveSession>
@@ -280,7 +308,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
             search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}
             emptyMessage={listMessage()}
             onFilter={(value) => {
-              demand = false
+              clearKeyboardDemand()
               setFilter(value)
             }}
             onScroll={onScroll}
