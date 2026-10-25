@@ -2,53 +2,55 @@
  * @spec-handoff
  * @interface selectArchivedSessionsView(input): ArchivedSessionsView
  * @behavior
- *   - Distinguishes a filtered nonempty page with no visible rows from a genuinely empty page.
- *   - Disables every paging action while a restore is pending.
+ *   - Separates initial loading/error from continuation pending/error while retaining loaded rows.
+ *   - Exposes only Load more or Retry for a stored next cursor and never pager controls.
  * @edge-cases
- *   - Loading and error states expose their own view messages.
- * @see RFC 057 Addendum C.3 and C.6
+ *   - A loaded zero-match filter remains eligible for Load more; restore pending disables continuation.
+ * @see RFC 057 D.3.2, D.3.17-18
  */
+// oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: assertions intentionally view the old page-shaped return as opaque until the accepted continuous-list result type exists.
 import { expect, test } from "bun:test"
 import { selectArchivedSessionsView } from "./archived-sessions-view"
 
-test("selects no-match only when a nonempty ready page is filtered to zero rows", () => {
-  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 0, filter: "missing" })).toMatchObject({
-    message: "no-match",
+test("selects loaded empty and no-match copy without page-scoped actions", () => {
+  expect(
+    selectArchivedSessionsView({ status: "ready", visibleSessionCount: 0, filter: "missing" }) as unknown,
+  ).toMatchObject({
+    message: "loaded-no-match",
   })
-  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 0, filter: "  " })).toMatchObject({
-    message: "page-empty",
-  })
-  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 1, filter: "missing" })).toMatchObject({
-    message: undefined,
-  })
-})
-
-test("selects loading and error messages independently of page controls", () => {
-  expect(selectArchivedSessionsView({ status: "loading", visibleSessionCount: 0, filter: "" })).toEqual({
-    message: "loading",
-    previousEnabled: false,
-    nextEnabled: false,
-    resetEnabled: false,
-  })
-  expect(selectArchivedSessionsView({ status: "error", visibleSessionCount: 0, filter: "missing" })).toEqual({
-    message: "error",
-    previousEnabled: false,
-    nextEnabled: false,
-    resetEnabled: false,
+  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 0, filter: "" }) as unknown).toMatchObject({
+    message: "loaded-empty",
   })
 })
 
-test("enables ready-page controls from cursors and locks them during restore", () => {
-  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 1, filter: "", previousCursor: "previous", nextCursor: "next" })).toEqual({
-    message: undefined,
-    previousEnabled: true,
-    nextEnabled: true,
-    resetEnabled: true,
-  })
-  expect(selectArchivedSessionsView({ status: "ready", visibleSessionCount: 1, filter: "", previousCursor: "previous", nextCursor: "next", restoringID: "session-1" })).toEqual({
-    message: undefined,
-    previousEnabled: false,
-    nextEnabled: false,
-    resetEnabled: false,
-  })
+test("offers Load more for a continuation cursor even when search has zero matches", () => {
+  expect(
+    selectArchivedSessionsView({
+      status: "ready",
+      visibleSessionCount: 0,
+      filter: "absent",
+      nextCursor: "cursor-2",
+    }) as unknown,
+  ).toEqual({ message: "loaded-no-match", loadMoreEnabled: true, retryEnabled: false })
+})
+
+test("replaces Load more with same-cursor Retry after a continuation failure and disables it during restore", () => {
+  expect(
+    selectArchivedSessionsView({
+      status: "ready",
+      visibleSessionCount: 2,
+      filter: "",
+      nextCursor: "cursor-2",
+      continuationError: new Error("failed"),
+    }) as unknown,
+  ).toEqual({ message: undefined, loadMoreEnabled: false, retryEnabled: true })
+  expect(
+    selectArchivedSessionsView({
+      status: "ready",
+      visibleSessionCount: 2,
+      filter: "",
+      nextCursor: "cursor-2",
+      restoringID: "row-1",
+    }) as unknown,
+  ).toEqual({ message: undefined, loadMoreEnabled: false, retryEnabled: false })
 })

@@ -6,15 +6,20 @@
  *   - Keeps rows inset by 12px and readable without horizontal overflow at 320px, 375px, and desktop widths.
  *   - Renders a decorative native session icon, start-aligned title/path text, and an independently right-aligned date.
  *   - Keeps icon, title, directory, and date on one desktop row; narrow rows stack only title/path in the left column.
- *   - Restores the keyboard-selected archived session and retains paging and search controls.
+ *   - Restores the keyboard-selected archived session from a continuous loaded-only list.
+ *   - Keeps the actual list scroller and bottom Load more/Retry actions keyboard reachable.
  * @edge-cases
  *   - A timestamp of 0 remains a row but intentionally has no date.
  *   - The displayed date derives from time.archived, not time.updated or time.created.
  *   - Long titles and directories truncate without viewport overflow while the date remains a separate right column.
  *   - An extremely long unbroken title cannot collapse a non-empty directory below a readable 48px allocation.
- * @rerun PLAYWRIGHT_BASE_URL=http://127.0.0.1:9 OPENCODE_COMPILED_BINARY=<rebuilt binary> playwright test archived-sessions-compiled-serve.spec.ts
+ * @edge-cases
+ *   - Programmatic scroll alone never requests continuation; one native downward wheel at threshold requests one cursor.
+ *   - Appending preserves connected row nodes, native row focus, active selection, and scroll position.
+ * @rerun OPENCODE_COMPILED_BINARY=packages/cli/dist/cli-linux-x64/bin/opencode bun run test:e2e -- e2e/regression/archived-sessions-compiled-serve.spec.ts
  * @see ./dialog-archived-sessions.tsx
  */
+// oxlint-disable anti-slop/require-readable-spacing -- SAFETY: the deterministic multi-batch fixture keeps each network-response branch adjacent to its request-count assertion.
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test"
 import { Schema } from "effect"
 import { randomBytes, randomUUID } from "node:crypto"
@@ -525,13 +530,13 @@ test("retains epoch-zero rows without a fabricated archived date", async () => {
   await expect(row).not.toContainText(/hace \d+ [mhd]/)
 })
 
-test("restores the keyboard-selected real archived session while search and pager remain available", async () => {
+test("restores the keyboard-selected real archived session while loaded-only search remains available", async () => {
   const session = await createSession(page, "Keyboard restore archive")
   await openSession(page, session.id, session.title)
   await archiveThroughMenu(page, session.id)
 
   let dialog = await openArchivedSessions(page)
-  const search = dialog.getByPlaceholder("Buscar en esta página")
+  const search = dialog.getByPlaceholder("Buscar")
   await expect(search).toBeFocused()
   await search.press("Escape")
   await expect(dialog).toBeHidden()
@@ -539,11 +544,11 @@ test("restores the keyboard-selected real archived session while search and page
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
   dialog = await openArchivedSessions(page)
-  const reopenedSearch = dialog.getByPlaceholder("Buscar en esta página")
+  const reopenedSearch = dialog.getByPlaceholder("Buscar")
   await expect(reopenedSearch).toBeFocused()
   await expect(reopenedSearch).toBeVisible()
-  await expect(dialog.getByRole("button", { name: "Página anterior" })).toBeVisible()
-  await expect(dialog.getByRole("button", { name: "Página siguiente" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Página anterior" })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Página siguiente" })).toHaveCount(0)
   await reopenedSearch.fill("Keyboard restore archive")
 
   const row = dialog.locator('[data-slot="list-item"]').filter({ hasText: session.title })
@@ -553,6 +558,44 @@ test("restores the keyboard-selected real archived session while search and page
   await expect(page).toHaveURL(new RegExp(`/session/${session.id}$`))
   await expect(dialog).toBeHidden()
   await expect.poll(async () => (await getSession(page, session.id)).time?.archived ?? null).toBeNull()
+})
+
+test("keeps a bounded continuous archive list: programmatic scroll cannot demand but one native wheel appends exactly one cursor", async () => {
+  const archives = Array.from({ length: 51 }, (_, index) => ({
+    id: `ses_archive_${String(index).padStart(3, "0")}`,
+    title: `Archived ${index}`,
+    directory: `/workspace/archive-${index}`,
+    archived: Date.now() - index * 1_000,
+  }))
+  let requests = 0
+
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      requests++
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      const data = cursor ? archives.slice(50) : archives.slice(0, 50)
+      return route.fulfill({ json: { data: data.map(toArchivedApiRow), cursor: cursor ? {} : { next: "cursor-2" } } })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
+  await expect(scroller).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /cargar más/i })).toBeVisible()
+  expect(requests).toBeLessThanOrEqual(2)
+
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  await expect.poll(() => requests).toBe(1)
+
+  await scroller.hover()
+  await page.mouse.wheel(0, 800)
+  await expect.poll(() => requests).toBe(2)
+  await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_050"]')).toBeVisible()
+  await expect.poll(() => requests).toBe(2)
 })
 
 async function connect(page: Page) {
@@ -637,15 +680,25 @@ async function mockArchivedPage(
     async (route) => {
       return route.fulfill({
         json: {
-          data: sessions.map((session) => ({
-            id: session.id,
-            title: session.title,
-            location: { directory: session.directory },
-            time: { archived: session.archived, updated: session.updated ?? session.archived },
-          })),
+          data: sessions.map(toArchivedApiRow),
           cursor: {},
         },
       })
     },
   )
+}
+
+function toArchivedApiRow(session: {
+  id: string
+  title: string
+  directory: string
+  archived: number
+  updated?: number
+}) {
+  return {
+    id: session.id,
+    title: session.title,
+    location: { directory: session.directory },
+    time: { archived: session.archived, updated: session.updated ?? session.archived },
+  }
 }
