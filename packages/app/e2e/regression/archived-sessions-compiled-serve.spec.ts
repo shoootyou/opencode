@@ -15,6 +15,8 @@
  *   - An extremely long unbroken title cannot collapse a non-empty directory below a readable 48px allocation.
  * @edge-cases
  *   - Programmatic scroll alone never requests continuation; one native downward wheel at threshold requests one cursor.
+ *   - A non-scrolling ArrowDown expires its keyboard demand, so later programmatic movement cannot load more.
+ *   - Upward wrapping preserves list navigation but cannot spend stale keyboard demand to load more.
  *   - A stale far-from-bottom wheel demand, deferred underfill, and stale continuation focus cannot affect later actions.
  *   - Appending preserves connected row nodes, native row focus, active selection, and scroll position.
  * @rerun OPENCODE_COMPILED_BINARY=packages/cli/dist/cli-linux-x64/bin/opencode bun run test:e2e -- e2e/regression/archived-sessions-compiled-serve.spec.ts
@@ -665,6 +667,109 @@ test("does not spend a far-from-bottom native wheel demand after later programma
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
     .toBeGreaterThan(96)
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  await expect.poll(() => cursors).toEqual([null])
+})
+
+test("does not let upward wrapping spend stale keyboard demand after non-scrolling list navigation", async () => {
+  const archives = Array.from({ length: 51 }, (_, index) => ({
+    id: `ses_archive_keyboard_wrap_${String(index).padStart(3, "0")}`,
+    title: `Keyboard wrap ${index}`,
+    directory: `/workspace/keyboard-wrap-${index}`,
+    archived: Date.now() - index,
+  }))
+  const cursors: Array<string | null> = []
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      cursors.push(cursor)
+      return route.fulfill({
+        json: {
+          data: (cursor ? archives.slice(50) : archives.slice(0, 50)).map(toArchivedApiRow),
+          cursor: cursor ? {} : { next: "keyboard-wrap-next" },
+        },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const search = dialog.getByPlaceholder("Buscar")
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
+  await expect(search).toBeFocused()
+  await expect(dialog.locator('[data-slot="list-item"]')).toHaveCount(50)
+  await expect(scroller).toHaveJSProperty("scrollTop", 0)
+  const activeKey = await dialog.locator('[data-slot="list-item"][data-active="true"]').getAttribute("data-key")
+  if (!activeKey) throw new Error("Expected the initial archived row to be active")
+  const initial = dialog.locator(`[data-slot="list-item"][data-key="${activeKey}"]`)
+  await expect(initial).toHaveAttribute("data-active", "true")
+
+  await page.keyboard.press("ArrowDown")
+  await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_keyboard_wrap_001"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  )
+  await expect(scroller).toHaveJSProperty("scrollTop", 0)
+  await page.keyboard.press("ArrowUp")
+  await expect(initial).toHaveAttribute("data-active", "true")
+  await expect(scroller).toHaveJSProperty("scrollTop", 0)
+  expect(cursors).toEqual([null])
+  await page.keyboard.press("ArrowUp")
+  await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_keyboard_wrap_049"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  )
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
+  await expect.poll(() => cursors).toEqual([null])
+})
+
+test("expires non-scrolling ArrowDown demand before a later programmatic bottom scroll", async () => {
+  const archives = Array.from({ length: 51 }, (_, index) => ({
+    id: `ses_archive_keyboard_expiry_${String(index).padStart(3, "0")}`,
+    title: `Keyboard expiry ${index}`,
+    directory: `/workspace/keyboard-expiry-${index}`,
+    archived: Date.now() - index,
+  }))
+  const cursors: Array<string | null> = []
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      cursors.push(cursor)
+      return route.fulfill({
+        json: {
+          data: (cursor ? archives.slice(50) : archives.slice(0, 50)).map(toArchivedApiRow),
+          cursor: cursor ? {} : { next: "keyboard-expiry-next" },
+        },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const search = dialog.getByPlaceholder("Buscar")
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
+  await expect(search).toBeFocused()
+  await expect(dialog.locator('[data-slot="list-item"]')).toHaveCount(50)
+  await page.keyboard.press("ArrowDown")
+  await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_keyboard_expiry_001"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  )
+  await expect(scroller).toHaveJSProperty("scrollTop", 0)
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
   await scroller.evaluate((element) => {
     element.scrollTop = element.scrollHeight
     element.dispatchEvent(new Event("scroll", { bubbles: true }))

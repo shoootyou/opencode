@@ -3,6 +3,7 @@
  * @interface useFilteredList({ items, key, preserveActiveKey? }): FilteredList
  * @behavior
  *   - Default callers reset selection and recreate groups after item updates.
+ *   - Default callers retain the existing active key when an item update leaves no rows.
  *   - Opted-in unchanged-filter appends retain active key and the existing group object.
  *   - Opted-in filter changes or removed active keys reset to the first matching row without selecting after an intentional clear.
  *   - An obsolete async filter completion cannot overwrite a newer committed opted-in group, rows, or active key.
@@ -46,6 +47,36 @@ test("keeps the default reset behavior after an unchanged-filter item append", a
     shiftKey: false,
   } as KeyboardEvent)
   expect(list.active()).toBe("new")
+  dispose()
+})
+
+test("retains default active selection across an empty update before later rows reset and wrap", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((rootDispose) => {
+    dispose = rootDispose
+    const [items, set] = createSignal([{ id: "first" }, { id: "second" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id })
+  })
+  await flush()
+  list.setActive("second")
+  setItems([])
+  await flush()
+  expect(list.active()).toBe("second")
+  setItems([{ id: "third" }, { id: "fourth" }])
+  await flush()
+  expect(list.active()).toBe("third")
+  list.onKeyDown({
+    altKey: false,
+    ctrlKey: false,
+    key: "ArrowUp",
+    metaKey: false,
+    preventDefault: () => {},
+    shiftKey: false,
+  } as KeyboardEvent)
+  expect(list.active()).toBe("fourth")
   dispose()
 })
 
