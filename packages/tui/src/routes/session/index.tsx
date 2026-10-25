@@ -110,7 +110,7 @@ import {
   type PartRef,
   type SessionRow,
 } from "./rows"
-import { switchLabel } from "../../util/model"
+import { assistantModelLabel, switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
 import { useArgs } from "../../context/args"
@@ -1897,13 +1897,7 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
   const data = useData()
   const local = useLocal()
   const theme = useTheme()
-  const model = createMemo(
-    () =>
-      ctx
-        .models()
-        .find((model) => model.providerID === props.message.model.providerID && model.id === props.message.model.id)
-        ?.name ?? `${props.message.model.providerID}/${props.message.model.id}`,
-  )
+  const model = createMemo(() => assistantModelLabel(props.message.model, ctx.models()))
   const messages = createMemo(() => data.session.message.list(ctx.sessionID))
   const duration = createMemo(() =>
     turnDuration(props.message, messages(), ctx.messageIndex(props.message.id), ctx.legacyTurns()),
@@ -1925,7 +1919,7 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
           <span style={{ fg: props.message.error ? theme.text.muted : local.agent.color(props.message.agent) }}>
             {Locale.titlecase(props.message.agent)}
           </span>
-          <Show when={ctx.terminal.width >= 28}>
+          <Show when={ctx.terminal.width >= 28 && model()}>
             <span style={{ fg: theme.text.muted }}> · {model()}</span>
           </Show>
           <Show when={duration() && (ctx.terminal.width < 28 || ctx.terminal.width >= 36)}>

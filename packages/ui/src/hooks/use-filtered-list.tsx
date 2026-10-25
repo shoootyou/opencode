@@ -1,8 +1,10 @@
 import fuzzysort from "fuzzysort"
 import { entries, flatMap, groupBy, map, pipe } from "remeda"
 import { createEffect, createMemo, createResource, on } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createMutable, createStore } from "solid-js/store"
 import { createList } from "solid-list"
+
+// oxlint-disable anti-slop/require-readable-spacing -- Committed resource reconciliation keeps each identity transition contiguous.
 
 export interface FilteredListProps<T> {
   items: T[] | ((filter: string) => T[] | Promise<T[]>)
@@ -15,18 +17,24 @@ export interface FilteredListProps<T> {
   skipFilter?: (item: T) => boolean
   onSelect?: (value: T | undefined, index: number) => void
   noInitialSelection?: boolean
+  preserveActiveKey?: boolean
 }
 
 export function useFilteredList<T>(props: FilteredListProps<T>) {
   const [store, setStore] = createStore<{ filter: string }>({ filter: "" })
 
-  type Group = { category: string; items: [T, ...T[]] }
+  type Group = { category: string; items: T[] }
 
   const empty: Group[] = []
+  const stableGroups = new Map<string, Group>()
+  let previousCommittedFilter: string | undefined
+  let filterChanged = false
+  let previousGroups = empty
 
-  const [grouped, { refetch }] = createResource(
+  const [resource, { refetch }] = createResource(
     () => ({
       filter: store.filter,
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- SAFETY: items is this hook's typed synchronous-or-async source union.
       items: typeof props.items === "function" ? props.items(store.filter) : props.items,
     }),
     async ({ filter, items }) => {
@@ -42,10 +50,16 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
           const filterable = skipFilter ? x.filter((item) => !skipFilter(item)) : x
           const skipped = skipFilter ? x.filter(skipFilter) : []
 
-          const filtered =
-            !props.filterKeys && Array.isArray(filterable) && filterable.every((e) => typeof e === "string")
-              ? (fuzzysort.go(needle, filterable).map((x) => x.target) as T[])
-              : fuzzysort.go(needle, filterable, { keys: props.filterKeys! }).map((x) => x.obj)
+          const stringItems =
+            !props.filterKeys &&
+            Array.isArray(filterable) &&
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- SAFETY: the string-array branch is selected only after every source item is verified as a string.
+            filterable.every((item) => typeof item === "string")
+
+          // SAFETY: stringItems verifies fuzzysort receives string targets before their typed items are restored.
+          const filtered = stringItems
+            ? (fuzzysort.go(needle, filterable).map((x) => x.target) as T[])
+            : fuzzysort.go(needle, filterable, { keys: props.filterKeys! }).map((x) => x.obj)
 
           return skipped.length ? [...filtered, ...skipped] : filtered
         },
@@ -55,14 +69,39 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
         (groups) => (props.sortGroupsBy ? groups.sort(props.sortGroupsBy) : groups),
       )
 
-      return result
+      return { filter, result }
     },
-    { initialValue: empty },
+    { initialValue: { filter: "", result: empty } },
   )
+
+  const groupedMemo = createMemo(() => {
+    const next = resource()
+    filterChanged = previousCommittedFilter !== undefined && previousCommittedFilter !== next.filter
+    previousCommittedFilter = next.filter
+    if (!props.preserveActiveKey) return next.result
+    if (filterChanged) stableGroups.clear()
+    const categories = new Set(next.result.map((group) => group.category))
+    for (const category of stableGroups.keys()) if (!categories.has(category)) stableGroups.delete(category)
+    return next.result.map((group) => {
+      const existing = stableGroups.get(group.category)
+      if (existing) {
+        existing.items = group.items
+        return existing
+      }
+      const stable = createMutable(group)
+      stableGroups.set(group.category, stable)
+      return stable
+    })
+  })
+
+  // SAFETY: this accessor exposes the resource-compatible properties List consumes while reading only committed groups.
+  const grouped = (() => groupedMemo()) as (() => Group[]) & { readonly latest: Group[]; readonly loading: boolean }
+  Object.defineProperty(grouped, "latest", { get: groupedMemo })
+  Object.defineProperty(grouped, "loading", { get: () => resource.loading })
 
   const flat = createMemo(() => {
     return pipe(
-      grouped.latest || [],
+      grouped(),
       flatMap((x) => x.items),
     )
   })
@@ -85,18 +124,33 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
     loop: true,
   })
 
-  const reset = () => {
+  const reset = (items = flat()) => {
     if (props.noInitialSelection) {
       list.setActive("")
 
       return
     }
 
-    const all = flat()
-
-    if (all.length === 0) return
-    list.setActive(props.key(all[0]))
+    if (items.length === 0) {
+      if (props.preserveActiveKey) list.setActive("")
+      return
+    }
+    list.setActive(props.key(items[0]))
   }
+
+  createEffect(
+    on(resource, () => {
+      const next = grouped()
+      const active = list.active()
+      const previousHadRows = previousGroups.some((group) => group.items.length > 0)
+      const keepActive =
+        props.preserveActiveKey &&
+        !filterChanged &&
+        (active ? next.some((group) => group.items.some((item) => props.key(item) === active)) : previousHadRows)
+      if (!keepActive) reset()
+      previousGroups = next
+    }),
+  )
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Enter" && !event.isComposing) {
@@ -122,12 +176,6 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
       list.onKeyDown(event)
     }
   }
-
-  createEffect(
-    on(grouped, () => {
-      reset()
-    }),
-  )
 
   const onInput = (value: string) => {
     setStore("filter", value)

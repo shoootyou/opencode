@@ -3,7 +3,7 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { Button } from "@opencode/ui/button"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
-import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
+import { type Accessor, createEffect, createMemo, type JSX, onCleanup, startTransition, untrack } from "solid-js"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { useCommand } from "@/shell/commands/command"
 import {
@@ -25,6 +25,8 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { sessionLabel, sessionTitle } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import { archiveHomeSession } from "./archive"
+import { isArchivedSession } from "@/session/archive"
+import { useGlobal } from "@/runtime/server/runtime"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, homeSessionLocation, type HomeSessionRecord } from "./records"
 
@@ -42,12 +44,15 @@ export type HomeSessionGroup = {
 export type OpenSessionOptions = { background?: boolean }
 
 export function createHomeSessionsController(home: HomeController) {
+  let alive = true
+  onCleanup(() => (alive = false))
   const tabs = useTabs()
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
   const queryClient = useQueryClient()
+  const global = useGlobal()
 
   const projectDirectories = createMemo(() => {
     const selected = home.selection.value().directory
@@ -324,7 +329,7 @@ export function createHomeSessionsController(home: HomeController) {
         if (!ctx) return
         const result = await ctx.sdk.api.session.get({ sessionID })
 
-        if (result.time.archived) return
+        if (isArchivedSession(result)) return
 
         return buildHomeSessionRecords({
           sessions: () => [result],
@@ -363,18 +368,21 @@ export function createHomeSessionsController(home: HomeController) {
         const ctx = home.server.focusedContext()
 
         if (!conn || !ctx) return
-        await archiveHomeSession({
-          server: ServerConnection.key(conn),
-          session,
-          // TODO: Restore archiving when the V2 client exposes a session archive API.
-          archive: async (_sessionID) => Promise.reject(new Error("Session archiving is unavailable")),
-          remove() {},
-          onError: (cause) =>
-            showToast({
-              title: language.t("common.requestFailed"),
-              description: errorMessage(cause, language.t("common.requestFailed")),
-            }),
-        })
+        await archiveHomeSession(
+          { server: ServerConnection.key(conn), session },
+          {
+            archiveSession: global.sessionArchive.archiveSession,
+            remove: () => ctx.data.session.evict(session.id),
+            // SAFETY: home archive events are created for the focused server connection.
+            notifyTabsRemoved: (detail) =>
+              notifySessionTabsRemoved({
+                ...detail,
+                server: detail.server as ServerConnection.Key,
+                sessionIDs: [...detail.sessionIDs],
+              }),
+            isActive: () => alive && home.server.focusedContext() === ctx,
+          },
+        )
       },
       rename,
       export: exportSession,
@@ -408,7 +416,10 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
   const now = new Date()
   const today = localDay(now)
   const yesterday = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
-  const day = (record: HomeSessionRecord) => localDay(new Date(record.session.time.updated ?? record.session.time.created))
+
+  const day = (record: HomeSessionRecord) =>
+    localDay(new Date(record.session.time.updated ?? record.session.time.created))
+
   const todaySessions = records.filter((record) => day(record) === today)
   const yesterdaySessions = records.filter((record) => day(record) === yesterday)
   const olderSessions = records.filter((record) => day(record) !== today && day(record) !== yesterday)

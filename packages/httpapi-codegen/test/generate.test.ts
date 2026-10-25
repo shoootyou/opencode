@@ -1,3 +1,12 @@
+/**
+ * @spec-handoff
+ * @interface Effect clients generated from an HttpApi with optional request fields
+ * @behavior
+ *   - Omits undefined optional payload and query fields from emitted requests.
+ *   - Preserves explicit null, zero, true, and false values.
+ * @edge-cases
+ *   - Native and imported Effect generator paths serialize the same request parts.
+ */
 import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -42,7 +51,43 @@ async function emittedModule(output: Output) {
   }
 }
 
+const EffectRequestApi = HttpApi.make("test").add(
+  HttpApiGroup.make("session")
+    .add(
+      HttpApiEndpoint.patch("update", "/session", {
+        payload: Schema.Struct({ archive: Schema.optional(Schema.NullOr(Schema.Number)) }),
+        success: HttpApiSchema.NoContent,
+      }),
+    )
+    .add(
+      HttpApiEndpoint.get("list", "/session", {
+        query: {
+          archived: Schema.Literals(["true", "false"])
+            .pipe(
+              Schema.decodeTo(Schema.Boolean, {
+                decode: SchemaGetter.transform((value) => value === "true"),
+                encode: SchemaGetter.transform((value): "true" | "false" => (value ? "true" : "false")),
+              }),
+              Schema.optional,
+            ),
+        },
+        success: HttpApiSchema.NoContent,
+      }),
+    ),
+)
+
 describe("HttpApiCodegen.generate", () => {
+  test("omits undefined optional request fields in native and imported Effect clients", () => {
+    const contract = compileContract(EffectRequestApi)
+    const outputs = [emitEffect(contract), emitEffectImported(contract, { module: "@example/api", api: "Api" })]
+
+    for (const output of outputs) {
+      const source = output.files.find((file) => file.path === "session.ts" || file.path === "client.ts")?.content
+      expect(source).toContain('...(input?.["archive"] === undefined ? { } : { "archive": input?.["archive"] })')
+      expect(source).toContain('...(input?.["archived"] === undefined ? { } : { "archived": input?.["archived"] })')
+    }
+  })
+
   test("compiles one contract for Promise and Effect emitters", () => {
     const contract = compileContract(
       api(

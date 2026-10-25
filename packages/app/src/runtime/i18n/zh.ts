@@ -3,6 +3,17 @@ import en from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "common.unarchive": "取消归档",
+  "command.session.archive": "归档会话",
+  "command.session.archive.description": "归档当前会话",
+  "command.session.unarchive": "取消归档会话",
+  "command.session.unarchive.description": "将当前会话恢复到会话列表",
+  "command.session.archivedBrowse": "浏览已归档会话",
+  "command.session.archivedBrowse.description": "查找并恢复已归档会话",
+  "dialog.archivedSessions.title": "已归档会话",
+  "dialog.archivedSessions.error": "无法加载已归档会话",
+  "dialog.archivedSessions.loading": "正在加载已归档会话…",
+  "session.archive.refreshFailed": "会话已更新，但无法刷新其详细信息。",
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "文件",
   "desktop.menu.edit": "编辑",

@@ -72,6 +72,17 @@ const desktop = [
 ]
 
 export const dict = {
+  "common.unarchive": "Endurheimta úr safni",
+  "command.session.archive": "Setja í safn setu",
+  "command.session.archive.description": "Setja í safn setu",
+  "command.session.unarchive": "Endurheimta úr safni setu",
+  "command.session.unarchive.description": "Endurheimta setu",
+  "command.session.archivedBrowse": "Geymdar setur",
+  "command.session.archivedBrowse.description": "Endurheimta setu setu",
+  "dialog.archivedSessions.title": "Geymdar setur",
+  "dialog.archivedSessions.error": "Ekki tókst að hlaða geymdum setum",
+  "dialog.archivedSessions.loading": "Hleður geymdum setum…",
+  "session.archive.refreshFailed": "Setan var uppfærð, en ekki tókst að uppfæra upplýsingarnar.",
   ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
   "command.category.suggested": "Tillögur",
   "command.category.view": "Skoða",

@@ -1,25 +1,23 @@
-import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
-import type { ServerConnection } from "@/runtime/server/registry"
-import type { SessionInfo } from "@opencode/client/promise"
+import { isArchivedSession, type ArchiveActions, type ArchiveSession, type ArchiveTabsRemoved } from "@/session/archive"
 
-type HomeSession = Pick<SessionInfo, "id" | "location">
+export async function archiveHomeSession(
+  input: Readonly<{ server: string; session: ArchiveSession }>,
+  deps: Readonly<{
+    archiveSession: ArchiveActions["archiveSession"]
+    remove: () => void
+    notifyTabsRemoved: (detail: ArchiveTabsRemoved) => void
+    isActive: () => boolean
+  }>,
+): Promise<boolean> {
+  if (input.session.parentID || isArchivedSession(input.session) || !deps.isActive()) return false
+  const sessionID = input.session.id
+  const directory = input.session.location.directory
+  const server = input.server
+  const committed = await deps.archiveSession({ server, sessionID })
 
-export async function archiveHomeSession(input: {
-  server: ServerConnection.Key
-  session: HomeSession
-  archive: (sessionID: string) => Promise<unknown>
-  remove: () => void
-  onError?: (error: unknown) => void
-}) {
-  await input
-    .archive(input.session.id)
-    .then(() => {
-      input.remove()
-      notifySessionTabsRemoved({
-        server: input.server,
-        directory: input.session.location.directory,
-        sessionIDs: [input.session.id],
-      })
-    })
-    .catch((error) => input.onError?.(error))
+  if (!committed || !deps.isActive()) return committed
+  deps.remove()
+  deps.notifyTabsRemoved({ server, directory, sessionIDs: [sessionID] })
+
+  return true
 }

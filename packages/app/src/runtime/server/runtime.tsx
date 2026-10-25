@@ -1,5 +1,15 @@
 import { createSimpleContext } from "@opencode/ui/context"
-import { Accessor, batch, createEffect, createMemo, createResource, createRoot, getOwner, untrack } from "solid-js"
+import {
+  Accessor,
+  batch,
+  createEffect,
+  createMemo,
+  createResource,
+  createRoot,
+  createSignal,
+  getOwner,
+  untrack,
+} from "solid-js"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
 import { useServerHealth } from "@/runtime/server/health"
@@ -20,11 +30,13 @@ import { useSettings } from "@/settings/model"
 import { timelinePreset } from "@opencode/session-ui/timeline/detail"
 import type { SessionInfo } from "@opencode/client/promise"
 import { resolveProjectForSession, resolveSessionDetailsProject } from "@/shell/layout/helpers"
+import { createSessionArchiveActions } from "@/session/archive"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
   init: () => {
     const server = useServers()
+    const language = useLanguage()
 
     const serverHealth = useServerHealth(
       () => server.list,
@@ -91,12 +103,52 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       }
     })
 
+    const [archivePendingVersion, setArchivePendingVersion] = createSignal(0)
+
+    const sessionArchiveActions = createSessionArchiveActions({
+      update: async ({ server: key, sessionID, archive }) => {
+        // SAFETY: session archive actions are invoked with keys created by ServerConnection.key.
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+
+        if (!ctx) throw new Error("Server is unavailable")
+        await ctx.sdk.api.session.update({ sessionID, archive })
+      },
+      sync: async ({ server: key, sessionID }) => {
+        // SAFETY: session archive actions are invoked with keys created by ServerConnection.key.
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+
+        if (!ctx) throw new Error("Server is unavailable")
+        ctx.data.session.invalidate(sessionID)
+        await ctx.data.session.sync(sessionID)
+      },
+      toast: ({ kind, error }) => {
+        const title = language.t("common.requestFailed")
+        showToast({
+          title,
+          description:
+            kind === "refresh" ? language.t("session.archive.refreshFailed") : formatServerError(error, language.t),
+        })
+      },
+      now: Date.now,
+      onPendingChange: () => setArchivePendingVersion((value) => value + 1),
+    })
+
+    const sessionArchive = {
+      ...sessionArchiveActions,
+      isPending(target: Parameters<typeof sessionArchiveActions.isPending>[0]) {
+        archivePendingVersion()
+
+        return sessionArchiveActions.isPending(target)
+      },
+    }
+
     return {
       servers: {
         list: () => server.list,
         health: serverHealth,
       },
       models,
+      sessionArchive,
       ensureServerCtx(conn: ServerConnection.Any) {
         return ensureServerCtx(conn)
       },
