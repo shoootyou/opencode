@@ -180,3 +180,65 @@ for (const outcome of ["resolve", "reject"] as const) {
     dispose()
   })
 }
+
+for (const outcome of ["resolve", "reject"] as const) {
+  test(`keeps the current group after an obsolete same-filter source ${outcome}s`, async () => {
+    type Row = { id: string }
+    const a: Row = { id: "a" }
+    const b: Row = { id: "b" }
+    const c: Row = { id: "c" }
+    const older = Promise.withResolvers<Row[]>()
+    const newer = Promise.withResolvers<Row[]>()
+    const calls: string[] = []
+    let dispose!: () => void
+    let setSource!: (source: Promise<Row[]>) => void
+    let list!: ReturnType<typeof useFilteredList<Row>>
+    const settle = async () => {
+      for (let index = 0; index < 8; index++) await Promise.resolve()
+    }
+
+    createRoot((stop) => {
+      dispose = stop
+      const [source, set] = createSignal<Promise<Row[]>>(Promise.resolve([a]))
+      setSource = (value) => {
+        set(value)
+      }
+      list = useFilteredList({
+        items: (filter) => {
+          calls.push(filter)
+          return source()
+        },
+        key: (row) => row.id,
+        preserveActiveKey: true,
+      })
+    })
+
+    try {
+      await settle()
+      expect(list.flat().map((row) => row.id)).toEqual(["a"])
+      setSource(older.promise)
+      await settle()
+      setSource(newer.promise)
+      await settle()
+      newer.resolve([a, c])
+      await settle()
+      expect(calls).toEqual(["", "", ""])
+      expect(list.flat().map((row) => row.id)).toEqual(["a", "c"])
+      const currentGroup = list.grouped.latest[0]
+      const currentItems = currentGroup.items
+      list.setActive("c")
+
+      if (outcome === "resolve") older.resolve([a, b])
+      else older.reject(new Error("obsolete source"))
+      await settle()
+
+      expect(currentGroup.items.map((row) => row.id)).toEqual(["a", "c"])
+      expect(list.flat().map((row) => row.id)).toEqual(["a", "c"])
+      expect(list.grouped.latest[0]).toBe(currentGroup)
+      expect(currentGroup.items).toBe(currentItems)
+      expect(list.active()).toBe("c")
+    } finally {
+      dispose()
+    }
+  })
+}
