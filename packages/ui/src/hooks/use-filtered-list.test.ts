@@ -145,7 +145,9 @@ for (const outcome of ["resolve", "reject"] as const) {
       list = useFilteredList({
         items: (filter) => {
           calls.push(filter)
+
           if (!filter) return [{ id: "a" }]
+
           return filter === "older" ? older.promise : newer.promise
         },
         key: (item) => item.id,
@@ -184,6 +186,7 @@ for (const outcome of ["resolve", "reject"] as const) {
 for (const outcome of ["resolve", "reject"] as const) {
   test(`keeps the current group after an obsolete same-filter source ${outcome}s`, async () => {
     type Row = { id: string }
+
     const a: Row = { id: "a" }
     const b: Row = { id: "b" }
     const c: Row = { id: "c" }
@@ -193,6 +196,7 @@ for (const outcome of ["resolve", "reject"] as const) {
     let dispose!: () => void
     let setSource!: (source: Promise<Row[]>) => void
     let list!: ReturnType<typeof useFilteredList<Row>>
+
     const settle = async () => {
       for (let index = 0; index < 8; index++) await Promise.resolve()
     }
@@ -203,9 +207,11 @@ for (const outcome of ["resolve", "reject"] as const) {
       setSource = (value) => {
         set(value)
       }
+
       list = useFilteredList({
         items: (filter) => {
           calls.push(filter)
+
           return source()
         },
         key: (row) => row.id,
