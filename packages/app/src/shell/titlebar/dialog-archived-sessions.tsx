@@ -217,7 +217,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
       <DialogHeader>
         <DialogTitleGroup
           title={language.t("dialog.archivedSessions.title")}
-          description={language.t("dialog.archivedSessions.description")}
+          description={language.t("dialog.archivedSessions.loadedDescription")}
         />
       </DialogHeader>
       <DialogBody class="flex min-h-0 flex-1 flex-col">
