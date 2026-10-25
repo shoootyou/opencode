@@ -5,6 +5,7 @@
  *   - Loads one archived root batch of 50, then appends unique continuation rows in response order.
  *   - Guards concurrent continuation, retains rows on recoverable continuation failure, and retries its same cursor.
  *   - Ignores stale, disposed, reset, and restore-aborted append completions.
+ *   - Keeps first row objects, terminates an empty root batch, and searches retained rows without fetching.
  * @edge-cases
  *   - Empty or cursorless batches exhaust; short nonempty batches with a cursor remain continuable.
  *   - Repeated cursors and duplicate-only batches pause with a recoverable error rather than exhausting.
@@ -70,6 +71,29 @@ test("appends unseen continuation rows in response order without treating a shor
   expect(archive.state().nextCursor).toBe("cursor-3")
 })
 
+test("deduplicates each root and continuation batch while retaining first objects and loaded row references", async () => {
+  const initial = session("first")
+  const duplicateInitial = { ...initial, title: "ignored initial duplicate" }
+  const duplicateAppend = session("second")
+  const archive = model(async (input) => {
+    if (!(input as { cursor?: string }).cursor)
+      return { data: [initial, duplicateInitial], cursor: { next: "cursor-2" } }
+    return {
+      data: [{ ...initial, title: "ignored overlap" }, duplicateAppend, { ...duplicateAppend }, session("third")],
+      cursor: {},
+    }
+  })
+
+  await archive.load()
+  const retained = archive.state().rows?.[0]
+  await archive.loadMore()
+
+  expect(archive.state().rows?.map((row) => row.id)).toEqual(["first", "second", "third"])
+  expect(archive.state().rows?.[0]).toBe(retained)
+  expect(archive.state().rows?.[0]).toBe(initial)
+  expect(archive.state().rows?.[1]).toBe(duplicateAppend)
+})
+
 test("sets the continuation in-flight guard before awaiting and does not completion-chain another request", async () => {
   const held = Promise.withResolvers<unknown>()
   const requests: unknown[] = []
@@ -129,6 +153,20 @@ test("exhausts only on an empty batch or an absent cursor, never a short cursor-
   await cursorless.load()
   expect(cursorless.state().rows?.map((row) => row.id)).toEqual(["final"])
   expect(cursorless.state().nextCursor).toBeUndefined()
+})
+
+test("treats an empty root batch as terminal despite a bogus continuation cursor", async () => {
+  let requests = 0
+  const archive = model(async () => {
+    requests++
+    return { data: [], cursor: { next: "bogus" } }
+  })
+
+  await archive.load()
+  await archive.loadMore()
+
+  expect(archive.state()).toMatchObject({ status: "ready", rows: [], nextCursor: undefined })
+  expect(requests).toBe(1)
 })
 
 test("pauses when a later continuation returns an already consumed cursor other than its requested cursor", async () => {
@@ -290,6 +328,57 @@ test("keeps continuation available after a failed restore without replaying the 
   expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "shown", archive: null }])
   await archive.loadMore()
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["shown", "later"])
+})
+
+for (const lateOutcome of ["resolve", "reject"] as const) {
+  test(`clears a restore-aborted held append before its late ${lateOutcome} and permits an explicit same-cursor retry`, async () => {
+    const held = Promise.withResolvers<unknown>()
+    let requests = 0
+    const archive = createArchivedSessionsModel({
+      server: "captured-server",
+      list: async () => {
+        requests++
+        if (requests === 1) return { data: [session("shown")], cursor: { next: "cursor-2" } } as never
+        if (requests === 2) return held.promise as never
+        return { data: [session("later")], cursor: {} } as never
+      },
+      setArchive: async () => false,
+      openProject: () => {},
+      touchProject: () => {},
+      addTab: () => "tab",
+      selectTab: () => {},
+      close: () => {},
+    }) as unknown as ContinuousModel
+
+    await archive.load()
+    const retained = archive.state().rows?.[0]
+    const append = archive.loadMore()
+    expect(await archive.restore("shown")).toBe(false)
+    expect(archive.state()).toMatchObject({ status: "ready", nextCursor: "cursor-2", continuationPending: false })
+    expect(archive.state().rows?.[0]).toBe(retained)
+    if (lateOutcome === "resolve") held.resolve({ data: [session("stale")], cursor: {} })
+    else held.reject(new Error("ignored abort"))
+    await append
+    expect(archive.state().rows?.map((row) => row.id)).toEqual(["shown"])
+
+    await archive.loadMore()
+    expect(requests).toBe(3)
+    expect(archive.state().rows?.map((row) => row.id)).toEqual(["shown", "later"])
+  })
+}
+
+test("filters loaded title and directory rows locally without issuing another archive request", async () => {
+  let requests = 0
+  const archive = model(async () => {
+    requests++
+    return { data: [session("title-match"), session("directory-match")], cursor: {} }
+  })
+
+  await archive.load()
+  expect(archive.search("title").map((row) => row.id)).toEqual(["title-match"])
+  expect(archive.search("/directory").map((row) => row.id)).toEqual(["directory-match"])
+  expect(archive.search("").map((row) => row.id)).toEqual(["title-match", "directory-match"])
+  expect(requests).toBe(1)
 })
 
 test("loadArchivedSessions preserves one-request validation and terminal cursor normalization", async () => {

@@ -15,6 +15,7 @@
  *   - An extremely long unbroken title cannot collapse a non-empty directory below a readable 48px allocation.
  * @edge-cases
  *   - Programmatic scroll alone never requests continuation; one native downward wheel at threshold requests one cursor.
+ *   - A stale far-from-bottom wheel demand and stale continuation focus cannot affect later actions.
  *   - Appending preserves connected row nodes, native row focus, active selection, and scroll position.
  * @rerun OPENCODE_COMPILED_BINARY=packages/cli/dist/cli-linux-x64/bin/opencode bun run test:e2e -- e2e/regression/archived-sessions-compiled-serve.spec.ts
  * @see ./dialog-archived-sessions.tsx
@@ -634,6 +635,43 @@ test("keeps a bounded continuous archive list: programmatic movement cannot dema
   await expect.poll(() => cursors).toEqual([null, "cursor-2", "cursor-3"])
 })
 
+test("does not spend a far-from-bottom native wheel demand after later programmatic movement", async () => {
+  const archives = Array.from({ length: 51 }, (_, index) => ({
+    id: `ses_archive_stale_wheel_${String(index).padStart(3, "0")}`,
+    title: `Stale wheel ${index}`,
+    directory: `/workspace/stale-wheel-${index}`,
+    archived: Date.now() - index,
+  }))
+  const cursors: Array<string | null> = []
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      cursors.push(cursor)
+      return route.fulfill({
+        json: {
+          data: (cursor ? archives.slice(50) : archives.slice(0, 50)).map(toArchivedApiRow),
+          cursor: cursor ? {} : { next: "cursor-2" },
+        },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
+  await expect(scroller).toBeVisible()
+  await scroller.hover()
+  await page.mouse.wheel(0, 1)
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+    .toBeGreaterThan(96)
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  await expect.poll(() => cursors).toEqual([null])
+})
+
 test("opens a 300-session history without draining cursor pages", async () => {
   const archives = Array.from({ length: 300 }, (_, index) => ({
     id: `ses_archive_bound_${String(index).padStart(3, "0")}`,
@@ -756,6 +794,7 @@ test("preserves connected archive group and row nodes, native focus, active sele
   await page.mouse.wheel(0, 800)
   const retry = dialog.getByRole("button", { name: "Try again" })
   await expect(retry).toBeVisible()
+  await expect(dialog.getByRole("status")).toContainText("No se pudieron cargar las sesiones archivadas")
 
   for (const handle of [rowHandle, groupHandle]) expect(await handle?.evaluate((node) => node.isConnected)).toBe(true)
   // SAFETY: this test-owned property counts only forced focus calls on the retained native row.
@@ -775,6 +814,7 @@ test("preserves connected archive group and row nodes, native focus, active sele
   const scrollBeforeRetry = await scroller.evaluate((node) => node.scrollTop)
   await page.keyboard.press("Enter")
   await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_50"]')).toBeVisible()
+  await expect(dialog.getByRole("status")).toHaveCount(0)
 
   expect(await rowHandle?.evaluate((node) => node.isConnected)).toBe(true)
   expect(await groupHandle?.evaluate((node) => node.isConnected)).toBe(true)
@@ -892,6 +932,83 @@ for (const [action, key, userLeavesPendingAction] of [
     else await expect(search).toBeFocused()
   })
 }
+
+test("does not recover stale load-more focus after the action settles, loses focus, and a later wheel exhausts", async () => {
+  const cursors: Array<string | null> = []
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      cursors.push(cursor)
+      if (!cursor)
+        return route.fulfill({
+          json: {
+            data: Array.from({ length: 50 }, (_, index) =>
+              toArchivedApiRow({
+                id: `ses_archive_settled_${index}`,
+                title: `Settled ${index}`,
+                directory: `/workspace/settled-${index}`,
+                archived: Date.now() - index,
+              }),
+            ),
+            cursor: { next: "cursor-2" },
+          },
+        })
+      if (cursor === "cursor-2")
+        return route.fulfill({
+          json: {
+            data: [
+              toArchivedApiRow({
+                id: "ses_archive_settled_more",
+                title: "Settled more",
+                directory: "/workspace/more",
+                archived: Date.now() - 100,
+              }),
+            ],
+            cursor: { next: "cursor-3" },
+          },
+        })
+      return route.fulfill({
+        json: {
+          data: [
+            toArchivedApiRow({
+              id: "ses_archive_settled_last",
+              title: "Settled last",
+              directory: "/workspace/last",
+              archived: Date.now() - 101,
+            }),
+          ],
+          cursor: {},
+        },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const loadMore = dialog.getByRole("button", { name: "Cargar más" })
+  const search = dialog.getByPlaceholder("Buscar")
+  const focusableCount = await dialog.locator("button:not([disabled]), input:not([disabled]), [href]").count()
+  for (let index = 0; index <= focusableCount; index++) {
+    if (await loadMore.evaluate((node) => node === document.activeElement)) break
+    await page.keyboard.press("Tab")
+  }
+  await expect(loadMore).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(dialog.getByText("Settled more", { exact: true })).toBeVisible()
+  await expect(loadMore).toBeFocused()
+  await page.keyboard.press("Tab")
+  const close = dialog.locator('[data-slot="dialog-close-button"]')
+  await expect(close).toBeFocused()
+
+  const scroller = dialog.locator('[data-slot="list-scroll"]')
+  await scroller.evaluate((element) => (element.scrollTop = element.scrollHeight))
+  await scroller.hover()
+  await page.mouse.wheel(0, 800)
+  await expect(dialog.getByText("Settled last", { exact: true })).toBeVisible()
+  await expect(close).toBeFocused()
+  await expect(search).not.toBeFocused()
+  expect(cursors).toEqual([null, "cursor-2", "cursor-3"])
+})
 
 async function connect(page: Page) {
   await page.goto(origin, { waitUntil: "domcontentloaded" })

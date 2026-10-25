@@ -4,6 +4,7 @@
  * @behavior
  *   - Default callers reset selection and recreate groups after item updates.
  *   - Opted-in unchanged-filter appends retain active key and the existing group object.
+ *   - Opted-in filter changes or removed active keys reset to the first matching row without selecting after an intentional clear.
  * @edge-cases
  *   - New items append without changing the active row's key.
  * @see RFC 057 D.3.15, AP8
@@ -55,9 +56,11 @@ test("preserves the active key and group object for opted-in unchanged-filter ap
     dispose = rootDispose
     const [items, set] = createSignal([{ id: "first" }, { id: "third" }])
     setItems = set
-    list = useFilteredList({ items, key: (item: { id: string }) => item.id, preserveActiveKey: true } as unknown as Parameters<
-      typeof useFilteredList<{ id: string }>
-    >[0])
+    list = useFilteredList({
+      items,
+      key: (item: { id: string }) => item.id,
+      preserveActiveKey: true,
+    } as unknown as Parameters<typeof useFilteredList<{ id: string }>>[0])
   })
   await flush()
   list.setActive("third")
@@ -66,5 +69,65 @@ test("preserves the active key and group object for opted-in unchanged-filter ap
   await flush()
   expect(list.active()).toBe("third")
   expect(list.grouped.latest[0]).toBe(group)
+  dispose()
+})
+
+test("resets opted-in selection to the first matching row when filtering removes its key", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((rootDispose) => {
+    dispose = rootDispose
+    const [items, set] = createSignal([{ id: "alpha" }, { id: "beta" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
+      typeof useFilteredList<{ id: string }>
+    >[0])
+  })
+  await flush()
+  list.setActive("alpha")
+  list.onInput("beta")
+  await flush()
+  expect(list.active()).toBe("beta")
+  dispose()
+})
+
+test("resets opted-in selection to the first row when the selected row disappears", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((rootDispose) => {
+    dispose = rootDispose
+    const [items, set] = createSignal([{ id: "alpha" }, { id: "beta" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
+      typeof useFilteredList<{ id: string }>
+    >[0])
+  })
+  await flush()
+  list.setActive("beta")
+  setItems([{ id: "alpha" }])
+  await flush()
+  expect(list.active()).toBe("alpha")
+  dispose()
+})
+
+test("preserves intentional no-selection through an opted-in unchanged-filter append", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((rootDispose) => {
+    dispose = rootDispose
+    const [items, set] = createSignal([{ id: "first" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
+      typeof useFilteredList<{ id: string }>
+    >[0])
+  })
+  await flush()
+  list.setActive("")
+  setItems([{ id: "first" }, { id: "second" }])
+  await flush()
+  expect(list.active()).toBe("")
   dispose()
 })
