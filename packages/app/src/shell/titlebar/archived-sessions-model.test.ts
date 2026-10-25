@@ -107,6 +107,63 @@ test("keeps rows and the failed cursor for retry after duplicate-only or repeate
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["first", "second"])
 })
 
+test("exhausts only on an empty batch or an absent cursor, never a short cursor-bearing batch", async () => {
+  const requests: unknown[] = []
+  const archive = model(async (input) => {
+    requests.push(input)
+    if (requests.length === 1) return { data: [session("first")], cursor: { next: "cursor-2" } }
+    if (requests.length === 2) return { data: [session("short")], cursor: { next: "cursor-3" } }
+    return { data: [], cursor: { next: "bogus" } }
+  })
+  const cursorless = model(async () => ({ data: [session("final")], cursor: {} }))
+
+  await archive.load()
+  await archive.loadMore()
+  expect(archive.state().nextCursor).toBe("cursor-3")
+  await archive.loadMore()
+  expect(archive.state().rows?.map((row) => row.id)).toEqual(["first", "short"])
+  expect(archive.state().nextCursor).toBeUndefined()
+  await archive.loadMore()
+  expect(requests).toHaveLength(3)
+
+  await cursorless.load()
+  expect(cursorless.state().rows?.map((row) => row.id)).toEqual(["final"])
+  expect(cursorless.state().nextCursor).toBeUndefined()
+})
+
+test("pauses when a later continuation returns an already consumed cursor other than its requested cursor", async () => {
+  const archive = model(async (input) => {
+    const cursor = (input as { cursor?: string }).cursor
+    if (!cursor) return { data: [session("first")], cursor: { next: "cursor-2" } }
+    if (cursor === "cursor-2") return { data: [session("second")], cursor: { next: "cursor-3" } }
+    return { data: [session("third")], cursor: { next: "cursor-2" } }
+  })
+
+  await archive.load()
+  await archive.loadMore()
+  await archive.loadMore()
+  expect(archive.state().rows?.map((row) => row.id)).toEqual(["first", "second"])
+  expect(archive.state().nextCursor).toBe("cursor-3")
+  expect(archive.state().continuationError).toBeDefined()
+})
+
+test("retries an initial failure from the first batch", async () => {
+  const requests: unknown[] = []
+  const archive = model(async (input) => {
+    requests.push(input)
+    if (requests.length === 1) throw new Error("offline")
+    return { data: [session("recovered")], cursor: {} }
+  })
+
+  await archive.load()
+  await archive.retryMore()
+  expect(requests).toEqual([
+    { archived: "only", parentID: null, order: "desc", limit: 50 },
+    { archived: "only", parentID: null, order: "desc", limit: 50 },
+  ])
+  expect(archive.state().rows?.map((row) => row.id)).toEqual(["recovered"])
+})
+
 test("commits final nonempty rows, exhausts only on empty or missing cursor, and ignores stale append after disposal", async () => {
   const held = Promise.withResolvers<unknown>()
   let calls = 0
@@ -123,6 +180,27 @@ test("commits final nonempty rows, exhausts only on empty or missing cursor, and
   await append
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["first"])
 })
+
+for (const outcome of ["resolve", "reject"] as const) {
+  test(`ignores an abort-ignored ${outcome} from a continuation after load resets its generation`, async () => {
+    const held = Promise.withResolvers<unknown>()
+    let calls = 0
+    const archive = model(async () => {
+      calls++
+      if (calls === 1) return { data: [session("first")], cursor: { next: "cursor-2" } }
+      if (calls === 2) return held.promise
+      return { data: [session("replacement")], cursor: {} }
+    })
+
+    await archive.load()
+    const append = archive.loadMore()
+    await archive.load()
+    if (outcome === "resolve") held.resolve({ data: [session("stale")], cursor: {} })
+    else held.reject(new Error("ignored abort"))
+    await append
+    expect(archive.state().rows?.map((row) => row.id)).toEqual(["replacement"])
+  })
+}
 
 test("restore aborts a held continuation, keeps displayed rows, and prevents its late result from appending", async () => {
   const continuation = Promise.withResolvers<unknown>()
@@ -161,10 +239,14 @@ test("restore aborts a held continuation, keeps displayed rows, and prevents its
 
 test("restores a captured displayed row through the existing success-only tab sequence", async () => {
   const calls: string[] = []
+  const archiveCalls: unknown[] = []
   const archive = createArchivedSessionsModel({
     server: "captured-server",
     list: async () => ({ data: [session("restorable")], cursor: {} }) as never,
-    setArchive: async () => true,
+    setArchive: async (input) => {
+      archiveCalls.push(input)
+      return true
+    },
     openProject: () => calls.push("open"),
     touchProject: () => calls.push("touch"),
     addTab: () => {
@@ -177,7 +259,37 @@ test("restores a captured displayed row through the existing success-only tab se
 
   await archive.load()
   expect(await archive.restore("restorable")).toBe(true)
+  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "restorable", archive: null }])
   expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
+})
+
+test("keeps continuation available after a failed restore without replaying the aborted request", async () => {
+  let requests = 0
+  const archiveCalls: unknown[] = []
+  const archive = createArchivedSessionsModel({
+    server: "captured-server",
+    list: async () => {
+      requests++
+      return requests === 1
+        ? ({ data: [session("shown")], cursor: { next: "cursor-2" } } as never)
+        : ({ data: [session("later")], cursor: {} } as never)
+    },
+    setArchive: async (input) => {
+      archiveCalls.push(input)
+      return false
+    },
+    openProject: () => {},
+    touchProject: () => {},
+    addTab: () => "tab",
+    selectTab: () => {},
+    close: () => {},
+  }) as unknown as ContinuousModel
+
+  await archive.load()
+  expect(await archive.restore("shown")).toBe(false)
+  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "shown", archive: null }])
+  await archive.loadMore()
+  expect(archive.state().rows?.map((row) => row.id)).toEqual(["shown", "later"])
 })
 
 test("loadArchivedSessions preserves one-request validation and terminal cursor normalization", async () => {

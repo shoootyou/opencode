@@ -29,6 +29,22 @@ const retired = [
   "dialog.archivedSessions.nextPage",
 ]
 
+const retained = [
+  "common.unarchive",
+  "command.session.archive",
+  "command.session.archive.description",
+  "command.session.unarchive",
+  "command.session.unarchive.description",
+  "command.session.archivedBrowse",
+  "command.session.archivedBrowse.description",
+  "dialog.archivedSessions.title",
+  "dialog.archivedSessions.error",
+  "dialog.archivedSessions.loading",
+  "session.archive.refreshFailed",
+]
+
+const slots = (value: string) => [...value.matchAll(/{{([^{}]+)}}/g)].map((match) => match[1]).sort()
+
 test("defines exact English loaded-only archive copy and exact Spanish translations", async () => {
   for (const [key, value] of Object.entries(loadedCopy)) expect((en as Record<string, string>)[key]).toBe(value)
 
@@ -48,5 +64,10 @@ test("removes only the obsolete archive pager keys from all 63 dictionaries", as
     for (const key of retired) expect(Object.hasOwn(dictionary, key)).toBe(false)
     expect(dictionary["common.loadMore"]).toBeTruthy()
     expect(dictionary["common.retry"]).toBeTruthy()
+    for (const key of retained) {
+      expect(Object.hasOwn(dictionary, key)).toBe(true)
+      expect(dictionary[key]?.trim()).not.toBe("")
+      expect(slots(dictionary[key])).toEqual(slots((en as Record<string, string>)[key]))
+    }
   }
 })

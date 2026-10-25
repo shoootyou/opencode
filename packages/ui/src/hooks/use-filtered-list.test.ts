@@ -30,9 +30,20 @@ test("keeps the default reset behavior after an unchanged-filter item append", a
   })
   await flush()
   list.setActive("third")
+  const group = list.grouped.latest[0]
   setItems([{ id: "first" }, { id: "third" }, { id: "new" }])
   await flush()
   expect(list.active()).toBe("first")
+  expect(list.grouped.latest[0]).not.toBe(group)
+  list.onKeyDown({
+    altKey: false,
+    ctrlKey: false,
+    key: "ArrowUp",
+    metaKey: false,
+    preventDefault: () => {},
+    shiftKey: false,
+  } as KeyboardEvent)
+  expect(list.active()).toBe("new")
   dispose()
 })
 
