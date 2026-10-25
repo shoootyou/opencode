@@ -124,6 +124,41 @@ test("commits final nonempty rows, exhausts only on empty or missing cursor, and
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["first"])
 })
 
+test("restore aborts a held continuation, keeps displayed rows, and prevents its late result from appending", async () => {
+  const continuation = Promise.withResolvers<unknown>()
+  const restore = Promise.withResolvers<boolean>()
+  const calls: string[] = []
+  let requests = 0
+  const archive = createArchivedSessionsModel({
+    server: "captured-server",
+    list: async () => {
+      requests++
+      if (requests === 1) return { data: [session("shown")], cursor: { next: "cursor-2" } } as never
+      return continuation.promise as never
+    },
+    setArchive: async () => restore.promise,
+    openProject: () => calls.push("open"),
+    touchProject: () => calls.push("touch"),
+    addTab: () => {
+      calls.push("tab")
+      return "tab"
+    },
+    selectTab: () => calls.push("select"),
+    close: () => calls.push("close"),
+  }) as unknown as ContinuousModel
+
+  await archive.load()
+  const append = archive.loadMore()
+  const restoring = archive.restore("shown")
+  await archive.loadMore()
+  expect(requests).toBe(2)
+  continuation.resolve({ data: [session("stale")], cursor: {} })
+  restore.resolve(true)
+  await Promise.all([append, restoring])
+  expect(archive.state().rows?.map((row) => row.id)).not.toContain("stale")
+  expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
+})
+
 test("restores a captured displayed row through the existing success-only tab sequence", async () => {
   const calls: string[] = []
   const archive = createArchivedSessionsModel({

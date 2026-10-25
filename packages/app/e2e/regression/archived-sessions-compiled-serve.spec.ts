@@ -598,6 +598,115 @@ test("keeps a bounded continuous archive list: programmatic scroll cannot demand
   await expect.poll(() => requests).toBe(2)
 })
 
+test("uses at most one initial underfill probe, retains a short cursor-bearing batch, then exhausts only after its empty response", async () => {
+  const short = [
+    { id: "ses_archive_short_1", title: "Short first", directory: "/workspace/short-1", archived: Date.now() },
+    { id: "ses_archive_short_2", title: "Short second", directory: "/workspace/short-2", archived: Date.now() - 1 },
+  ]
+  let requests = 0
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      requests++
+      return route.fulfill({
+        json: { data: requests === 1 ? short.map(toArchivedApiRow) : [], cursor: { next: "bogus" } },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  await expect(dialog.getByText("Short first", { exact: true })).toBeVisible()
+  await expect.poll(() => requests).toBe(2)
+  await expect(dialog.getByText("Short second", { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /cargar más/i })).toHaveCount(0)
+  await expect.poll(() => requests).toBe(2)
+})
+
+test("preserves the connected archive group and active row nodes, native focus, and scroll offset across append", async () => {
+  const archives = Array.from({ length: 51 }, (_, index) => ({
+    id: `ses_archive_identity_${index}`,
+    title: `Identity ${index}`,
+    directory: `/workspace/identity-${index}`,
+    archived: Date.now() - index,
+  }))
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      return route.fulfill({
+        json: {
+          data: (cursor ? archives.slice(50) : archives.slice(0, 50)).map(toArchivedApiRow),
+          cursor: cursor ? {} : { next: "identity-next" },
+        },
+      })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const row = dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_0"]')
+  await row.focus()
+  const group = row.locator("xpath=../..")
+  const scrollTop = await dialog.locator('[data-slot="list-scroll"]').evaluate((node) => (node.scrollTop = 17))
+  const rowHandle = await row.elementHandle()
+  const groupHandle = await group.elementHandle()
+  await dialog.getByRole("button", { name: /cargar más/i }).press("Enter")
+  await expect(dialog.locator('[data-slot="list-item"][data-key="ses_archive_identity_50"]')).toBeVisible()
+
+  expect(await rowHandle?.evaluate((node) => node.isConnected)).toBe(true)
+  expect(await groupHandle?.evaluate((node) => node.isConnected)).toBe(true)
+  expect(
+    await rowHandle?.evaluate((node) => node === document.querySelector('[data-key="ses_archive_identity_0"]')),
+  ).toBe(true)
+  expect(await groupHandle?.evaluate((node) => node === document.querySelector('[data-slot="list-group"]'))).toBe(true)
+  await expect(row).toBeFocused()
+  await expect(row).toHaveAttribute("data-active", "true")
+  await expect(dialog.locator('[data-slot="list-scroll"]')).toHaveJSProperty("scrollTop", scrollTop)
+})
+
+for (const [action, key] of [
+  ["Load more", "Enter"],
+  ["Load more", " "],
+  ["Retry", "Enter"],
+  ["Retry", " "],
+] as const) {
+  test(`reaches ${action} by Tab and Shift+Tab and activates it once with ${key}`, async () => {
+    let requests = 0
+    const expectedCursor = action === "Retry" ? "retry-cursor" : "load-cursor"
+    await page.route(
+      (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+      async (route) => {
+        requests++
+        const cursor = new URL(route.request().url()).searchParams.get("cursor")
+        if (!cursor)
+          return route.fulfill({
+            json: {
+              data: [
+                toArchivedApiRow({
+                  id: "ses_archive_keyboard",
+                  title: "Keyboard",
+                  directory: "/workspace/keyboard",
+                  archived: Date.now(),
+                }),
+              ],
+              cursor: { next: expectedCursor },
+            },
+          })
+        if (action === "Retry" && requests === 2) return route.abort("failed")
+        return route.fulfill({ json: { data: [], cursor: {} } })
+      },
+    )
+    const dialog = await openArchivedSessions(page)
+    const button = dialog.getByRole("button", { name: action === "Retry" ? /reintentar/i : /cargar más/i })
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Shift+Tab")
+    await expect(button).toBeFocused()
+    if (action === "Retry") await button.press("Enter")
+    await button.press(key)
+    await expect.poll(() => requests).toBe(action === "Retry" ? 3 : 2)
+    await expect(dialog.getByText("Keyboard", { exact: true })).toBeVisible()
+  })
+}
+
 async function connect(page: Page) {
   await page.goto(origin, { waitUntil: "domcontentloaded" })
   await page.locator("#server-connect-link").click()
