@@ -75,21 +75,26 @@ test("preserves the active key and group object for opted-in unchanged-filter ap
 
 test("resets opted-in selection to the first matching row when filtering removes its key", async () => {
   let dispose!: () => void
-  let setItems!: (items: { id: string }[]) => void
   let list!: ReturnType<typeof useFilteredList<{ id: string }>>
   createRoot((rootDispose) => {
     dispose = rootDispose
-    const [items, set] = createSignal([{ id: "alpha" }, { id: "beta" }])
-    setItems = set
-    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
-      typeof useFilteredList<{ id: string }>
-    >[0])
+    const [items] = createSignal([{ id: "alpha" }, { id: "beta" }])
+    list = useFilteredList({
+      items,
+      key: (item: { id: string }) => item.id,
+      filterKeys: ["id"],
+      preserveActiveKey: true,
+    } as unknown as Parameters<typeof useFilteredList<{ id: string }>>[0])
   })
   await flush()
   list.setActive("alpha")
   list.onInput("beta")
   await flush()
   expect(list.active()).toBe("beta")
+  list.onInput("missing")
+  await flush()
+  expect(list.flat().map((item) => item.id)).toEqual([])
+  expect(list.active()).toBe("")
   dispose()
 })
 
@@ -101,9 +106,11 @@ test("resets opted-in selection to the first row when the selected row disappear
     dispose = rootDispose
     const [items, set] = createSignal([{ id: "alpha" }, { id: "beta" }])
     setItems = set
-    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
-      typeof useFilteredList<{ id: string }>
-    >[0])
+    list = useFilteredList({
+      items,
+      key: (item: { id: string }) => item.id,
+      preserveActiveKey: true,
+    } as unknown as Parameters<typeof useFilteredList<{ id: string }>>[0])
   })
   await flush()
   list.setActive("beta")
@@ -121,9 +128,11 @@ test("preserves intentional no-selection through an opted-in unchanged-filter ap
     dispose = rootDispose
     const [items, set] = createSignal([{ id: "first" }])
     setItems = set
-    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true } as unknown as Parameters<
-      typeof useFilteredList<{ id: string }>
-    >[0])
+    list = useFilteredList({
+      items,
+      key: (item: { id: string }) => item.id,
+      preserveActiveKey: true,
+    } as unknown as Parameters<typeof useFilteredList<{ id: string }>>[0])
   })
   await flush()
   list.setActive("")
@@ -143,14 +152,14 @@ for (const outcome of ["resolve", "reject"] as const) {
     createRoot((rootDispose) => {
       dispose = rootDispose
       list = useFilteredList({
-        items: (filter) => {
+        items: (filter: string) => {
           calls.push(filter)
 
           if (!filter) return [{ id: "a" }]
 
           return filter === "older" ? older.promise : newer.promise
         },
-        key: (item) => item.id,
+        key: (item: { id: string }) => item.id,
         preserveActiveKey: true,
         skipFilter: () => true,
       } as unknown as Parameters<typeof useFilteredList<{ id: string }>>[0])

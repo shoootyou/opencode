@@ -1032,6 +1032,12 @@ test("does not recover stale load-more focus after the action settles, loses foc
   const dialog = await openArchivedSessions(page)
   const loadMore = dialog.getByRole("button", { name: "Cargar más" })
   const search = dialog.getByPlaceholder("Buscar")
+  await expect(search).toBeVisible()
+  await expect(search).toBeFocused()
+  await expect(dialog.locator('[data-slot="list-item"]')).toHaveCount(50)
+  await expect(loadMore).toBeVisible()
+  await expect(loadMore).toBeEnabled()
+  await expect(loadMore).not.toHaveAttribute("aria-disabled", "true")
   const focusableCount = await dialog.locator("button:not([disabled]), input:not([disabled]), [href]").count()
   for (let index = 0; index <= focusableCount; index++) {
     if (await loadMore.evaluate((node) => node === document.activeElement)) break

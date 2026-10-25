@@ -1,5 +1,7 @@
 import { isArchivedSession, type ArchiveSession, type SetSessionArchive } from "@/session/archive"
 
+// oxlint-disable anti-slop/require-readable-spacing -- Compact state transitions keep each cursor operation auditable as one unit.
+
 export type ArchivedSessionsState =
   | Readonly<{ status: "idle" }>
   | Readonly<{ status: "loading" }>
@@ -103,7 +105,18 @@ export function createArchivedSessionsModel<Tab>(
       const page = await loadArchivedSessions({ list: deps.list }, { signal: current.signal })
 
       if (disposed || version !== generation) return
-      value = { status: "ready", rows: page.sessions, nextCursor: page.cursor.next, continuationPending: false }
+      const seen = new Set<string>()
+      const rows = page.sessions.filter((session) => {
+        if (seen.has(session.id)) return false
+        seen.add(session.id)
+        return true
+      })
+      value = {
+        status: "ready",
+        rows,
+        nextCursor: rows.length ? page.cursor.next : undefined,
+        continuationPending: false,
+      }
       notify()
     } catch (error) {
       if (disposed || version !== generation || current.signal.aborted) return
@@ -137,11 +150,19 @@ export function createArchivedSessionsModel<Tab>(
 
       const rows = value.rows
       const existing = new Set(rows.map((session) => session.id))
-      const appended = page.sessions.filter((session) => !existing.has(session.id))
+      const appended = page.sessions.filter((session) => {
+        if (existing.has(session.id)) return false
+        existing.add(session.id)
+        return true
+      })
       const repeatedCursor = page.cursor.next === cursor || (page.cursor.next && consumed.has(page.cursor.next))
 
       if (appended.length === 0 || repeatedCursor) {
-        value = { ...value, continuationPending: false, continuationError: new Error("Archived session continuation made no progress") }
+        value = {
+          ...value,
+          continuationPending: false,
+          continuationError: new Error("Archived session continuation made no progress"),
+        }
         notify()
 
         return
@@ -176,9 +197,7 @@ export function createArchivedSessionsModel<Tab>(
     loadMore: () => loadMore(),
     retryMore: () => (value.status === "error" ? load() : loadMore()),
     search(query) {
-      return value.status === "ready"
-        ? value.rows.filter((session) => matchesArchivedSession(session, query))
-        : []
+      return value.status === "ready" ? value.rows.filter((session) => matchesArchivedSession(session, query)) : []
     },
     restoringID: () => restoring,
     async restore(sessionID) {
@@ -189,6 +208,7 @@ export function createArchivedSessionsModel<Tab>(
       controller?.abort()
       const version = ++generation
       restoring = sessionID
+      value = { ...value, continuationPending: false }
       notify()
 
       try {

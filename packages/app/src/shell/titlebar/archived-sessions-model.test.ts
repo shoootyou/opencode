@@ -20,6 +20,7 @@ type ContinuousModel = {
   load: () => Promise<void>
   loadMore: () => Promise<void>
   retryMore: () => Promise<void>
+  search: (query: string) => readonly { id: string }[]
   restore: (id: string) => Promise<boolean>
   dispose: () => void
 }

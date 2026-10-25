@@ -12,6 +12,8 @@ import { type ArchiveSession } from "@/session/archive"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
 import { selectArchivedSessionsView } from "./archived-sessions-view"
 
+// oxlint-disable anti-slop/require-readable-spacing -- Adjacent native-event guards define one demand-token transition.
+
 export function showArchivedSessionsDialog(dialog: Pick<ReturnType<typeof useDialog>, "show">, server: string) {
   dialog.show(() => <ArchivedSessionsDialog server={server} />)
 }
@@ -28,10 +30,13 @@ function ArchivedSessionsDialog(props: { server: string }) {
   let previousScrollTop = 0
   let underfillFrame: number | undefined
   let underfillProbed = false
+  let underfillEligible = false
+  let underfillDecided = false
   let removeWheel: (() => void) | undefined
   let listRoot: HTMLDivElement | undefined
   let actionButton: HTMLButtonElement | undefined
   let restoreSearchFocus = false
+  let focusGeneration = 0
   // SAFETY: the dialog is opened only from the registered archive command with a current server key.
   const ctx = global.serverCtx(props.server as never)
 
@@ -109,6 +114,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
 
   const retry = () => {
     restoreSearchFocus = document.activeElement === actionButton
+    focusGeneration++
 
     if (canRetry()) void model.retryMore()
   }
@@ -120,25 +126,22 @@ function ArchivedSessionsDialog(props: { server: string }) {
     const movedDown = current.scrollTop > previousScrollTop
     previousScrollTop = current.scrollTop
 
-    if (!demand || !movedDown || current.clientHeight <= 0) return
-
-    if (current.scrollHeight - current.clientHeight - current.scrollTop > 96) return
-
+    if (!demand) return
     demand = false
+    if (!movedDown || current.clientHeight <= 0) return
+    if (current.scrollHeight - current.clientHeight - current.scrollTop > 96) return
 
     loadMore()
   }
 
   const onWheel = (event: WheelEvent) => {
+    demand = false
     if (event.deltaY <= 0) return
-
-    demand = true
 
     if (!scroller || scroller.clientHeight <= 0) return
 
     if (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 96) return
 
-    demand = false
     loadMore()
   }
 
@@ -149,11 +152,16 @@ function ArchivedSessionsDialog(props: { server: string }) {
   }
 
   const actionPending = () => continueLoading() || restoringID() !== undefined
+  const continuationError = () => {
+    const current = state()
+    return current.status === "ready" ? current.continuationError : undefined
+  }
 
   const activateContinuation = () => {
     if (actionPending()) return
 
     restoreSearchFocus = document.activeElement === actionButton
+    focusGeneration++
 
     const current = state()
 
@@ -169,12 +177,22 @@ function ArchivedSessionsDialog(props: { server: string }) {
   createEffect(() => {
     const current = state()
 
-    if (current.status === "loading") underfillProbed = false
+    if (current.status === "loading") {
+      underfillProbed = false
+      underfillEligible = false
+      underfillDecided = false
+      underfillFrame = undefined
+    }
+
+    if (current.status === "ready" && !underfillDecided) {
+      underfillDecided = true
+      underfillEligible = !filter().trim()
+    }
 
     if (
       current.status !== "ready" ||
       underfillProbed ||
-      filter().trim() ||
+      !underfillEligible ||
       !current.nextCursor ||
       current.continuationPending ||
       current.continuationError ||
@@ -185,6 +203,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
 
     underfillProbed = true
     underfillFrame = requestAnimationFrame(() => {
+      underfillFrame = undefined
       if (
         state().status !== "ready" ||
         filter().trim() ||
@@ -202,9 +221,22 @@ function ArchivedSessionsDialog(props: { server: string }) {
 
     if (current.status !== "ready" || current.nextCursor || !restoreSearchFocus) return
 
-    restoreSearchFocus = false
+    const action = actionButton
+    const generation = focusGeneration
 
-    queueMicrotask(() => listRoot?.querySelector<HTMLInputElement>('[data-slot="list-search"] input')?.focus())
+    queueMicrotask(() => {
+      if (
+        !restoreSearchFocus ||
+        focusGeneration !== generation ||
+        !listRoot?.isConnected ||
+        !action ||
+        action.isConnected ||
+        hasContinuationAction()
+      )
+        return
+      restoreSearchFocus = false
+      listRoot.querySelector<HTMLInputElement>('[data-slot="list-search"] input')?.focus()
+    })
   })
 
   onCleanup(() => {
@@ -238,46 +270,49 @@ function ArchivedSessionsDialog(props: { server: string }) {
         >
           <List<ArchiveSession>
             class="flex min-h-0 flex-1 flex-col px-3"
-          items={(filter) => {
-            version()
+            items={(filter) => {
+              version()
 
-            return [...model.search(filter)]
-          }}
-          key={(session) => session.id}
-          filterKeys={["title", "location.directory"]}
-          search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}
-          emptyMessage={listMessage()}
-          onFilter={setFilter}
-          onScroll={onScroll}
-          preserveActiveKey
-          onSelect={(session) => {
-            if (session) void model.restore(session.id)
-          }}
-        >
-          {(session) => {
-            const archived = session.time.archived ?? 0
+              return [...model.search(filter)]
+            }}
+            key={(session) => session.id}
+            filterKeys={["title", "location.directory"]}
+            search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}
+            emptyMessage={listMessage()}
+            onFilter={(value) => {
+              demand = false
+              setFilter(value)
+            }}
+            onScroll={onScroll}
+            preserveActiveKey
+            onSelect={(session) => {
+              if (session) void model.restore(session.id)
+            }}
+          >
+            {(session) => {
+              const archived = session.time.archived ?? 0
 
-            return (
-              <span class="flex w-full min-w-0 items-center gap-2 text-start">
-                <Icon name="bubble-5" size="small" class="shrink-0 text-v2-text-text-muted" aria-hidden="true" />
-                <span class="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
-                  <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530] md:max-w-[50%]">
-                    {session.title || language.t("command.session.new")}
-                  </span>
-                  <span class="min-w-0 flex-1 truncate leading-4 text-v2-text-text-muted [font-weight:440]" dir="ltr">
-                    {session.location.directory}
-                  </span>
-                </span>
-                <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
-                  {(archived) => (
-                    <span class="shrink-0 whitespace-nowrap text-end text-v2-text-text-muted [font-weight:440]">
-                      {getRelativeTime(new Date(archived()).toISOString(), language.t)}
+              return (
+                <span class="flex w-full min-w-0 items-center gap-2 text-start">
+                  <Icon name="bubble-5" size="small" class="shrink-0 text-v2-text-text-muted" aria-hidden="true" />
+                  <span class="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
+                    <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530] md:max-w-[50%]">
+                      {session.title || language.t("command.session.new")}
                     </span>
-                  )}
-                </Show>
-              </span>
-            )
-          }}
+                    <span class="min-w-0 flex-1 truncate leading-4 text-v2-text-text-muted [font-weight:440]" dir="ltr">
+                      {session.location.directory}
+                    </span>
+                  </span>
+                  <Show when={Number.isFinite(archived) && archived !== 0 ? archived : undefined}>
+                    {(archived) => (
+                      <span class="shrink-0 whitespace-nowrap text-end text-v2-text-text-muted [font-weight:440]">
+                        {getRelativeTime(new Date(archived()).toISOString(), language.t)}
+                      </span>
+                    )}
+                  </Show>
+                </span>
+              )
+            }}
           </List>
         </div>
       </DialogBody>
@@ -286,6 +321,9 @@ function ArchivedSessionsDialog(props: { server: string }) {
           <Show when={continueLoading()}>
             <span aria-live="polite">{language.t("dialog.archivedSessions.loading")}</span>
           </Show>
+          <Show when={continuationError()}>
+            <span role="status">{language.t("dialog.archivedSessions.error")}</span>
+          </Show>
           <Show when={hasContinuationAction()}>
             <Button
               variant="ghost"
@@ -293,8 +331,15 @@ function ArchivedSessionsDialog(props: { server: string }) {
                 actionButton = element
               }}
               aria-disabled={actionPending() ? "true" : undefined}
-              onBlur={() => {
-                if (continueLoading()) restoreSearchFocus = false
+              onBlur={(event: FocusEvent & { currentTarget: HTMLButtonElement }) => {
+                if (
+                  !event.currentTarget.isConnected ||
+                  event.currentTarget !== actionButton ||
+                  !hasContinuationAction()
+                )
+                  return
+                restoreSearchFocus = false
+                focusGeneration++
               }}
               onClick={activateContinuation}
             >
