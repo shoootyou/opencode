@@ -15,7 +15,7 @@
  *   - An extremely long unbroken title cannot collapse a non-empty directory below a readable 48px allocation.
  * @edge-cases
  *   - Programmatic scroll alone never requests continuation; one native downward wheel at threshold requests one cursor.
- *   - A stale far-from-bottom wheel demand and stale continuation focus cannot affect later actions.
+ *   - A stale far-from-bottom wheel demand, deferred underfill, and stale continuation focus cannot affect later actions.
  *   - Appending preserves connected row nodes, native row focus, active selection, and scroll position.
  * @rerun OPENCODE_COMPILED_BINARY=packages/cli/dist/cli-linux-x64/bin/opencode bun run test:e2e -- e2e/regression/archived-sessions-compiled-serve.spec.ts
  * @see ./dialog-archived-sessions.tsx
@@ -740,6 +740,51 @@ test("uses one initial underfill probe, keeps a short cursor-bearing batch conti
   await dialog.getByRole("button", { name: /cargar más/i }).press("Enter")
   await expect(dialog.getByText("Third", { exact: true })).toBeVisible()
   await expect.poll(() => cursors).toEqual([null, "cursor-2", "cursor-3"])
+})
+
+test("does not defer initial underfill when a query is active before the first short batch commits", async () => {
+  const initial = Promise.withResolvers<void>()
+  const cursors: Array<string | null> = []
+  await page.route(
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor")
+      cursors.push(cursor)
+      if (!cursor) {
+        await initial.promise
+        return route.fulfill({
+          json: {
+            data: [
+              toArchivedApiRow({
+                id: "ses_archive_query_first",
+                title: "Matching first",
+                directory: "/workspace/first",
+                archived: Date.now(),
+              }),
+              toArchivedApiRow({
+                id: "ses_archive_query_second",
+                title: "Matching second",
+                directory: "/workspace/second",
+                archived: Date.now() - 1,
+              }),
+            ],
+            cursor: { next: "cursor-2" },
+          },
+        })
+      }
+      return route.fulfill({ json: { data: [], cursor: {} } })
+    },
+  )
+
+  const dialog = await openArchivedSessions(page)
+  const search = dialog.getByPlaceholder("Buscar")
+  await search.fill("Matching")
+  initial.resolve()
+  await expect(dialog.getByText("Matching first", { exact: true })).toBeVisible()
+  expect(cursors).toEqual([null])
+  await search.fill("")
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  expect(cursors).toEqual([null])
 })
 
 test("preserves connected archive group and row nodes, native focus, active selection, and scroll across failure and retry", async () => {
