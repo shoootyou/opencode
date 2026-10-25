@@ -262,6 +262,12 @@ test("uses archived time and an untitled label in rendered Spanish rows", async 
   const row = dialog.locator('[data-slot="list-item"]')
 
   await expect(row).toContainText("Nueva sesión")
+  await expect(
+    dialog.getByText(
+      "Selecciona una sesión para restaurarla y abrir su pestaña. La búsqueda solo incluye las sesiones cargadas; desplázate hacia abajo o carga más para explorar sesiones anteriores.",
+      { exact: true },
+    ),
+  ).toBeVisible()
 })
 
 test("uses archived rather than updated time for a visible localized timestamp", async () => {
@@ -760,7 +766,7 @@ test("preserves connected archive group and row nodes, native focus, active sele
   await expect(active).toHaveAttribute("data-active", "true")
   await expect(scroller).toHaveJSProperty("scrollTop", scrollTop)
 
-  const focusableCount = await dialog.locator('button:not([disabled]), input:not([disabled]), [href]').count()
+  const focusableCount = await dialog.locator("button:not([disabled]), input:not([disabled]), [href]").count()
   for (let index = 0; index <= focusableCount; index++) {
     if (await retry.evaluate((node) => node === document.activeElement)) break
     await page.keyboard.press("Tab")
@@ -836,7 +842,7 @@ for (const [action, key, userLeavesPendingAction] of [
     const search = dialog.getByPlaceholder("Buscar")
     const loadMore = dialog.getByRole("button", { name: "Cargar más" })
     await expect(search).toBeFocused()
-    const focusableCount = await dialog.locator('button:not([disabled]), input:not([disabled]), [href]').count()
+    const focusableCount = await dialog.locator("button:not([disabled]), input:not([disabled]), [href]").count()
     for (let index = 0; index <= focusableCount; index++) {
       if (await loadMore.evaluate((node) => node === document.activeElement)) break
       await page.keyboard.press("Tab")
