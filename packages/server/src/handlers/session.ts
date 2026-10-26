@@ -1,4 +1,5 @@
 import { Session } from "@opencode/core/session"
+import { Bus } from "@opencode/core/bus"
 import { SessionStats } from "@opencode/core/session/stats"
 import { SessionTitle } from "@opencode/core/session/title"
 import { SessionTransfer } from "@opencode/core/session/transfer"
@@ -17,6 +18,7 @@ import {
   InvalidRequestError,
   InvalidCursorError,
   MessageNotFoundError,
+  UnknownError,
   ServiceUnavailableError,
   SessionArchiveLimitError,
   SessionBusyError,
@@ -602,7 +604,13 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           yield* session.get(ctx.params.sessionID).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
           return session
             .log({ sessionID: ctx.params.sessionID, after: ctx.query.after, follow: ctx.query.follow })
-            .pipe(Stream.orDie)
+            .pipe(
+              Stream.mapError((error) =>
+                error._tag === "Bus.InvalidDurableEvent"
+                  ? new UnknownError({ message: "Unable to read session log." })
+                  : error,
+              ),
+            )
         }),
       )
       .handle(

@@ -258,7 +258,7 @@ export type SessionUpdateInput = {
   readonly title?: string | undefined
   readonly metadata?: Session.Metadata | undefined
   readonly permissions?: Permission.Ruleset | undefined
-  readonly archived?: boolean | undefined
+  readonly archived?: boolean
 }
 export type SessionUpdateOutput = void
 export type SessionUpdateOperation<E = never> = (input: SessionUpdateInput) => Effect.Effect<SessionUpdateOutput, E>

@@ -237,7 +237,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
       HttpApiEndpoint.delete("session.remove", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
         success: HttpApiSchema.NoContent,
-        error: [ConflictError, SessionArchiveLimitError, SessionNotFoundError],
+        error: SessionNotFoundError,
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "session.remove",
@@ -302,7 +302,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           title: Schema.String.pipe(Schema.optional),
           metadata: Session.Metadata.pipe(Schema.optional),
           permissions: Permission.Ruleset.pipe(Schema.optional),
-          archived: Schema.Boolean.pipe(Schema.optional).annotate({
+          archived: Schema.optionalKey(Schema.Boolean).annotate({
             description:
               "Archive the session with true or restore it with false. Repeating the current state is a no-op.",
           }),
@@ -674,7 +674,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
         success: HttpApiSchema.StreamSse({
           data: Schema.Union([SessionEvent.Durable, EventLog.Synced]).annotate({ identifier: "SessionLogItem" }),
         }),
-        error: SessionNotFoundError,
+        error: [SessionNotFoundError, UnknownError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "session.log",

@@ -1630,26 +1630,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "ConflictError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictErrorEncoded"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "SessionArchiveLimitError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionArchiveLimitErrorEncoded"
-                }
-              }
-            }
           }
         },
         "description": "Delete a session and its child sessions.",
@@ -1770,14 +1750,7 @@
                     ]
                   },
                   "archived": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
+                    "type": "boolean",
                     "description": "Archive the session with true or restore it with false. Repeating the current state is a no-op."
                   }
                 },
@@ -4128,6 +4101,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionNotFoundErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "UnknownError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnknownErrorEncoded"
                 }
               }
             }

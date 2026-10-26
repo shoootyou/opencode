@@ -2756,6 +2756,15 @@ export type UnknownError = {
 export const isUnknownError = (value: unknown): value is UnknownError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
+export type MessageNotFoundError = {
+  readonly _tag: "MessageNotFoundError"
+  readonly sessionID: string
+  readonly messageID: string
+  readonly message: string
+}
+export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
+
 export type SessionArchiveLimitError = {
   readonly _tag: "SessionArchiveLimitError"
   readonly sessionID: string
@@ -2765,15 +2774,6 @@ export type SessionArchiveLimitError = {
 }
 export const isSessionArchiveLimitError = (value: unknown): value is SessionArchiveLimitError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionArchiveLimitError"
-
-export type MessageNotFoundError = {
-  readonly _tag: "MessageNotFoundError"
-  readonly sessionID: string
-  readonly messageID: string
-  readonly message: string
-}
-export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
 
 export type CommandNotFoundError = {
   readonly _tag: "CommandNotFoundError"
@@ -3477,7 +3477,7 @@ export type SessionUpdateInput = {
     readonly permissions?:
       | ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }>
       | undefined
-    readonly archived?: boolean | undefined
+    readonly archived?: boolean
   }["title"]
   readonly metadata?: {
     readonly title?: string | undefined
@@ -3485,7 +3485,7 @@ export type SessionUpdateInput = {
     readonly permissions?:
       | ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }>
       | undefined
-    readonly archived?: boolean | undefined
+    readonly archived?: boolean
   }["metadata"]
   readonly permissions?: {
     readonly title?: string | undefined
@@ -3493,7 +3493,7 @@ export type SessionUpdateInput = {
     readonly permissions?:
       | ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }>
       | undefined
-    readonly archived?: boolean | undefined
+    readonly archived?: boolean
   }["permissions"]
   readonly archived?: {
     readonly title?: string | undefined
@@ -3501,7 +3501,7 @@ export type SessionUpdateInput = {
     readonly permissions?:
       | ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }>
       | undefined
-    readonly archived?: boolean | undefined
+    readonly archived?: boolean
   }["archived"]
 }
 
