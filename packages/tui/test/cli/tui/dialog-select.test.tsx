@@ -666,3 +666,79 @@ test("keeps the first row selected when current is only a marker", async () => {
     select.app.renderer.destroy()
   }
 })
+
+async function renderTitleViewSelect(root: string, newDesigns: boolean, titleView?: boolean) {
+  const state = path.join(root, "state")
+  await mkdir(state, { recursive: true })
+  const [{ ConfigProvider }, { ThemeProvider }, { Keymap }, { DialogProvider }, { DialogSelect }, { ToastProvider }] =
+    await Promise.all([
+      import("../../../src/config"),
+      import("../../../src/context/theme"),
+      import("../../../src/context/keymap"),
+      import("../../../src/ui/dialog"),
+      import("../../../src/ui/dialog-select"),
+      import("../../../src/ui/toast"),
+    ])
+  const config = { ...createTuiResolvedConfig(), experimental: newDesigns ? { "new-designs": true } : undefined }
+  const app = await testRender(
+    () => (
+      <TestTuiContexts directory={root} paths={{ home: root, state, worktree: root }}>
+        <ConfigProvider config={config}>
+          <ThemeProvider mode="dark" source={emptyThemeSource}>
+            <Keymap.Provider>
+              <ToastProvider>
+                <DialogProvider>
+                  {(() => {
+                    onCleanup(Keymap.use().mode.push("modal"))
+                    return (
+                      <DialogSelect
+                        title="Sessions"
+                        titleView={titleView ? <text>Showing the first 50 results. Refine your search.</text> : undefined}
+                        options={[{ title: "Archived session", value: "archived" }]}
+                        searchInTitle
+                      />
+                    )
+                  })()}
+                </DialogProvider>
+              </ToastProvider>
+            </Keymap.Provider>
+          </ThemeProvider>
+        </ConfigProvider>
+      </TestTuiContexts>
+    ),
+    { width: 100, height: 24, kittyKeyboard: true },
+  )
+  app.renderer.start()
+  return app
+}
+
+test("preserves a DialogSelect titleView beside the new-designs search input", async () => {
+  await using tmp = await tmpdir()
+  const message = "Showing the first 50 results. Refine your search."
+  const app = await renderTitleViewSelect(tmp.path, true, true)
+  try {
+    await app.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
+    expect(app.captureCharFrame(), `new-designs dropped titleView: ${message}`).toContain(message)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("renders titleView by default and renders no disclosure when it is omitted", async () => {
+  await using tmp = await tmpdir()
+  const message = "Showing the first 50 results. Refine your search."
+  const defaultApp = await renderTitleViewSelect(tmp.path, false, true)
+  try {
+    await defaultApp.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
+    expect(defaultApp.captureCharFrame()).toContain(message)
+  } finally {
+    defaultApp.renderer.destroy()
+  }
+  const emptyApp = await renderTitleViewSelect(tmp.path, false, false)
+  try {
+    await emptyApp.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
+    expect(emptyApp.captureCharFrame()).not.toContain(message)
+  } finally {
+    emptyApp.renderer.destroy()
+  }
+})
