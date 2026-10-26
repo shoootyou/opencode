@@ -92,6 +92,7 @@ export function createChildStoreManager(input: {
     if (!current) return
 
     if (current === input.owner) return
+    // SAFETY: Solid creates owners as objects, so they can be used as WeakMap identity keys.
     const key = current as object
     const set = ownerPins.get(key)
 
