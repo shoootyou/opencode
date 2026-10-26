@@ -836,7 +836,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                   <For each={options}>
                     {(option) => {
                       const active = createMemo(
-                        () => !props.locked && focusedAction() === undefined && isDeepEqual(option.value, selected()?.value),
+                        () =>
+                          !props.locked &&
+                          focusedAction() === undefined &&
+                          isDeepEqual(option.value, selected()?.value),
                       )
                       const current = createMemo(() => isDeepEqual(option.value, props.current))
                       return (

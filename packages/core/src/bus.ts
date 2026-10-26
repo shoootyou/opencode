@@ -718,7 +718,8 @@ export function configured(options?: Options) {
                 .where(eq(EventSequenceTable.aggregate_id, event.aggregateID))
                 .get()
                 .pipe(Effect.orDie)
-              if (row?.ownerID && row.ownerID !== options?.ownerID) return yield* Effect.fail(invalidLegacyArchiveEvent())
+              if (row?.ownerID && row.ownerID !== options?.ownerID)
+                return yield* Effect.fail(invalidLegacyArchiveEvent())
             }
             yield* durableLocks.withLock(event.aggregateID)(
               Effect.gen(function* () {

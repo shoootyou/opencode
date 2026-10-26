@@ -278,7 +278,9 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
           bg: focused() ? focusedBackground() : undefined,
           fg: props.action.disabled
             ? theme.text.action.primary.disabled
-            : (focused() ? theme.text.action.primary.focused : (props.action.color ?? theme.text.base)),
+            : focused()
+              ? theme.text.action.primary.focused
+              : (props.action.color ?? theme.text.base),
         }}
       >
         {props.action.title}
@@ -289,7 +291,9 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
             bg: focused() ? focusedBackground() : undefined,
             fg: props.action.disabled
               ? theme.text.action.primary.disabled
-              : (focused() ? theme.text.action.primary.focused : (props.action.color ?? key)),
+              : focused()
+                ? theme.text.action.primary.focused
+                : (props.action.color ?? key),
           }}
         >
           {" " + props.action.key}
@@ -301,13 +305,8 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
     <Show
       when={newDesigns()}
       fallback={
-        <box
-          backgroundColor={focused() ? focusedBackground() : undefined}
-          onMouseUp={trigger}
-        >
-          <text attributes={focused() ? TextAttributes.BOLD : undefined}>
-            {label(theme.text.muted)}
-          </text>
+        <box backgroundColor={focused() ? focusedBackground() : undefined} onMouseUp={trigger}>
+          <text attributes={focused() ? TextAttributes.BOLD : undefined}>{label(theme.text.muted)}</text>
         </box>
       }
     >
@@ -326,9 +325,7 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
         onMouseOut={() => setHovered(false)}
         onMouseUp={trigger}
       >
-        <text attributes={focused() ? TextAttributes.BOLD : undefined}>
-          {label(theme.text.faint)}
-        </text>
+        <text attributes={focused() ? TextAttributes.BOLD : undefined}>{label(theme.text.faint)}</text>
       </box>
     </Show>
   )
