@@ -372,35 +372,40 @@ describe("v2.1.4 archive compatibility contract", () => {
     }),
   )
 
-  it.effect(
-    "requires admission to count six recent native archive rows before publishing a legacy-compatible transition",
-    () =>
-      Effect.gen(function* () {
-        const db = yield* seed()
-        yield* TestClock.setTime(1_000)
-        const now = 1_000
-        yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 5 }).run()
-        yield* db
-          .insert(EventTable)
-          .values(
-            Array.from({ length: 6 }, (_, seq) => ({
-              id: Event.ID.make(`evt_v214_recent_native_${seq}`),
-              aggregate_id: sessionID,
-              seq,
-              created: now,
-              type: nativeType(seq % 2 === 0),
-              data: { sessionID },
-            })),
-          )
-          .run()
+  it.effect("admits the sixth mixed legacy/native transition then refuses the seventh with its typed rate error", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      yield* TestClock.setTime(1_000)
+      const now = 1_000
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 4 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 5 }, (_, seq) => ({
+            id: Event.ID.make(`evt_v214_recent_native_${seq}`),
+            aggregate_id: sessionID,
+            seq,
+            created: now,
+            type: seq % 2 === 0 ? "session.archive.changed.1" : nativeType(false),
+            data: seq % 2 === 0 ? { sessionID, archived: seq === 0 ? 0 : null } : { sessionID },
+          })),
+        )
+        .run()
 
-        const result = yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit)
-        expect(Exit.isFailure(result)).toBe(true)
-        expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
-        expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
-          archived: null,
-        })
-      }),
+      const session = yield* Session.Service
+      yield* session.archive(sessionID)
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+      const result = yield* session.unarchive(sessionID).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result))
+        expect(result.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)).toMatchObject([
+          { _tag: "Session.ArchiveLimitError", kind: "rate", retryAfterMillis: 60_000 },
+        ])
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: now,
+      })
+    }),
   )
 
   it.effect(

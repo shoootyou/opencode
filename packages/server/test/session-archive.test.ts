@@ -76,6 +76,27 @@ it.live("accepts native archive booleans and preserves an omitted archive state 
   }).pipe(Effect.scoped),
 )
 
+it.live("maps a real archive rate refusal to the declared 429 response", () =>
+  Effect.gen(function* () {
+    const handler = yield* ServerFetch.make(options)
+    const session = yield* create(handler)
+    for (const archived of [true, false, true, false, true, false]) {
+      const response = yield* update(handler, session.id, JSON.stringify({ archived }))
+      expect(response.status).toBe(204)
+    }
+    const denied = yield* update(handler, session.id, JSON.stringify({ archived: true }))
+    expect(denied.status).toBe(429)
+    expect(denied.headers.get("content-type")).toContain("application/json")
+    expect(yield* Effect.promise(() => denied.json())).toMatchObject({
+      _tag: "SessionArchiveLimitError",
+      sessionID: session.id,
+      kind: "rate",
+      retryAfterMillis: expect.any(Number),
+      message: "Archive transition rate limit exceeded",
+    })
+  }).pipe(Effect.scoped),
+)
+
 it.live("requires the real decoder to reject legacy and excess root fields before a mixed title update", () =>
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make(options)
