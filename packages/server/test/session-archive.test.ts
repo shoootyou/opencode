@@ -1,29 +1,21 @@
 /**
  * @spec-handoff
- * @interface PATCH /api/session/:sessionID { archive?: number | null }: 204
+ * @interface PATCH /api/session/:sessionID { archived?: boolean }: 204
  * @behavior
- *   - archive: 0 and finite numbers archive; archive: null restores; omission preserves state.
- *   - GET remains archive-inclusive while list hides archived unless archived=true and returns archived-only rows for archived=only.
- *   - PATCH retains existing title, metadata, permissions, location middleware, and error mapping.
+ *   - Native true archives, false restores, and omitted archived leaves state unchanged.
+ *   - The real HTTP decoder rejects legacy archive and unknown root keys before any session mutation.
+ *   - Authentication runs before payload decoding; native media and schema failures retain their HTTP contracts.
  * @edge-cases
- *   - Invalid archive values do not mutate state; missing sessions return 404.
- *   - Exhausted archive contention maps to ConflictError/409.
+ *   - Mixed title plus legacy archive fails atomically, while nested metadata.archive remains valid.
+ *   - Unsupported media is 415 text/plain; malformed JSON and invalid booleans are 400 JSON Payload errors.
  */
 import { expect } from "bun:test"
-import path from "node:path"
-import {
-  node as SessionNode,
-  Service as SessionService,
-  type Interface as SessionInterface,
-} from "../../core/src/session"
 import { Session } from "@opencode/schema/session"
-import { Effect, Layer, Schema } from "effect"
-import { tmpdir } from "../../core/test/fixture/tmpdir"
+import { Effect, Schema } from "effect"
 import { it } from "../../core/test/lib/effect"
 import { ServerFetch } from "../src/fetch"
 
 const SessionResponse = Schema.Struct({ data: Schema.toEncoded(Session.Info) })
-const SessionsResponse = Schema.Struct({ data: Schema.Array(Schema.toEncoded(Session.Info)) })
 const options = {
   app: { version: "test" },
   database: { path: ":memory:" },
@@ -31,179 +23,120 @@ const options = {
   models: { fetch: false },
 }
 
-it.live("archives, restores, and lists session archive state through the real server", () =>
+const request = (handler: (request: Request) => Promise<Response>, path: string, init: RequestInit) =>
+  Effect.promise(() =>
+    handler(
+      new Request(`http://opencode.local${path}`, {
+        ...init,
+        headers: { "content-type": "application/json", ...init.headers },
+      }),
+    ),
+  )
+
+const create = (handler: (request: Request) => Promise<Response>, headers?: HeadersInit) =>
+  request(handler, "/api/session", { method: "POST", headers, body: "{}" }).pipe(
+    Effect.flatMap((response) => Effect.promise(() => response.json())),
+    Effect.map((body) => Schema.decodeUnknownSync(SessionResponse)(body).data),
+  )
+
+const update = (
+  handler: (request: Request) => Promise<Response>,
+  sessionID: string,
+  body: string,
+  headers?: HeadersInit,
+) => request(handler, `/api/session/${sessionID}`, { method: "PATCH", headers, body })
+
+const get = (handler: (request: Request) => Promise<Response>, sessionID: string, headers?: HeadersInit) =>
+  request(handler, `/api/session/${sessionID}`, { method: "GET", headers }).pipe(
+    Effect.flatMap((response) => Effect.promise(() => response.json())),
+    Effect.map((body) => Schema.decodeUnknownSync(SessionResponse)(body).data),
+  )
+
+const text = (response: Response) => Effect.promise(() => response.text())
+
+it.live("accepts native archive booleans and preserves an omitted archive state through the real HTTP route", () =>
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make(options)
-    const request = (path: string, method = "GET", body?: unknown) =>
-      Effect.promise(() =>
-        handler(
-          new Request(`http://opencode.local${path}`, {
-            method,
-            headers: { "content-type": "application/json" },
-            body: body === undefined ? undefined : JSON.stringify(body),
-          }),
-        ),
-      )
-    const create = (title: string) =>
-      request("/api/session", "POST", {
-        title,
-        metadata: { source: title },
-        permissions: [{ action: "read", resource: "*", effect: "deny" }],
-      }).pipe(
-        Effect.flatMap((response) => Effect.promise(() => response.json())),
-        Effect.map((body) => Schema.decodeUnknownSync(SessionResponse)(body).data),
-      )
-    const get = (sessionID: string) =>
-      request(`/api/session/${sessionID}`).pipe(
-        Effect.flatMap((response) => Effect.promise(() => response.json())),
-        Effect.map((body) => Schema.decodeUnknownSync(SessionResponse)(body).data),
-      )
-    const list = (query = "") =>
-      request(`/api/session${query}`).pipe(
-        Effect.flatMap((response) => Effect.promise(() => response.json())),
-        Effect.map((body) => Schema.decodeUnknownSync(SessionsResponse)(body).data),
-      )
+    const session = yield* create(handler)
 
-    const archivedAtZero = yield* create("epoch")
-    const archivedAtFinite = yield* create("finite")
-    const active = yield* create("active")
-    const omitted = yield* request(`/api/session/${archivedAtZero.id}`, "PATCH", {})
+    const omitted = yield* update(handler, session.id, "{}")
     expect(omitted.status).toBe(204)
-    expect((yield* get(archivedAtZero.id)).time.archived).toBeUndefined()
+    expect(yield* text(omitted)).toBe("")
+    expect((yield* get(handler, session.id)).time.archived).toBeUndefined()
 
-    const epoch = yield* request(`/api/session/${archivedAtZero.id}`, "PATCH", { archive: 0 })
-    const finite = yield* request(`/api/session/${archivedAtFinite.id}`, "PATCH", { archive: 7 })
-    expect(epoch.status).toBe(204)
-    expect(finite.status).toBe(204)
-    expect((yield* get(archivedAtZero.id)).time.archived).toBe(0)
-    expect((yield* get(archivedAtFinite.id)).time.archived).toBe(7)
-    expect(yield* get(archivedAtZero.id)).toMatchObject({
-      title: "epoch",
-      metadata: { source: "epoch" },
-      permissions: [{ action: "read", resource: "*", effect: "deny" }],
-    })
+    const archived = yield* update(handler, session.id, JSON.stringify({ archived: true }))
+    expect(archived.status).toBe(204)
+    expect(yield* text(archived)).toBe("")
+    expect((yield* get(handler, session.id)).time.archived).toBeNumber()
 
-    expect((yield* list()).map((session) => session.id)).toEqual([active.id])
-    expect((yield* list("?archived=false")).map((session) => session.id)).toEqual([active.id])
-    expect((yield* list("?archived=true")).map((session) => session.id)).toEqual(
-      expect.arrayContaining([active.id, archivedAtZero.id, archivedAtFinite.id]),
-    )
-    const onlyResponse = yield* request("/api/session?archived=only")
-    expect(onlyResponse.status).toBe(200)
-    const only = Schema.decodeUnknownSync(SessionsResponse)(yield* Effect.promise(() => onlyResponse.json())).data
-    expect(only.map((session) => session.id)).toEqual(
-      expect.arrayContaining([archivedAtZero.id, archivedAtFinite.id]),
-    )
-    expect(only.map((session) => session.id)).not.toContain(active.id)
-
-    const restored = yield* request(`/api/session/${archivedAtFinite.id}`, "PATCH", { archive: null })
+    const restored = yield* update(handler, session.id, JSON.stringify({ archived: false }))
     expect(restored.status).toBe(204)
-    expect((yield* get(archivedAtFinite.id)).time.archived).toBeUndefined()
+    expect(yield* text(restored)).toBe("")
+    expect((yield* get(handler, session.id)).time.archived).toBeUndefined()
   }).pipe(Effect.scoped),
 )
 
-it.live("rejects invalid archive values without mutating mutable session fields", () =>
+it.live("requires the real decoder to reject legacy and excess root fields before a mixed title update", () =>
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make(options)
-    const request = (path: string, method: string, body?: unknown) =>
-      Effect.promise(() =>
-        handler(
-          new Request(`http://opencode.local${path}`, {
-            method,
-            headers: { "content-type": "application/json" },
-            body: body === undefined ? undefined : JSON.stringify(body),
-          }),
-        ),
-      )
-    const createdResponse = yield* request("/api/session", "POST", { title: "original", metadata: { stable: true } })
-    const created = Schema.decodeUnknownSync(SessionResponse)(yield* Effect.promise(() => createdResponse.json())).data
-    for (const archive of ["0", false, {}, []]) {
-      const response = yield* request(`/api/session/${created.id}`, "PATCH", { archive })
-      expect(response.status).toBe(400)
-    }
-    const response = yield* request(`/api/session/${created.id}`, "GET")
-    const unchanged = Schema.decodeUnknownSync(SessionResponse)(yield* Effect.promise(() => response.json())).data
-    expect(unchanged).toMatchObject({ title: "original", metadata: { stable: true } })
-    expect(unchanged.time).not.toHaveProperty("archived")
+    const session = yield* create(handler)
+
+    const response = yield* update(handler, session.id, JSON.stringify({ title: "must-not-apply", archive: 0 }))
+    expect(response.status).toBe(400)
+    expect(response.headers.get("content-type")).toContain("application/json")
+    expect(yield* Effect.promise(() => response.json())).toMatchObject({ _tag: "InvalidRequestError", kind: "Payload" })
+    expect((yield* get(handler, session.id)).title).not.toBe("must-not-apply")
   }).pipe(Effect.scoped),
 )
 
-it.live("keeps PATCH location middleware and missing-session mapping for archive", () =>
+it.live("retains native media and malformed-payload HTTP contracts without a raw handler", () =>
   Effect.gen(function* () {
-    const root = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-archive-location-")))
-    const missing = path.join(root.path, "missing")
-    const handler = yield* ServerFetch.make({ ...options, config: { project: false, directory: root.path } })
-    const created = yield* Effect.promise(() =>
-      handler(
-        new Request("http://opencode.local/api/session", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ location: { directory: missing } }),
-        }),
-      ),
-    )
-    const session = Schema.decodeUnknownSync(SessionResponse)(yield* Effect.promise(() => created.json())).data
-    const unavailable = yield* Effect.promise(() =>
-      handler(
-        new Request(`http://opencode.local/api/session/${session.id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json", "x-opencode-directory": encodeURIComponent(missing) },
-          body: JSON.stringify({ archive: 0 }),
-        }),
-      ),
-    )
-    expect(unavailable.status).toBe(404)
-    expect(yield* Effect.promise(() => unavailable.json())).toMatchObject({
-      _tag: "LocationNotFoundError",
-      location: { directory: missing },
-    })
+    const handler = yield* ServerFetch.make(options)
+    const session = yield* create(handler)
 
-    const unknown = yield* Effect.promise(() =>
-      handler(
-        new Request("http://opencode.local/api/session/ses_missing", {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ archive: 0 }),
-        }),
-      ),
-    )
-    expect(unknown.status).toBe(404)
+    const unsupported = yield* update(handler, session.id, "archived=true", { "content-type": "text/plain" })
+    expect(unsupported.status).toBe(415)
+    expect(unsupported.headers.get("content-type")).toContain("text/plain")
+    expect(yield* text(unsupported)).toBe("Unsupported content-type: text/plain")
+
+    const malformed = yield* update(handler, session.id, "{", { "content-type": "application/json; charset=utf-8" })
+    expect(malformed.status).toBe(400)
+    expect(malformed.headers.get("content-type")).toContain("application/json")
+    expect(yield* Effect.promise(() => malformed.json())).toMatchObject({
+      _tag: "InvalidRequestError",
+      kind: "Payload",
+    })
   }).pipe(Effect.scoped),
 )
 
-it.live("maps exhausted archive contention from the core service to ConflictError", () =>
+it.live("authenticates before decoding malformed or legacy request bodies", () =>
   Effect.gen(function* () {
-    const session = new Proxy({} as SessionInterface, {
-      get(_, key) {
-        if (key === "get") return () => Effect.succeed({ location: { directory: process.cwd() } })
-        if (key === "list") return () => Effect.succeed({ data: [], cursor: {} })
-        if (key === "setArchive")
-          return () =>
-            Effect.fail({
-              _tag: "Session.ArchiveConflictError",
-              sessionID: "ses_archive_conflict",
-              message: "Archive contention exhausted",
-            })
-        return () => Effect.void
-      },
+    const handler = yield* ServerFetch.make({ ...options, password: "synthetic-test-password" })
+    const unauthenticated = yield* update(handler, "ses_not_routed", "{")
+    expect(unauthenticated.status).toBe(401)
+    expect(unauthenticated.headers.get("content-type")).toContain("application/json")
+    expect(yield* Effect.promise(() => unauthenticated.json())).toEqual({
+      _tag: "UnauthorizedError",
+      message: "Authentication required",
     })
-    const handler = yield* ServerFetch.make(options, {
-      overrides: [SessionNode.replace(Layer.succeed(SessionService, session))],
-    })
-    const response = yield* Effect.promise(() =>
-      handler(
-        new Request("http://opencode.local/api/session/ses_archive_conflict", {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ archive: 0 }),
-        }),
-      ),
-    )
 
-    expect(response.status).toBe(409)
-    expect(yield* Effect.promise(() => response.json())).toMatchObject({
-      _tag: "ConflictError",
-      resource: "ses_archive_conflict",
-    })
+    const authorized = { authorization: `Basic ${btoa("opencode:synthetic-test-password")}` }
+    const session = yield* create(handler, authorized)
+    const legacy = yield* update(handler, session.id, JSON.stringify({ archive: null }), authorized)
+    expect(legacy.status).toBe(400)
+    expect(legacy.headers.get("content-type")).toContain("application/json")
+    expect(yield* Effect.promise(() => legacy.json())).toMatchObject({ _tag: "InvalidRequestError", kind: "Payload" })
+    expect((yield* get(handler, session.id, authorized)).time.archived).toBeUndefined()
+  }).pipe(Effect.scoped),
+)
+
+it.live("accepts declared metadata records containing an archive-named nested key", () =>
+  Effect.gen(function* () {
+    const handler = yield* ServerFetch.make(options)
+    const session = yield* create(handler)
+
+    const response = yield* update(handler, session.id, JSON.stringify({ metadata: { archive: { retained: true } } }))
+    expect(response.status).toBe(204)
+    expect((yield* get(handler, session.id)).metadata).toEqual({ archive: { retained: true } })
   }).pipe(Effect.scoped),
 )

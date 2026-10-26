@@ -11,7 +11,7 @@
  *   - A legacy payload sessionID must equal its durable aggregateID.
  */
 import { describe, expect } from "bun:test"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Stream } from "effect"
 import { eq } from "drizzle-orm"
 import { TestClock } from "effect/testing"
 import { Bus } from "@opencode/core/bus"
@@ -160,6 +160,36 @@ describe("v2.1.4 archive compatibility contract", () => {
           archived: null,
           updated: 9,
         })
+      }),
+  )
+
+  it.effect(
+    "requires a recognized malformed legacy log row to fail before its cursor or synced watermark advances",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* seed([{ id: sessionID }, { id: otherID, updated: 9 }])
+        yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 0 }).run()
+        yield* db
+          .insert(EventTable)
+          .values({
+            id: Event.ID.make("evt_v214_legacy_log_mismatch"),
+            aggregate_id: sessionID,
+            seq: 0,
+            created: 1234,
+            type: "session.archive.changed.1",
+            data: { sessionID: otherID, archived: 0 },
+          })
+          .run()
+
+        const result = yield* Stream.runCollect((yield* Bus.Service).log({ aggregateID: sessionID })).pipe(Effect.exit)
+        expect(Exit.isFailure(result)).toBe(true)
+        expect(
+          yield* db
+            .select({ archived: SessionTable.time_archived, updated: SessionTable.time_updated })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, otherID))
+            .get(),
+        ).toEqual({ archived: null, updated: 9 })
       }),
   )
 
