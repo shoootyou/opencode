@@ -71,18 +71,22 @@ const all = await client.session.list()
 ```
 
 Custom clients using the earlier fork contract must replace the numeric
-`archive` request field and `archived=only`. Unknown root request fields,
-including `archive`, return `400` before any accompanying title update is
-applied. This does not restrict a nested `metadata.archive` value.
+`archive` request field and `archived=only`. The optional `archived` key accepts
+only a boolean, so `{ "archived": null }` returns `400`. Unknown root request
+fields, including `archive`, also return `400` before any accompanying title
+update is applied. This does not restrict a nested `metadata.archive` value.
 
 Session updates can return `ConflictError` (`409`) or
 `SessionArchiveLimitError` (`429`). The archive admission limit allows at most
-six transitions per 60 seconds. Archiving is also refused when 1,023 retained
-archive-family events exist, leaving room for a restore.
+six transitions per 60 seconds. Its window includes retained archive-family
+events dated up to 60 seconds before or after the current time. Events dated
+further in the future do not count toward that limit, but still count toward
+the 1,023 retained-event cap. Archiving is refused at that cap; restores remain
+rate-limited but are exempt from the cap.
 
 New archive operations emit `session.archived` and `session.unarchived`. The
 generated event union also includes the historical
-`session.archive.changed` version 1 event for reading and replaying existing
+`session.archive.changed` version 1 event for reading and replaying valid existing
 history; new operations never write it. Compatibility with an unmodified stock
 upstream SDK reading complete legacy fork history is not promised.
 
