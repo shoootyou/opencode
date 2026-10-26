@@ -162,22 +162,51 @@ test.each(["dark", "light"] as const)("renders an AA focused footer action in %s
       .captureSpans()
       .lines.flatMap((line) => line.spans)
       .find((entry) => entry.text.includes(text))
+  const pair = () => {
+    const action = span("archive/unarchive")
+    const dialog = span("Sessions")
+    if (!action || !dialog) throw new Error("archive footer or dialog background was not rendered")
+    const background = action.bg.toInts()[3] === 0 ? dialog.bg : action.bg
+    const hex = (color: RGBA) =>
+      `#${color
+        .toInts()
+        .slice(0, 3)
+        .map((value) => value.toString(16).padStart(2, "0"))
+        .join("")}`
+    return { foreground: action.fg, background, description: `fg=${hex(action.fg)} bg=${hex(background)}` }
+  }
 
   await setup.ready
   await setup.waitForFrame((frame) => frame.includes("Ask anything"))
   setup.mockInput.pressKey("l", { ctrl: true })
   await setup.waitForFrame((frame) => frame.includes("Sessions") && frame.includes("Active root"))
   await setup.waitForVisualIdle({ quietFrames: 3 })
+  const unfocused = pair()
+  const unfocusedRatio = contrastRatio(unfocused.foreground, unfocused.background)
+  expect(
+    unfocusedRatio,
+    `unfocused ${mode} archive action ${unfocused.description} ratio=${unfocusedRatio.toFixed(2)}:1`,
+  ).toBeGreaterThanOrEqual(4.5)
   setup.mockInput.pressTab()
   setup.mockInput.pressTab()
   setup.mockInput.pressTab()
-  await setup.waitForFrame((frame) => frame.includes("archive/unarchive"))
-  const action = span("archive/unarchive")!
-  const row = span("Active root")!
-  expect(action.bg.equals(RGBA.fromInts(0, 0, 0, 0))).toBe(false)
-  const ratio = contrastRatio(action.fg, action.bg)
-  expect(ratio, `focused archive action contrast was ${ratio.toFixed(2)}:1 in ${mode}`).toBeGreaterThanOrEqual(4.5)
-  expect(row.bg.equals(action.bg)).toBe(false)
+  try {
+    await setup.waitFor(() => {
+      const focused = pair()
+      return !focused.foreground.equals(unfocused.foreground) || !focused.background.equals(unfocused.background)
+    })
+  } catch {
+    const current = pair()
+    throw new Error(
+      `archive focus did not repaint in ${mode}: unfocused ${unfocused.description}; current ${current.description}`,
+    )
+  }
+  const focused = pair()
+  const focusedRatio = contrastRatio(focused.foreground, focused.background)
+  expect(
+    focusedRatio,
+    `focused ${mode} archive action ${focused.description} ratio=${focusedRatio.toFixed(2)}:1; unfocused ${unfocused.description} ratio=${unfocusedRatio.toFixed(2)}:1`,
+  ).toBeGreaterThanOrEqual(4.5)
   setup.mockInput.pressEnter()
   await setup.waitFor(() => patches.length === 1)
   expect(patches).toEqual([{ archived: true }])
