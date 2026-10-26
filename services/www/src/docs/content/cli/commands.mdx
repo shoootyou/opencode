@@ -44,6 +44,9 @@ Continue the last session.
 $ opencode run --continue "Now handle the expired case"
 ```
 
+`--continue` selects active sessions only. Use `--session <id>` to continue an
+archived session by its explicit ID.
+
 Emit newline-delimited JSON for scripts.
 
 ```bash
@@ -125,6 +128,10 @@ Limit the list and print JSON.
 ```bash
 $ opencode session list --max-count 20 --format json
 ```
+
+`session list` shows active sessions only. The interactive picker used by
+`session export` also shows active sessions only, but `session export <id>` can
+export an archived session when you provide its ID.
 
 Delete a session and its child sessions.
 

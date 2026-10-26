@@ -55,6 +55,37 @@ await client.session.list(undefined, {
 })
 ```
 
+## Session archives
+
+Archive or restore a session with the `archived` boolean. List requests use the
+same field: `true` returns archived sessions, `false` returns active sessions,
+and omitting it returns both.
+
+```ts
+await client.session.update({ sessionID: "ses_example", archived: true })
+await client.session.update({ sessionID: "ses_example", archived: false })
+
+const active = await client.session.list({ archived: false })
+const archived = await client.session.list({ archived: true })
+const all = await client.session.list()
+```
+
+Custom clients using the earlier fork contract must replace the numeric
+`archive` request field and `archived=only`. Unknown root request fields,
+including `archive`, return `400` before any accompanying title update is
+applied. This does not restrict a nested `metadata.archive` value.
+
+Session updates can return `ConflictError` (`409`) or
+`SessionArchiveLimitError` (`429`). The archive admission limit allows at most
+six transitions per 60 seconds. Archiving is also refused when 1,023 retained
+archive-family events exist, leaving room for a restore.
+
+New archive operations emit `session.archived` and `session.unarchived`. The
+generated event union also includes the historical
+`session.archive.changed` version 1 event for reading and replaying existing
+history; new operations never write it. Compatibility with an unmodified stock
+upstream SDK reading complete legacy fork history is not promised.
+
 ## Stream events
 
 Streaming endpoints return async iterables:
