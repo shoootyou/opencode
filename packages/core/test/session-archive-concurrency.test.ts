@@ -9,7 +9,7 @@
  *   - The fixture gates the real Bus publisher before its transaction; it does not replace locking or admission.
  */
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { eq } from "drizzle-orm"
 import { Bus } from "@opencode/core/bus"
@@ -207,6 +207,50 @@ describe("native session archive commit admission", () => {
     }),
   )
 
+  it.effect("retries once after an unrelated write and then commits the native archive", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      let attempts = 0
+      const sessions = yield* nativeSessionWithPublishGate((_archived, real) =>
+        Effect.sync(() => ++attempts).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 1
+              ? real.publish(SessionEvent.Renamed, { sessionID, title: "between-attempts" }).pipe(Effect.asVoid)
+              : Effect.void,
+          ),
+        ),
+      )
+      yield* sessions.forSession(sessionID).archive()
+      expect(attempts).toBe(2)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: expect.any(Number),
+      })
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([
+        { aggregate_id: sessionID, seq: 1, owner_id: null },
+      ])
+    }),
+  )
+
+  it.effect("propagates an arbitrary publish defect without retrying or translating it to archive contention", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const defect = { marker: "native-archive-defect" }
+      let attempts = 0
+      const sessions = yield* nativeSessionWithPublishGate(() =>
+        Effect.sync(() => ++attempts).pipe(Effect.andThen(Effect.die(defect))),
+      )
+      const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) {
+        expect(result.cause.reasons.filter(Cause.isDieReason).map((reason) => reason.defect)).toContainEqual(defect)
+        expect(String(result)).not.toContain("ArchiveConflictError")
+      }
+      expect(attempts).toBe(1)
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+    }),
+  )
+
   it.effect("retries native archive exactly eight times after its initial stale commit attempt", () =>
     Effect.gen(function* () {
       const db = yield* seed()
@@ -232,6 +276,8 @@ describe("native session archive commit admission", () => {
       const db = yield* seed()
       const now = 3_000_000
       yield* TestClock.setTime(now)
+      let notifications = 0
+      yield* (yield* Bus.Service).listen(() => Effect.sync(() => ++notifications))
       yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 5 }).run()
       yield* db
         .insert(EventTable)
@@ -249,10 +295,20 @@ describe("native session archive commit admission", () => {
 
       const result = yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) {
+        expect(result.cause.reasons.some(Cause.isDieReason)).toBe(false)
+        expect(result.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)).toMatchObject([
+          { _tag: "Session.ArchiveLimitError", kind: "rate", retryAfterMillis: 60_001 },
+        ])
+      }
       expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([
+        { aggregate_id: sessionID, seq: 5, owner_id: null },
+      ])
       expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
         archived: null,
       })
+      expect(notifications).toBe(0)
     }),
   )
 })

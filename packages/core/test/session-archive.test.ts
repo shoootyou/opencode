@@ -11,6 +11,7 @@ import { SessionEvent } from "@opencode/core/session/event"
 import { SessionExecution } from "@opencode/core/session/execution"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionStore } from "@opencode/core/session/store"
+import { SessionTable } from "@opencode/core/session/sql"
 import { Event } from "@opencode/schema/event"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { DateTime, Effect, Exit } from "effect"
@@ -30,7 +31,13 @@ const it = testEffect(
 )
 const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 
-const legacyArchiveEvent = (id: string, sessionID: Session.ID, seq: number, created: number, archived: number | null) => ({
+const legacyArchiveEvent = (
+  id: string,
+  sessionID: Session.ID,
+  seq: number,
+  created: number,
+  archived: number | null,
+) => ({
   id: Event.ID.make(id),
   aggregateID: sessionID,
   seq,
@@ -86,6 +93,35 @@ describe("Session.archive", () => {
     }),
   )
 
+  it.effect("filters archived rows before limits and keeps equal-time cursor ordering", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const { db } = yield* Database.Service
+      const archived = yield* session.create({ id: Session.ID.make("ses_z"), location })
+      const activeC = yield* session.create({ id: Session.ID.make("ses_c"), location })
+      const activeB = yield* session.create({ id: Session.ID.make("ses_b"), location })
+      const activeA = yield* session.create({ id: Session.ID.make("ses_a"), location })
+      yield* session.archive(archived.id)
+      yield* db.update(SessionTable).set({ time_updated: 10 }).run()
+      yield* db.update(SessionTable).set({ time_updated: 9 }).where(eq(SessionTable.id, activeA.id)).run()
+
+      const store = yield* SessionStore.Service
+      expect((yield* store.list({ archived: false, limit: 2 })).map((item) => item.id)).toEqual([
+        activeC.id,
+        activeB.id,
+      ])
+      expect((yield* store.list({ archived: true, limit: 2 })).map((item) => item.id)).toEqual([archived.id])
+      expect((yield* store.list({ limit: 2 })).map((item) => item.id)).toEqual([archived.id, activeC.id])
+      expect(
+        (yield* store.list({
+          archived: false,
+          order: "asc",
+          anchor: { id: activeB.id, time: 10, direction: "previous" },
+        })).map((item) => item.id),
+      ).toEqual([activeA.id])
+    }),
+  )
+
   it.effect("rejects an unknown session", () =>
     Effect.gen(function* () {
       const session = yield* Session.Service
@@ -109,11 +145,25 @@ describe("Session.archive", () => {
       expect(DateTime.toEpochMillis(firstArchived.time.updated)).toBe(1234)
       expect(
         yield* db
-          .select({ id: EventTable.id, aggregateID: EventTable.aggregate_id, seq: EventTable.seq, created: EventTable.created, type: EventTable.type, data: EventTable.data })
+          .select({
+            id: EventTable.id,
+            aggregateID: EventTable.aggregate_id,
+            seq: EventTable.seq,
+            created: EventTable.created,
+            type: EventTable.type,
+            data: EventTable.data,
+          })
           .from(EventTable)
           .where(eq(EventTable.id, archive.id))
           .get(),
-      ).toEqual({ id: archive.id, aggregateID: created.id, seq: 1, created: 1234, type: archive.type, data: archive.data })
+      ).toEqual({
+        id: archive.id,
+        aggregateID: created.id,
+        seq: 1,
+        created: 1234,
+        type: archive.type,
+        data: archive.data,
+      })
 
       yield* bus.replay(legacyArchiveEvent("evt_archive_repeat", created.id, 2, 2345, 9))
       const repeatedArchive = yield* session.get(created.id)
@@ -134,12 +184,18 @@ describe("Session.archive", () => {
       const other = yield* session.create({ location })
       const event = legacyArchiveEvent("evt_archive_replay", created.id, 1, 1234, 0)
 
-      expect(Exit.isFailure(yield* bus.replay({ ...event, data: { sessionID: other.id, archived: 0 } }).pipe(Effect.exit))).toBe(true)
+      expect(
+        Exit.isFailure(yield* bus.replay({ ...event, data: { sessionID: other.id, archived: 0 } }).pipe(Effect.exit)),
+      ).toBe(true)
       expect((yield* session.get(other.id)).time.archived).toBeUndefined()
       yield* bus.replay(event)
       yield* bus.replay(event)
-      expect(Exit.isFailure(yield* bus.replay({ ...event, data: { sessionID: created.id, archived: 9 } }).pipe(Effect.exit))).toBe(true)
-      expect(Exit.isFailure(yield* bus.replay({ ...event, id: Event.ID.make("evt_archive_gap"), seq: 3 }).pipe(Effect.exit))).toBe(true)
+      expect(
+        Exit.isFailure(yield* bus.replay({ ...event, data: { sessionID: created.id, archived: 9 } }).pipe(Effect.exit)),
+      ).toBe(true)
+      expect(
+        Exit.isFailure(yield* bus.replay({ ...event, id: Event.ID.make("evt_archive_gap"), seq: 3 }).pipe(Effect.exit)),
+      ).toBe(true)
     }),
   )
 })
