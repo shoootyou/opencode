@@ -416,4 +416,54 @@ describe("native session archive commit admission", () => {
         expect(yield* db.select().from(EventTable).all()).toHaveLength(7)
       }),
   )
+
+  it.effect("does not let six far-future replayed native rows lock a real archive transition", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const bus = yield* Bus.Service
+      const now = 3_000_000
+      const future = now + 31_536_000_000
+      yield* TestClock.setTime(now)
+      for (const seq of Array.from({ length: 6 }, (_, index) => index))
+        yield* bus.replay({
+          id: Event.ID.make(`evt_archive_future_replay_${seq}`),
+          aggregateID: sessionID,
+          seq,
+          created: future,
+          type: `session.${seq % 2 === 0 ? "archived" : "unarchived"}.1`,
+          data: { sessionID },
+        })
+      yield* (yield* Session.Service).archive(sessionID)
+      const rows = yield* db.select().from(EventTable).orderBy(EventTable.seq).all()
+      expect(rows).toHaveLength(7)
+      expect(rows.slice(0, 6).map((row) => [row.seq, row.created])).toEqual(
+        Array.from({ length: 6 }, (_, seq) => [seq, future]),
+      )
+      expect(rows.at(-1)).toMatchObject({ seq: 6, type: "session.archived.1" })
+    }),
+  )
+
+  it.effect("excludes rows beyond the exact future admission boundary", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const now = 3_000_000
+      yield* TestClock.setTime(now)
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 5 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 6 }, (_, seq) => ({
+            id: Event.ID.make(`evt_archive_future_boundary_${seq}`),
+            aggregate_id: sessionID,
+            seq,
+            created: now + 60_001,
+            type: `session.${seq % 2 === 0 ? "archived" : "unarchived"}.1`,
+            data: { sessionID },
+          })),
+        )
+        .run()
+      yield* (yield* Session.Service).archive(sessionID)
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(7)
+    }),
+  )
 })
