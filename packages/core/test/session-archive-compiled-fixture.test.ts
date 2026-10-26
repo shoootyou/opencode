@@ -8,7 +8,7 @@
  * @edge-cases
  *   - Missing an explicitly requested manifest fails configuration; normal runs may opt in with the manifest environment variable.
  *   - Every spawned server is an isolated process group whose identity, reaping, and absence are verified before profile snapshots or deletion.
- * @see ../../../.debug/fixtures/plan382-e4-05109/fixture-pair.json
+ * @see ../../../.debug/fixtures/plan382-e8-d2c112b/fixture-pair.json
  */
 import { expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
@@ -18,8 +18,8 @@ import path from "node:path"
 
 const manifestPath = process.env.OPENCODE_COMPILED_FIXTURE_MANIFEST
 const required = process.env.OPENCODE_COMPILED_FIXTURE_REQUIRED === "1"
-const fixtureRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e4-05109/shin-compiled-roundtrip")
-const evidenceRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e4-05109/evidence")
+const fixtureRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e8-d2c112b/shin-compiled-roundtrip")
+const evidenceRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e8-d2c112b/evidence")
 
 test.skipIf(!manifestPath && !required)(
   "compiled old/native populated fixture requires an explicit manifest",
@@ -73,7 +73,9 @@ test.skipIf(!manifestPath && !required)(
       const afterNative = await sessionStates(native, [active.id])
       expect(afterNative.active).not.toBeNull()
       const afterNativeJournal = await readJournal(oldProfile, [active.id])
-      const missingNativeRetention = !afterNativeJournal.some((event) => event.type === "session.archived.1")
+      const nativeEvents = afterNativeJournal.filter((event) => event.type === "session.archived.1")
+      expect(nativeEvents).toHaveLength(1)
+      expect(nativeEvents[0]?.seq).toBe(1)
       await stopServer(native)
       native = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
@@ -86,8 +88,7 @@ test.skipIf(!manifestPath && !required)(
       await stopServer(old)
       old = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
-      semanticOutcome = missingNativeRetention ? "semantic-red-missing-native-retention" : "unexpected-green"
-      expect(missingNativeRetention).toBe(false)
+      semanticOutcome = "semantic-green-native-retention"
     } finally {
       await Promise.all([stopServer(native), stopServer(old)])
       expect(await ownedProcessIDs(root)).toEqual([])
@@ -113,7 +114,7 @@ test.skipIf(!manifestPath && !required)(
             "delete",
           ],
           snapshot_and_rollback: true,
-          source: "05109ed35e722d1dd0af1421fac8bedb2fcf74ea",
+          source: "d2c112bad4ee61a94e4fbef731ab611aa284f269",
         }),
       )
       await rm(root, { recursive: true, force: false })
