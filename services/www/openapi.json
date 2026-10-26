@@ -4104,16 +4104,6 @@
                 }
               }
             }
-          },
-          "500": {
-            "description": "UnknownError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnknownErrorEncoded"
-                }
-              }
-            }
           }
         },
         "description": "Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true.",
