@@ -425,6 +425,53 @@ test("far-future retention remains SQL-derived after reopening, while no-ops pre
   )
 })
 
+it.effect("refuses archive at 1,023 future rows while an archived 1,024-row history remains restore-exempt", () =>
+  Effect.gen(function* () {
+    const db = yield* seed()
+    yield* TestClock.setTime(T)
+    yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 1022 }).run()
+    yield* db
+      .insert(EventTable)
+      .values(
+        Array.from({ length: 1023 }, (_, seq) => ({
+          id: Event.ID.make(`evt_retention_active_${seq}`),
+          aggregate_id: sessionID,
+          seq,
+          created: future + seq,
+          type: types[seq % 3],
+          data:
+            types[seq % 3] === "session.archive.changed.1"
+              ? { sessionID, archived: seq % 2 === 0 ? future : null }
+              : { sessionID },
+        })),
+      )
+      .run()
+    expectLimit(yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit), "retention")
+
+    const archivedID = SessionID.make("ses_archive_future_retention_archived")
+    yield* seed(true, archivedID)
+    yield* db.insert(EventSequenceTable).values({ aggregate_id: archivedID, seq: 1023 }).run()
+    yield* db
+      .insert(EventTable)
+      .values(
+        Array.from({ length: 1024 }, (_, seq) => ({
+          id: Event.ID.make(`evt_retention_archived_${seq}`),
+          aggregate_id: archivedID,
+          seq,
+          created: future + seq,
+          type: types[seq % 3],
+          data:
+            types[seq % 3] === "session.archive.changed.1"
+              ? { sessionID: archivedID, archived: seq % 2 === 0 ? future : null }
+              : { sessionID: archivedID },
+        })),
+      )
+      .run()
+    yield* (yield* Session.Service).unarchive(archivedID)
+    expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, archivedID)).all()).toHaveLength(1025)
+  }),
+)
+
 it.effect(
   "preserves future envelopes through duplicate replay and log watermark while no-op commands bypass poisoned admission",
   () =>
