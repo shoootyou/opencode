@@ -89,3 +89,37 @@ test("toggles scope with Ctrl+A and archives through the default-none Tab fallba
   await setup.waitFor(() => patches.length === 1)
   expect(patches).toEqual([{ archived: true }])
 })
+
+test("Shift+Tab activates the default-unbound archived-visibility action without selecting a row", async () => {
+  // coverage backfill: the reverse default-none traversal must reach the selection-free visibility action.
+  const requests: URL[] = []
+  const patches: unknown[] = []
+  await using setup = await createAppFixture({
+    config: {
+      animations: false,
+      keybinds: { "session.list": "ctrl+l" },
+    },
+    fetch: async (url, request) => {
+      if (!url.pathname.startsWith("/api/session")) return
+      if (request.method === "PATCH") {
+        patches.push(await request.json())
+        return new Response(null, { status: 204 })
+      }
+      if (url.pathname === "/api/session") {
+        requests.push(url)
+        return json({ data: [active], cursor: {} })
+      }
+      return json({ data: active })
+    },
+  })
+
+  await setup.ready
+  await setup.waitForFrame((frame) => frame.includes("Ask anything"))
+  setup.mockInput.pressKey("l", { ctrl: true })
+  await setup.waitForFrame((frame) => frame.includes("Sessions") && frame.includes("Active root"))
+  setup.mockInput.pressTab({ shift: true })
+  setup.mockInput.pressEnter()
+  await setup.waitFor(() => requests.some((url) => url.searchParams.get("archived") === "true"))
+  expect(patches).toEqual([])
+  expect(requests.filter((url) => url.searchParams.get("archived") === "true")).toHaveLength(1)
+})

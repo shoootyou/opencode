@@ -1,3 +1,13 @@
+/**
+ * @spec-handoff
+ * @interface DialogSelect<T>(props: DialogSelectProps<T>): JSX.Element
+ * @behavior
+ *   - Tab and Shift+Tab focus only footer actions explicitly available when unbound.
+ *   - A focused footer action has an AA-readable paired foreground/background treatment and Enter runs it before a row.
+ * @edge-cases
+ *   - Bound actions without showWhenUnbound retain normal Tab field/list behavior.
+ * @see ../../../src/ui/dialog-select.tsx
+ */
 /** @jsxImportSource @opentui/solid */
 import { InputRenderable, type RGBA } from "@opentui/core"
 import { testRender } from "@opentui/solid"
@@ -23,6 +33,7 @@ async function renderSelect(
   onGlobal: () => void,
   onRow: (option: DialogSelectOption<string>) => void,
   current?: string,
+  footerActions?: DialogSelectProps<string>["actions"],
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
@@ -45,19 +56,21 @@ async function renderSelect(
           title="Items"
           options={options}
           current={current}
-          actions={[
-            {
-              command: "dialog.move_session.delete",
-              title: "delete",
-              onTrigger: onRow,
-            },
-            {
-              command: "dialog.move_session.new",
-              title: "new",
-              selection: "none",
-              onTrigger: onGlobal,
-            },
-          ]}
+          actions={
+            footerActions ?? [
+              {
+                command: "dialog.move_session.delete",
+                title: "delete",
+                onTrigger: onRow,
+              },
+              {
+                command: "dialog.move_session.new",
+                title: "new",
+                selection: "none",
+                onTrigger: onGlobal,
+              },
+            ]
+          }
         />
       )
     }
@@ -638,7 +651,9 @@ test("dialog rows do not add renderer resize listeners", async () => {
     const before = count()
     // Mounting 30 rows must not add one resize listener per row (Node warns
     // past 10 listeners on one emitter).
-    select.replaceOptions(Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })))
+    select.replaceOptions(
+      Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })),
+    )
     await select.app.waitForVisualIdle()
     expect(count()).toBe(before)
   } finally {
@@ -664,5 +679,160 @@ test("keeps the first row selected when current is only a marker", async () => {
     expect(select.selected).toEqual(["recent"])
   } finally {
     select.app.renderer.destroy()
+  }
+})
+
+function contrastRatio(foreground: RGBA, background: RGBA) {
+  const luminance = (color: RGBA) => {
+    const [red, green, blue] = color
+      .toInts()
+      .slice(0, 3)
+      .map((value) => value / 255)
+    const channel = (value: number) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+  }
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((left, right) => right - left)
+  return (light + 0.05) / (dark + 0.05)
+}
+
+test.each(["dark", "light"] as const)(
+  "renders an AA-focused footer action over its paired background in %s new-designs mode",
+  async (mode) => {
+    await using temporary = await tmpdir()
+    let actionRuns = 0
+    let rowRuns = 0
+    let theme: ReturnType<ReturnType<typeof useTheme>["surface"]> | undefined
+    const config = {
+      ...createTuiResolvedConfig({ theme: { name: "opencode", mode } }),
+      experimental: { "new-designs": true },
+    }
+    const [
+      { ConfigProvider },
+      { ThemeProvider, useTheme },
+      { Keymap },
+      { DialogProvider },
+      { DialogSelect },
+      { ToastProvider },
+    ] = await Promise.all([
+      import("../../../src/config"),
+      import("../../../src/context/theme"),
+      import("../../../src/context/keymap"),
+      import("../../../src/ui/dialog"),
+      import("../../../src/ui/dialog-select"),
+      import("../../../src/ui/toast"),
+    ])
+    const app = await testRender(
+      () => (
+        <TestTuiContexts directory={temporary.path} paths={{ home: temporary.path, state: temporary.path }}>
+          <ConfigProvider config={config}>
+            <ThemeProvider mode={mode} source={emptyThemeSource}>
+              <Keymap.Provider>
+                <ToastProvider>
+                  <DialogProvider>
+                    {(() => {
+                      onCleanup(Keymap.use().mode.push("modal"))
+                      theme = useTheme().surface("dialog")
+                      return (
+                        <DialogSelect
+                          title="Footer focus"
+                          options={[{ title: "Selected row", value: "selected" }]}
+                          onSelect={() => rowRuns++}
+                          actions={[
+                            {
+                              command: "test.footer.visibility",
+                              title: "toggle visibility",
+                              selection: "none",
+                              showWhenUnbound: true,
+                              onTrigger: () => actionRuns++,
+                            },
+                          ]}
+                        />
+                      )
+                    })()}
+                  </DialogProvider>
+                </ToastProvider>
+              </Keymap.Provider>
+            </ThemeProvider>
+          </ConfigProvider>
+        </TestTuiContexts>
+      ),
+      { width: 100, height: 24, kittyKeyboard: true },
+    )
+    const span = (text: string) =>
+      app
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .find((entry) => entry.text.includes(text))
+
+    try {
+      app.renderer.start()
+      await app.waitForFrame((frame) => frame.includes("Selected row") && frame.includes("toggle visibility"))
+      await app.waitForVisualIdle({ quietFrames: 3 })
+      app.renderer.currentFocusedEditor?.blur()
+      app.mockInput.pressTab({ shift: true })
+      await app.waitForFrame(
+        () => span("toggle visibility")?.bg.equals(theme!.background.action.primary.focused) === true,
+      )
+      let action = span("toggle visibility")!
+      let row = span("Selected row")!
+      expect(action.fg.equals(theme!.text.action.primary.focused)).toBe(true)
+      expect(action.bg.equals(theme!.background.action.primary.focused)).toBe(true)
+      expect(contrastRatio(action.fg, action.bg)).toBeGreaterThanOrEqual(4.5)
+      expect(row.bg.equals(theme!.background.action.primary.focused)).toBe(false)
+
+      app.mockInput.pressArrow("down")
+      await app.waitFor(() => span("toggle visibility")?.bg.equals(theme!.background.action.primary.focused) === false)
+      app.mockInput.pressTab()
+      await app.waitForFrame(
+        () => span("toggle visibility")?.bg.equals(theme!.background.action.primary.focused) === true,
+      )
+      action = span("toggle visibility")!
+      row = span("Selected row")!
+      expect(action.fg.equals(theme!.text.action.primary.focused)).toBe(true)
+      expect(contrastRatio(action.fg, action.bg)).toBeGreaterThanOrEqual(4.5)
+      expect(row.bg.equals(theme!.background.action.primary.focused)).toBe(false)
+      app.mockInput.pressEnter()
+      await app.waitFor(() => actionRuns === 1)
+      expect(rowRuns).toBe(0)
+    } finally {
+      app.renderer.destroy()
+    }
+  },
+)
+
+test("keeps Tab and Shift+Tab in normal dialog navigation for a bound footer action", async () => {
+  // coverage backfill: tabActions() must not capture Tab unless an action opts into showWhenUnbound.
+  await using temporary = await tmpdir()
+  let actionRuns = 0
+  const app = await renderSelect(
+    temporary.path,
+    [{ title: "Selected row", value: "selected" }],
+    () => {},
+    () => {},
+    undefined,
+    [
+      {
+        command: "test.bound.action",
+        title: "bound action",
+        bind: "ctrl+b",
+        selection: "none",
+        onTrigger: () => actionRuns++,
+      },
+    ],
+  )
+
+  try {
+    await app.waitFor(() => app.renderer.currentFocusedEditor instanceof InputRenderable)
+    app.mockInput.pressTab()
+    app.mockInput.pressEnter()
+    expect(actionRuns).toBe(0)
+    expect(app.renderer.currentFocusedEditor).toBeInstanceOf(InputRenderable)
+
+    app.mockInput.pressTab({ shift: true })
+    app.mockInput.pressEnter()
+    expect(actionRuns).toBe(0)
+    expect(app.renderer.currentFocusedEditor).toBeInstanceOf(InputRenderable)
+  } finally {
+    app.renderer.destroy()
   }
 })
