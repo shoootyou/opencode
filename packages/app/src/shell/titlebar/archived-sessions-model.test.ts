@@ -2,12 +2,12 @@
  * @spec-handoff
  * @interface createArchivedSessionsModel(deps): { load(): Promise<void>; loadMore(): Promise<void>; retryMore(): Promise<void> }
  * @behavior
- *   - Loads one archived root batch of 50, then appends unique continuation rows in response order.
+ *   - Loads one archived:true root batch of 50, then appends unique continuation rows in response order.
  *   - Guards concurrent continuation, retains rows on recoverable continuation failure, and retries its same cursor.
  *   - Ignores stale, disposed, reset, and restore-aborted append completions.
  *   - Keeps first row objects, terminates an empty root batch, and searches retained rows without fetching.
  * @edge-cases
- *   - Empty or cursorless batches exhaust; short nonempty batches with a cursor remain continuable.
+ *   - Empty or cursorless batches exhaust; short nonempty batches with a cursor remain continuable; restore sends archived:false.
  *   - Repeated cursors and duplicate-only batches pause with a recoverable error rather than exhausting.
  * @see RFC 057 D.3.1-9, AP1, AP4-7
  */
@@ -40,7 +40,7 @@ function model(list: (input: unknown) => Promise<unknown>) {
   }) as unknown as ContinuousModel
 }
 
-test("loads one archived-only root batch with the fixed limit and searches loaded title or directory rows locally", async () => {
+test("loads one archived:true root batch with the fixed limit and searches loaded title or directory rows locally", async () => {
   const requests: unknown[] = []
   const archive = model(async (input) => {
     requests.push(input)
@@ -48,7 +48,7 @@ test("loads one archived-only root batch with the fixed limit and searches loade
   })
 
   await archive.load()
-  expect(requests).toEqual([{ archived: "only", parentID: null, order: "desc", limit: 50 }])
+  expect(requests).toEqual([{ archived: true, parentID: null, order: "desc", limit: 50 }])
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["zero", "directory-match"])
   expect(matchesArchivedSession(session("directory-match"), "directory")).toBe(true)
 })
@@ -65,8 +65,8 @@ test("appends unseen continuation rows in response order without treating a shor
   await archive.load()
   await archive.loadMore()
   expect(requests).toEqual([
-    { archived: "only", parentID: null, order: "desc", limit: 50 },
-    { archived: "only", parentID: null, order: "desc", limit: 50, cursor: "cursor-2" },
+    { archived: true, parentID: null, order: "desc", limit: 50 },
+    { archived: true, parentID: null, order: "desc", limit: 50, cursor: "cursor-2" },
   ])
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["newest", "overlap", "older"])
   expect(archive.state().nextCursor).toBe("cursor-3")
@@ -128,7 +128,7 @@ test("keeps rows and the failed cursor for retry after duplicate-only or repeate
   expect(archive.state().nextCursor).toBe("cursor-2")
   expect(archive.state().continuationError).toBeDefined()
   await archive.retryMore()
-  expect(requests[2]).toEqual({ archived: "only", parentID: null, order: "desc", limit: 50, cursor: "cursor-2" })
+  expect(requests[2]).toEqual({ archived: true, parentID: null, order: "desc", limit: 50, cursor: "cursor-2" })
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["first", "second"])
 })
 
@@ -197,8 +197,8 @@ test("retries an initial failure from the first batch", async () => {
   await archive.load()
   await archive.retryMore()
   expect(requests).toEqual([
-    { archived: "only", parentID: null, order: "desc", limit: 50 },
-    { archived: "only", parentID: null, order: "desc", limit: 50 },
+    { archived: true, parentID: null, order: "desc", limit: 50 },
+    { archived: true, parentID: null, order: "desc", limit: 50 },
   ])
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["recovered"])
 })
@@ -298,7 +298,7 @@ test("restores a captured displayed row through the existing success-only tab se
 
   await archive.load()
   expect(await archive.restore("restorable")).toBe(true)
-  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "restorable", archive: null }])
+  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "restorable", archived: false }])
   expect(calls).toEqual(["open", "touch", "tab", "select", "close"])
 })
 
@@ -326,7 +326,7 @@ test("keeps continuation available after a failed restore without replaying the 
 
   await archive.load()
   expect(await archive.restore("shown")).toBe(false)
-  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "shown", archive: null }])
+  expect(archiveCalls).toEqual([{ server: "captured-server", sessionID: "shown", archived: false }])
   await archive.loadMore()
   expect(archive.state().rows?.map((row) => row.id)).toEqual(["shown", "later"])
 })

@@ -2,7 +2,8 @@
  * @spec-handoff
  * @interface createSessionListModel(input: SessionListModelInput): SessionListModel
  * @behavior
- *   - Keeps showArchived in the list resource identity and requests archived-only mode when enabled.
+ *   - Keeps showArchived in the list resource identity.
+ *   - Sends archived:false for active roots or true for archived roots.
  *   - Shows active root sessions by default and archived root sessions (including timestamp 0) when enabled.
  *   - Applies the current archive filter to network, latest, loading, error, and local-fallback data.
  * @edge-cases
@@ -35,7 +36,7 @@ type Result = {
 
 type SessionListModel = {
   identity: Identity
-  request: { archived?: "only" }
+  request: { archived?: boolean }
   visible(input: { local: Session[]; latest?: Result; result?: Result; loading: boolean }): Session[]
 }
 
@@ -68,14 +69,14 @@ test("starts each session-list opening with active roots and an active-only requ
   const model = await createModel(false)
 
   expect(model.identity).toEqual({ query: "", allProjects: true, location: "/fixture", showArchived: false })
-  expect(model.request).toEqual({})
+  expect(model.request).toEqual({ archived: false })
   expect(model.visible({ local: [active, archivedAtEpoch, archivedChild], loading: false })).toEqual([active])
 })
 
 test("shows only archived roots and uses archived-only HTTP mode when archive visibility is enabled", async () => {
   const model = await createModel(true)
 
-  expect(model.request).toEqual({ archived: "only" })
+  expect(model.request).toEqual({ archived: true })
   expect(model.visible({ local: [active, archivedAtEpoch, archivedChild], loading: false })).toEqual([archivedAtEpoch])
 })
 
