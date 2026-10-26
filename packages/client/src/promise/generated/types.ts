@@ -1029,6 +1029,16 @@ export type SessionRenamed = {
   data: { sessionID: SessionID; title: string }
 }
 
+export type SessionArchiveChanged = {
+  id: EventID
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.archive.changed"
+  durable: { aggregateID: string; seq: EventSeq; version: 1 }
+  location?: LocationRef
+  data: { sessionID: SessionID; archived: number | null }
+}
+
 export type SessionMetadataUpdated = {
   id: EventID
   created: number
@@ -2528,6 +2538,7 @@ export type SessionEventDurable =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchiveChanged
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -2593,6 +2604,7 @@ export type V2Event =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchiveChanged
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -2743,6 +2755,16 @@ export type UnknownError = {
 }
 export const isUnknownError = (value: unknown): value is UnknownError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
+
+export type SessionArchiveLimitError = {
+  readonly _tag: "SessionArchiveLimitError"
+  readonly sessionID: string
+  readonly kind: "rate" | "retention"
+  readonly retryAfterMillis?: number | undefined
+  readonly message: string
+}
+export const isSessionArchiveLimitError = (value: unknown): value is SessionArchiveLimitError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionArchiveLimitError"
 
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
