@@ -166,11 +166,14 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package directories such as `packages/core`.
+- Before writing or changing tests, read the matching skill in `.opencode/skills`: `unit-tests` (bun test), `tui-tests` (OpenTUI renderer tests), `app-e2e-tests` (Playwright in `packages/app/e2e`) or `component-tests` (Storybook Playwright). They cover what has made tests slow or flaky in CI.
 
 ## Checks
 
 - Run `bun run check` from the repository root as the canonical full lint and type-check verification.
 - During focused iteration, run `bun typecheck` from the affected package directory (for example, `packages/core`). Never run `tsc` directly.
+- Local `typecheck` scripts use `bun check`. CI and package publishing run `typecheck:tsc`, which uses the official TypeScript compiler (`@typescript/native`). When the two disagree, `tsc` is the source of truth; reproduce with `bun run typecheck:tsc` from the package directory.
+- `bun check` aims to match TypeScript 7.1, not the `7.0.2` that `process.versions.typescript` reports (oven-sh/bun#46536). When `bun check` and `tsc` from the pinned `@typescript/native` report different errors, file a minimal, dependency-free repro at https://github.com/oven-sh/bun/issues, with the output of both. `bun check` writes no declaration files, so declaration-emit errors such as TS5088 or TS2883 are expected to appear only in `tsc`; do not report those.
 
 ## Session Core
 

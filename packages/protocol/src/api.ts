@@ -2,6 +2,7 @@ import { Context } from "effect"
 import { HttpApi, HttpApiGroup, HttpApiMiddleware, OpenApi } from "effect/http-api"
 import { SchemaErrorMiddleware } from "./middleware/schema-error.js"
 import { GenerateGroup } from "./groups/generate.js"
+import { VoiceGroup } from "./groups/voice.js"
 import { MessageGroup } from "./groups/message.js"
 import { ModelGroup } from "./groups/model.js"
 import { ProviderGroup } from "./groups/provider.js"
@@ -26,7 +27,7 @@ import { Authorization } from "./middleware/authorization.js"
 import { makeLocationGroup } from "./groups/location.js"
 import { IntegrationGroup } from "./groups/integration.js"
 import { WebSearchGroup } from "./groups/websearch.js"
-import { McpGroup } from "./groups/mcp.js"
+import { makeMcpGroup } from "./groups/mcp.js"
 import { CredentialGroup } from "./groups/credential.js"
 import { ProjectGroup } from "./groups/project.js"
 import { WorktreeGroup } from "./groups/worktree.js"
@@ -41,7 +42,6 @@ type LocationGroups<LocationId extends HttpApiMiddleware.AnyId> =
   | HttpApiGroup.AddMiddleware<typeof ProviderGroup, LocationId>
   | HttpApiGroup.AddMiddleware<typeof IntegrationGroup, LocationId>
   | HttpApiGroup.AddMiddleware<typeof WebSearchGroup, LocationId>
-  | HttpApiGroup.AddMiddleware<typeof McpGroup, LocationId>
   | HttpApiGroup.AddMiddleware<typeof ProjectGroup, LocationId>
   | HttpApiGroup.AddMiddleware<typeof FileSystemGroup, LocationId>
   | HttpApiGroup.AddMiddleware<typeof CommandGroup, LocationId>
@@ -54,6 +54,10 @@ type LocationGroups<LocationId extends HttpApiMiddleware.AnyId> =
 
 type PtyGroups<LocationId extends HttpApiMiddleware.AnyId, LocationService> = ReturnType<
   typeof makePtyGroup<LocationId, LocationService>
+>
+
+type McpGroups<LocationId extends HttpApiMiddleware.AnyId, LocationService> = ReturnType<
+  typeof makeMcpGroup<LocationId, LocationService>
 >
 
 type SessionGroups<
@@ -94,11 +98,13 @@ type ApiGroups<
   | typeof MigrationGroup
   | typeof WorktreeGroup
   | typeof GenerateGroup
+  | typeof VoiceGroup
   | typeof PersistentPtyGroup
   | typeof CredentialGroup
   | LocationGroups<LocationId>
   | LocationGroup<LocationId, LocationService>
   | PtyGroups<LocationId, LocationService>
+  | McpGroups<LocationId, LocationService>
   | FormGroups<LocationId, LocationService>
   | SessionGroups<SessionLocationId, SessionLocationService, FormLocationId, FormLocationService>
   | MixedMiddlewareGroups<LocationId, LocationService, SessionLocationId, SessionLocationService>
@@ -165,9 +171,10 @@ const makeApiFromGroup = <
     .add(MessageGroup)
     .add(ModelGroup.middleware(locationMiddleware))
     .add(GenerateGroup)
+    .add(VoiceGroup)
     .add(ProviderGroup.middleware(locationMiddleware))
     .add(IntegrationGroup.middleware(locationMiddleware))
-    .add(McpGroup.middleware(locationMiddleware))
+    .add(makeMcpGroup(locationMiddleware))
     .add(CredentialGroup)
     .add(ProjectGroup.middleware(locationMiddleware))
     .add(makeFormGroup(locationMiddleware))

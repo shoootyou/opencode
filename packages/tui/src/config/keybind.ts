@@ -85,6 +85,7 @@ export const Definitions = {
   "diff.single_patch": keybind("s", "Toggle single patch view"),
   "diff.switch_source": keybind("d", "Switch diff viewer source"),
   "diff.toggle_view": keybind("v", "Toggle diff viewer split or unified view"),
+  "diff.toggle_fullscreen": keybind("f", "Toggle diff viewer full screen"),
   "diff.mark_reviewed": keybind("m", "Toggle selected diff file reviewed"),
   "diff.help": keybind("?,shift+?,shift+/", "Show more diff viewer shortcuts"),
 
@@ -123,8 +124,9 @@ export const Definitions = {
   "session.delete": keybind("ctrl+d", "Delete session"),
   "session.archive.toggle": keybind("none", "Archive or unarchive the selected session"),
   "session.archived.toggle_visibility": keybind("none", "Show or hide archived sessions"),
-  "session.share": keybind("none", "Share current session"),
-  "session.unshare": keybind("none", "Unshare current session"),
+  // Retain shipped configuration names; session sharing was removed.
+  "session.share": keybind("none", "Deprecated: session sharing was removed"),
+  "session.unshare": keybind("none", "Deprecated: session sharing was removed"),
   "session.interrupt": keybind("escape", "Interrupt current session"),
   "session.background": keybind("ctrl+b", "Background blocking session tools"),
   "session.compact": keybind("<leader>c", "Compact the session"),

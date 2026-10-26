@@ -13,7 +13,6 @@ import { Model } from "../../model.js"
 
 const decodeOptions = { errors: "all", onExcessProperty: "ignore" } as const
 const decodeAgent = Schema.decodeUnknownSync(Schema.fromJsonString(ConfigAgent.Info), decodeOptions)
-const encodeAgent = Schema.encodeSync(ConfigAgent.Info)
 
 function permissions(info?: ConfigPermissionV1.Info) {
   const rules = (info ?? []).flatMap(([key, rule]) => {
@@ -26,7 +25,7 @@ function permissions(info?: ConfigPermissionV1.Info) {
 
 // Map v1 permission/tool keys onto their renamed v2 tool actions so migrated rules keep matching.
 export function normalizeAction(action: string) {
-  if (action === "write" || action === "patch") return "edit"
+  if (action === "write" || action === "patch" || action === "apply_patch") return "edit"
   if (action === "task") return "subagent"
   if (action === "bash") return "shell"
   return action
@@ -38,21 +37,19 @@ export function migrateAgent(info: ConfigAgentV1.Info) {
     ...(info.temperature === undefined ? {} : { temperature: info.temperature }),
     ...(info.top_p === undefined ? {} : { top_p: info.top_p }),
   }
-  return encodeAgent(
-    decodeAgent(
-      JSON.stringify({
-        model: modelSelection(info.model, info.variant),
-        request: Object.keys(body).length ? { body } : undefined,
-        system: info.prompt,
-        description: info.description,
-        mode: info.mode,
-        hidden: info.hidden,
-        color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
-        steps: info.steps,
-        disabled: info.disable,
-        permissions: permissions(info.permission),
-      }),
-    ),
+  return decodeAgent(
+    JSON.stringify({
+      model: modelSelection(info.model, info.variant),
+      request: Object.keys(body).length ? { body } : undefined,
+      system: info.prompt,
+      description: info.description,
+      mode: info.mode,
+      hidden: info.hidden,
+      color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
+      steps: info.steps,
+      disabled: info.disable,
+      permissions: permissions(info.permission),
+    }),
   )
 }
 
@@ -76,6 +73,11 @@ export function modelSelection(input?: string, variant?: string) {
   }
 }
 
+// V1 had a single MCP timeout, so a bare number bounds every phase.
+export function migrateMcpTimeout(timeout: number) {
+  return { startup: timeout, catalog: timeout, execution: timeout }
+}
+
 export function migrateMcp(info: ConfigMCPV1.Info) {
   const disabled = info.enabled === undefined ? undefined : !info.enabled
   if (info.type === "local")
@@ -85,7 +87,7 @@ export function migrateMcp(info: ConfigMCPV1.Info) {
       cwd: info.cwd,
       environment: info.environment,
       disabled,
-      timeout: info.timeout === undefined ? undefined : { catalog: info.timeout, execution: info.timeout },
+      timeout: info.timeout === undefined ? undefined : migrateMcpTimeout(info.timeout),
     }
   return {
     type: info.type,
@@ -99,7 +101,7 @@ export function migrateMcp(info: ConfigMCPV1.Info) {
       redirect_uri: info.oauth.redirectUri,
     },
     disabled,
-    timeout: info.timeout === undefined ? undefined : { catalog: info.timeout, execution: info.timeout },
+    timeout: info.timeout === undefined ? undefined : migrateMcpTimeout(info.timeout),
   }
 }
 
@@ -116,7 +118,7 @@ function migrateStandardProvider(info: ConfigProviderV1.Info) {
   return {
     name: info.name,
     env: info.env,
-    package: info.npm ? Provider.aisdk(info.npm) : undefined,
+    package: info.npm ? packageSpecifier(info.npm) : undefined,
     compatibility: setCacheKey === undefined ? undefined : { supportsPromptCacheKey: setCacheKey },
     settings: info.api ? { ...options.settings, baseURL: info.api } : info.options ? options.settings : undefined,
     headers: info.options && options.headers,
@@ -160,6 +162,12 @@ function migrateGoogleVertexAnthropicProvider(info: ConfigProviderV1.Info) {
         ]),
       ),
   }
+}
+
+// Built-in provider routes are already native package specifiers; only npm packages load through the AI SDK.
+function packageSpecifier(npm: string) {
+  const name = Provider.packageName(npm)
+  return name.startsWith("@opencode/ai/") ? name : Provider.aisdk(npm)
 }
 
 // Renames retired provider IDs in V1 fields and the shared top-level model.
@@ -229,7 +237,7 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, npm: string | un
     compatibility: disableThinkingBlockBinding
       ? { ...compatibility, supportsThinkingBlockBinding: false }
       : compatibility,
-    package: info.provider?.npm ? Provider.aisdk(info.provider.npm) : undefined,
+    package: info.provider?.npm ? packageSpecifier(info.provider.npm) : undefined,
     settings: info.provider?.api ? { ...settings, baseURL: info.provider.api } : settings,
     capabilities,
     headers: info.headers,

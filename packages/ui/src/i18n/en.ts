@@ -75,12 +75,15 @@ const source = {
   "ui.sessionTurn.retry.attemptWaiting.other": "Attempt {{attempt}} - retrying in {{count}}s",
   "ui.sessionTurn.retry.attemptRetryingNow": "Attempt {{attempt}} - retrying",
   "ui.sessionTurn.retry.geminiHot": "gemini is way too hot right now",
+  "ui.sessionTurn.freeLimit.title": "You've used today's free messages.",
+  "ui.sessionTurn.freeLimit.lineReset": "You've used today's free messages. They reset at {{time}}.",
   "ui.sessionTurn.error.freeUsageExceeded": "Free usage exceeded",
   "ui.sessionTurn.error.addCredits": "Add credits",
 
   "dialog.usageExceeded.freeTier.title": "Free limit reached",
   "dialog.usageExceeded.freeTier.description":
     "Subscribe to OpenCode Go for reliable access to the best open-source models for $10/month.",
+  "dialog.usageExceeded.freeTier.reset": "Your free messages reset at {{time}}.",
   "dialog.usageExceeded.freeTier.actionLabel": "Subscribe",
   "dialog.usageExceeded.accountRateLimit.title": "Go limit reached",
   "dialog.usageExceeded.accountRateLimit.description":
@@ -241,10 +244,12 @@ const source = {
   "ui.message.collapse": "Collapse message",
   "ui.message.copy": "Copy",
   "ui.message.copyMessage": "Copy message",
+  "ui.message.copyFullMessage": "Copy full message",
   "ui.message.forkMessage": "Fork to new session",
   "ui.message.revertMessage": "Revert message",
   "ui.message.moveToQueue": "Move to queue",
   "ui.message.pending": "Pending",
+  "ui.message.voice": "Voice",
   "ui.message.deletePending": "Delete",
   "ui.message.copyResponse": "Copy response",
   "ui.message.copied": "Copied",
@@ -255,6 +260,8 @@ const source = {
   "ui.message.modelVariant": "{{model}} ({{variant}})",
   "ui.sessionTimeline.notice.model": "Model",
   "ui.sessionTimeline.notice.modelSwitched": "Switched to {{model}}",
+  "ui.sessionTimeline.notice.variantSwitched": "Switched variant to {{variant}}",
+  "ui.sessionTimeline.notice.variantDefault": "Switched variant to Default",
   "ui.sessionTimeline.notice.agentChanged": "Agent changed",
   "ui.sessionTimeline.notice.movedTo": "Moved to",
   "ui.sessionTimeline.notice.movedTooltip": "Session working directory changed",
@@ -277,6 +284,7 @@ const source = {
   "ui.question.multiHint": "Select all answers that apply",
   "ui.question.singleHint": "Select one answer",
   "ui.question.custom.placeholder": "Type your answer…",
+  "ui.question.custom.answerPlaceholder": "Type your own answer…",
 } satisfies Record<string, string>
 
 export type Key = keyof typeof source

@@ -96,21 +96,6 @@ const seed = (
     return db
   })
 
-type ArchiveHandle = {
-  archive?: (sessionID: SessionID) => Effect.Effect<void>
-  unarchive?: (sessionID: SessionID) => Effect.Effect<void>
-  setArchive?: (input: { sessionID: SessionID; archived: number | null }) => Effect.Effect<void>
-}
-
-// The legacy fallback lets this contract execute on the 2.0.28 baseline; green requires the native branch.
-const transition = (handle: unknown, sessionID: SessionID, archived: boolean) => {
-  const archive = handle as ArchiveHandle
-  if (archived && archive.archive) return archive.archive(sessionID)
-  if (!archived && archive.unarchive) return archive.unarchive(sessionID)
-  if (archive.setArchive) return archive.setArchive({ sessionID, archived: archived ? 0 : null })
-  return Effect.die(new Error("archive transition handle is missing"))
-}
-
 const nativeType = (archived: boolean) => `session.${archived ? "archived" : "unarchived"}.1`
 
 describe("v2.1.4 archive compatibility contract", () => {
@@ -183,7 +168,7 @@ describe("v2.1.4 archive compatibility contract", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* seed()
-        yield* transition(yield* Session.Service, sessionID, true)
+        yield* (yield* Session.Service).archive(sessionID)
 
         expect(yield* db.select({ type: EventTable.type, data: EventTable.data }).from(EventTable).all()).toEqual([
           { type: nativeType(true), data: { sessionID } },
@@ -229,7 +214,7 @@ describe("v2.1.4 archive compatibility contract", () => {
           )
           .run()
 
-        const result = yield* transition(yield* Session.Service, sessionID, true).pipe(Effect.exit)
+        const result = yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit)
         expect(Exit.isFailure(result)).toBe(true)
         expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
         expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
@@ -259,10 +244,10 @@ describe("v2.1.4 archive compatibility contract", () => {
           .run()
 
         const handle = yield* Session.Service
-        yield* transition(handle, sessionID, false)
+        yield* handle.unarchive(sessionID)
         expect(yield* db.select().from(EventTable).all()).toHaveLength(1024)
 
-        const archive = yield* transition(handle, sessionID, true).pipe(Effect.exit)
+        const archive = yield* handle.archive(sessionID).pipe(Effect.exit)
         expect(Exit.isFailure(archive)).toBe(true)
         expect(yield* db.select().from(EventTable).all()).toHaveLength(1024)
         expect(
