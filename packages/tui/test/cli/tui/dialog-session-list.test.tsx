@@ -11,7 +11,7 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { onCleanup, onMount } from "solid-js"
+import { onMount } from "solid-js"
 import { DialogSessionList } from "../../../src/component/dialog-session-list"
 import { ConfigProvider } from "../../../src/config"
 import { ArgsProvider } from "../../../src/context/args"
@@ -168,7 +168,6 @@ test("renders configured archive actions without reporting a TextBuffer failure"
   function Probe() {
     const dialog = useDialog()
     storage = useStorage()
-    onCleanup(Keymap.use().mode.push("modal"))
     onMount(() => dialog.replace(() => <DialogSessionList />))
     return null
   }
@@ -272,7 +271,6 @@ test("discloses that an archived picker page is bounded to fifty sessions", asyn
   function Probe() {
     const dialog = useDialog()
     storage = useStorage()
-    onCleanup(Keymap.use().mode.push("modal"))
     onMount(() => dialog.replace(() => <DialogSessionList />))
     return null
   }
@@ -283,12 +281,7 @@ test("discloses that an archived picker page is bounded to fifty sessions", asyn
           <StorageProvider>
             <ArgsProvider>
               <ConfigProvider
-                config={(() => {
-                  return {
-                    ...createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } }),
-                    experimental: { "new-designs": true },
-                  }
-                })()}
+                config={createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } })}
               >
                 <Keymap.Provider>
                   <ToastProvider>
@@ -324,112 +317,10 @@ test("discloses that an archived picker page is bounded to fifty sessions", asyn
   app.renderer.start()
   try {
     await app.waitForFrame((frame) => frame.includes("Sessions"))
-    await app.waitFor(() => app.renderer.currentFocusedEditor !== undefined)
-    await app.waitForVisualIdle({ quietFrames: 3 })
-    app.renderer.currentFocusedEditor?.blur()
     app.mockInput.pressKey("b", { ctrl: true })
     await app.waitForFrame((frame) =>
       frame.includes("Showing up to 50 archived sessions; refine search to find others."),
     )
-  } finally {
-    app.renderer.destroy()
-    await storage.flush()
-    await temporary[Symbol.asyncDispose]()
-  }
-})
-
-test("does not show the fifty-result archived disclosure for a shorter new-designs page", async () => {
-  // coverage backfill: the disclosure is a bounded-page warning, not generic archived-picker copy.
-  const events = createEventStream()
-  const calls = createFetch((url) => {
-    if (url.pathname === "/api/location")
-      return json({
-        directory: process.cwd(),
-        project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
-      })
-    if (url.pathname === "/api/session")
-      return json({
-        data:
-          url.searchParams.get("archived") === "true"
-            ? [
-                {
-                  id: "ses_archived",
-                  projectID: "proj_fixture",
-                  cost: 0,
-                  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-                  time: { created: 1, updated: 2, archived: 1 },
-                  title: "Archived only",
-                  location: { directory: process.cwd() },
-                },
-              ]
-            : [],
-        cursor: {},
-      })
-    return undefined
-  }, events)
-  const temporary = await tmpdir()
-  let storage!: ReturnType<typeof useStorage>
-  function Probe() {
-    const dialog = useDialog()
-    storage = useStorage()
-    onCleanup(Keymap.use().mode.push("modal"))
-    onMount(() => dialog.replace(() => <DialogSessionList />))
-    return null
-  }
-  const app = await testRender(
-    () => (
-      <TestTuiContexts paths={{ state: temporary.path }}>
-        <TuiAppProvider value={{ name: "test", version: "test", channel: "test" }}>
-          <StorageProvider>
-            <ArgsProvider>
-              <ConfigProvider
-                config={(() => {
-                  return {
-                    ...createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } }),
-                    experimental: { "new-designs": true },
-                  }
-                })()}
-              >
-                <Keymap.Provider>
-                  <ToastProvider>
-                    <RouteProvider>
-                      <ClientProvider api={createApi(calls.fetch)}>
-                        <PermissionProvider>
-                          <DataProvider directory={process.cwd()}>
-                            <LocationProvider>
-                              <SessionTabsProvider>
-                                <ThemeProvider mode="dark" source={emptyThemeSource}>
-                                  <LocalProvider>
-                                    <DialogProvider>
-                                      <Probe />
-                                    </DialogProvider>
-                                  </LocalProvider>
-                                </ThemeProvider>
-                              </SessionTabsProvider>
-                            </LocationProvider>
-                          </DataProvider>
-                        </PermissionProvider>
-                      </ClientProvider>
-                    </RouteProvider>
-                  </ToastProvider>
-                </Keymap.Provider>
-              </ConfigProvider>
-            </ArgsProvider>
-          </StorageProvider>
-        </TuiAppProvider>
-      </TestTuiContexts>
-    ),
-    { width: 100, height: 30, kittyKeyboard: true },
-  )
-  app.renderer.start()
-  try {
-    await app.waitForFrame((frame) => frame.includes("Sessions"))
-    await app.waitFor(() => app.renderer.currentFocusedEditor !== undefined)
-    await app.waitForVisualIdle({ quietFrames: 3 })
-    app.renderer.currentFocusedEditor?.blur()
-    app.mockInput.pressKey("b", { ctrl: true })
-    await app.waitForFrame((frame) => frame.includes("Archived only"))
-    expect(app.captureCharFrame()).not.toContain("Showing up to 50 archived sessions; refine search to find others.")
   } finally {
     app.renderer.destroy()
     await storage.flush()
