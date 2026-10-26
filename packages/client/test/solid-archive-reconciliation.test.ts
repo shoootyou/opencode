@@ -62,7 +62,7 @@ function nativeArchiveEvent(sessionID: string): OpenCodeEvent {
     type: "session.archived",
     durable: { aggregateID: sessionID, seq: 1, version: 1 },
     data: { sessionID },
-  } as unknown as OpenCodeEvent
+  } satisfies OpenCodeEvent
 }
 
 async function wait(check: () => boolean) {
@@ -115,6 +115,7 @@ test("reapplies the native archive event after a same-ID pending family hydratio
     setup.emit(nativeArchiveEvent("ses_native"))
     familyRead.resolve(Response.json({ data: session("ses_native", 17) }))
     await pendingFamily
+    await wait(() => setup.data.session.get("ses_native")?.time.archived === 0)
     expect(setup.data.session.get("ses_native")?.time).toEqual({ created: 3, updated: 9, archived: 0 })
   } finally {
     familyRead.resolve(Response.json({ data: session("ses_native", 17) }))
