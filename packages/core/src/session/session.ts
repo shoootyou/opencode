@@ -39,6 +39,9 @@ type PromptRequest = SessionPrompt.Input & {
   resume?: boolean
 }
 
+const ARCHIVE_RATE_WINDOW_MS = 60_000
+const ARCHIVE_FUTURE_SKEW_MS = ARCHIVE_RATE_WINDOW_MS
+
 class StaleArchiveObservation extends Error {}
 class ArchiveAdmissionLimit extends Error {
   constructor(readonly error: ArchiveLimitError) {
@@ -120,7 +123,10 @@ export const make = Effect.fn("Session.make")(function* () {
                   .orderBy(desc(EventTable.created))
                   .all()
                   .pipe(Effect.orDie)
-                const recent = records.filter((record) => record.created > now - 60_000)
+                const recent = records.filter(
+                  (record) =>
+                    record.created > now - ARCHIVE_RATE_WINDOW_MS && record.created <= now + ARCHIVE_FUTURE_SKEW_MS,
+                )
                 if (recent.length >= 6) {
                   const cutoff = recent[5]!.created
                   return yield* Effect.die(
@@ -128,7 +134,7 @@ export const make = Effect.fn("Session.make")(function* () {
                       new ArchiveLimitError({
                         sessionID,
                         kind: "rate",
-                        retryAfterMillis: Math.max(1, cutoff + 60_000 - now),
+                        retryAfterMillis: Math.max(1, cutoff + ARCHIVE_RATE_WINDOW_MS - now),
                       }),
                     ),
                   )
