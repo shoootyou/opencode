@@ -146,14 +146,14 @@ export type Viewed = typeof Viewed.Type
 
 export const Archived = Event.durable({
   type: "session.archived",
-  ...options,
+  durable: { ...options.durable, retain: true },
   schema: Base,
 })
 export type Archived = typeof Archived.Type
 
 export const Unarchived = Event.durable({
   type: "session.unarchived",
-  ...options,
+  durable: { ...options.durable, retain: true },
   schema: Base,
 })
 export type Unarchived = typeof Unarchived.Type

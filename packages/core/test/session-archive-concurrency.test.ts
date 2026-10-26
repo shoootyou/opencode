@@ -191,11 +191,12 @@ describe("native session archive commit admission", () => {
   it.effect("does not recreate a session deleted between native archive observation and commit", () =>
     Effect.gen(function* () {
       const db = yield* seed()
+      const directSession = yield* Session.Service
       let deleted = false
-      const sessions = yield* nativeSessionWithPublishGate((_archived, real) => {
+      const sessions = yield* nativeSessionWithPublishGate(() => {
         if (deleted) return Effect.void
         deleted = true
-        return real.publish(SessionEvent.Deleted, { sessionID }).pipe(Effect.asVoid)
+        return directSession.remove(sessionID).pipe(Effect.orDie)
       })
 
       const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)

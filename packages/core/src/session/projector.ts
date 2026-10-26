@@ -250,12 +250,7 @@ function run(db: DatabaseService, event: MessageEvent) {
       return db
         .update(SessionMessageTable)
         .set({ type, time_created: DateTime.toEpochMillis(message.time.created), data })
-        .where(
-          and(
-            eq(SessionMessageTable.id, message.id),
-            eq(SessionMessageTable.session_id, event.data.sessionID),
-          ),
-        )
+        .where(and(eq(SessionMessageTable.id, message.id), eq(SessionMessageTable.session_id, event.data.sessionID)))
         .run()
         .pipe(Effect.orDie)
     }
@@ -635,7 +630,7 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ time_archived: event.created, time_updated: event.created })
-        .where(eq(SessionTable.id, event.data.sessionID))
+        .where(and(eq(SessionTable.id, event.data.sessionID), isNull(SessionTable.time_archived)))
         .run()
         .pipe(Effect.orDie),
     )
@@ -643,7 +638,7 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ time_archived: null, time_updated: event.created })
-        .where(eq(SessionTable.id, event.data.sessionID))
+        .where(and(eq(SessionTable.id, event.data.sessionID), isNotNull(SessionTable.time_archived)))
         .run()
         .pipe(Effect.orDie),
     )

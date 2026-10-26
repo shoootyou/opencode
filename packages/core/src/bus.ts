@@ -80,12 +80,16 @@ const decodeSerializedEvent = (event: SerializedEvent): Event.Payload => {
   if (!definition?.durable) {
     throw new InvalidDurableEventError({ type: event.type, message: `Unknown durable event type ${event.type}` })
   }
+  const data = decodeStoredData(definition, event.data)
+  if (definition === SessionEvent.ArchiveChanged && (data as Record<string, unknown>).sessionID !== event.aggregateID) {
+    throw new InvalidDurableEventError({ type: event.type, message: "Legacy archive aggregate mismatch" })
+  }
   return {
     id: event.id,
     created: event.created ?? 0,
     type: definition.type,
     durable: envelope(event.aggregateID, event.seq, definition.durable.version),
-    data: decodeStoredData(definition, event.data),
+    data,
   }
 }
 
@@ -341,7 +345,7 @@ export function configured(options?: Options) {
                           )
                         }
                         if (input && input.seq <= latest) {
-                           if (!retained) return
+                          if (!retained) return
                           const stored = yield* db
                             .select()
                             .from(EventTable)
@@ -384,7 +388,7 @@ export function configured(options?: Options) {
                             }),
                           )
                         }
-                         if (retained) {
+                        if (retained) {
                           const stored = yield* db
                             .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
                             .from(EventTable)
@@ -420,7 +424,7 @@ export function configured(options?: Options) {
                           })
                           .run()
                           .pipe(Effect.orDie)
-                         if (retained)
+                        if (retained)
                           yield* db
                             .insert(EventTable)
                             .values([
@@ -654,7 +658,7 @@ export function configured(options?: Options) {
                             .onConflictDoUpdate({ target: EventSequenceTable.aggregate_id, set: { seq: finalSeq } })
                             .run()
                             .pipe(Effect.orDie)
-                           if (rows.length > 0) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
+                          if (rows.length > 0) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
                           return { events: queued, route }
                         }),
                       { behavior: "immediate" },
@@ -688,12 +692,7 @@ export function configured(options?: Options) {
               )
             yield* durableLocks.withLock(event.aggregateID)(
               Effect.gen(function* () {
-                const payload = {
-                  id: event.id,
-                  created: event.created ?? 0,
-                  type: definition.type,
-                  data: decodeStoredData(definition, event.data),
-                } as Event.Payload
+                const payload = decodeSerializedEvent(event)
                 const committed = yield* commitDurableEvent(definition, payload, {
                   seq: event.seq,
                   aggregateID: event.aggregateID,
