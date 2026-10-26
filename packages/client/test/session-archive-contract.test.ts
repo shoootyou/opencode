@@ -4,6 +4,8 @@
  * @behavior
  *   - Promise and Effect clients encode archived:true and archived:false without client timestamps.
  *   - Promise and Effect list clients encode archived:true, archived:false, or omit archived for both.
+ *   - Generated event types retain native archive events and the read-only legacy archive event.
+ *   - OpenAPI declares archive conflict and archive-limit responses without retired request shapes.
  * @edge-cases
  *   - Omitted archived is absent from the query and request body.
  *   - Generated OpenAPI exposes archived as a boolean field and has no archive field.
@@ -84,11 +86,30 @@ test("Effect generated session methods encode native archived fields and omit th
   expect(requests[1]?.body).not.toHaveProperty("archive")
 })
 
-test("OpenAPI describes archived as boolean and excludes retired archive", async () => {
+test("generated event union retains native archive events and the read-only legacy v1 envelope", async () => {
+  const types = await Bun.file(new URL("../src/promise/generated/types.ts", import.meta.url)).text()
+  const union = types.slice(types.indexOf("export type V2Event ="), types.indexOf("export type SessionLogItem"))
+
+  expect(union).toContain("| SessionArchived")
+  expect(union).toContain("| SessionUnarchived")
+  expect(types).toContain('type: "session.archived"')
+  expect(types).toContain('type: "session.unarchived"')
+  expect(types).toContain('type: "session.archive.changed"')
+  expect(types).toContain("durable: { aggregateID: string; seq: EventSeq; version: 1 }")
+  expect(types).toContain("data: { sessionID: SessionID; archived: number | null }")
+  expect(PromiseOpenCode.make({ baseUrl: "http://localhost:3000" }).session).not.toHaveProperty("archiveChanged")
+})
+
+test("OpenAPI describes archived as a non-null boolean and excludes retired archive", async () => {
   const openapi = await Bun.file(new URL("../../protocol/openapi.json", import.meta.url)).json()
-  const schema = openapi.paths["/api/session/{sessionID}"].patch.requestBody.content["application/json"].schema
-  expect(schema.properties.archived).toEqual(
-    expect.objectContaining({ anyOf: expect.arrayContaining([{ type: "boolean" }]) }),
-  )
+  const operation = openapi.paths["/api/session/{sessionID}"]
+  const schema = operation.patch.requestBody.content["application/json"].schema
+  expect(schema.properties.archived).toEqual(expect.objectContaining({ type: "boolean" }))
+  expect(schema.properties.archived).not.toHaveProperty("anyOf")
+  expect(schema.properties.archived).not.toEqual(expect.objectContaining({ type: "number" }))
   expect(schema.properties).not.toHaveProperty("archive")
+  expect(operation.patch.responses["409"].description).toBe("ConflictError")
+  expect(operation.patch.responses["429"].description).toBe("SessionArchiveLimitError")
+  expect(Object.keys(operation.delete.responses)).toEqual(["204", "400", "401", "404"])
+  expect(operation.delete.responses["404"].description).toBe("SessionNotFoundError")
 })
