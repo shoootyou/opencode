@@ -3,8 +3,9 @@
  * @interface compiledLegacyArchiveRoundtrip(manifestPath: string): Promise<void>
  * @behavior
  *   - Populates active, epoch-zero archived, normally archived, and restored sessions through the old compiled HTTP API.
- *   - Starts the native compiled binary on the copied old profile and requires it to read the preserved identities, archive times, and retained old event journal.
- *   - Requires a native archive transition to retain a native archive event, then restores the pre-upgrade profile and proves the old binary can read it.
+ *   - Captures an exact typed old-profile baseline (sessions, legacy archive envelopes, message history, and config) through the old binary and its SQLite state.
+ *   - Requires native archive/restore transitions, repeated no-op behavior, and restart persistence without changing preserved profile configuration.
+ *   - Restores the pre-upgrade backup and requires the old binary to read the complete typed baseline exactly.
  * @edge-cases
  *   - Missing an explicitly requested manifest fails configuration; normal runs may opt in with the manifest environment variable.
  *   - Every spawned server is an isolated process group whose identity, reaping, and absence are verified before profile snapshots or deletion.
@@ -115,31 +116,63 @@ test.skipIf(!manifestPath && !required)(
       const restored = await createSession(old, "restored")
       await archiveOld(old, epoch.id, 0)
       await archiveOld(old, archived.id, 1_700_000_000_000)
+      const archivedBeforeRepeat = await archiveBaseline(old, archived.id)
+      await archiveOld(old, archived.id, 1_700_000_000_999)
+      expect(await archiveBaseline(old, archived.id)).toEqual(archivedBeforeRepeat)
       await archiveOld(old, restored.id, 1_700_000_000_100)
       await archiveOld(old, restored.id, null)
       const oldState = await sessionStates(old, [active.id, epoch.id, archived.id, restored.id])
       expect(oldState).toEqual({ active: null, archived: 1_700_000_000_000, epoch: 0, restored: null })
+      const baseline = await typedBaseline(old, oldProfile, [active.id, epoch.id, archived.id, restored.id], active.id)
+      expect(baseline.sessions.map((session) => session.id)).toEqual([active.id, epoch.id, archived.id, restored.id])
+      expect(baseline.sessions.map((session) => session.time.archived)).toEqual([null, 0, 1_700_000_000_000, null])
+      expect(baseline.legacy).toHaveLength(4)
+      expect(baseline.legacy.map((event) => event.aggregate_id)).toEqual(
+        [epoch.id, archived.id, restored.id, restored.id].sort(),
+      )
+      expect(baseline.messages.length).toBeGreaterThanOrEqual(0)
       await stopServer(old)
       old = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
 
       const preupgrade = path.join(root, "preupgrade")
-      await Bun.write(path.join(root, "baseline.json"), JSON.stringify(oldState))
+      await Bun.write(path.join(root, "baseline.json"), JSON.stringify(baseline))
       await copyProfile(oldProfile, preupgrade)
       native = await startServer(manifest.native.path, oldProfile, password, "native")
       lifecycles.push(native.receipt)
-      const nativeState = await sessionStates(native, [active.id, epoch.id, archived.id, restored.id])
-      expect(nativeState).toEqual(oldState)
-      const nativeJournal = await readJournal(oldProfile, [epoch.id, archived.id, restored.id])
-      expect(nativeJournal.some((event) => event.type === "session.archive.changed.1" && event.seq >= 0)).toBe(true)
+      expect(
+        await typedBaseline(native, oldProfile, [active.id, epoch.id, archived.id, restored.id], active.id),
+      ).toEqual(baseline)
 
       await archiveNative(native, active.id)
-      const afterNative = await sessionStates(native, [active.id])
-      expect(afterNative.active).not.toBeNull()
-      const afterNativeJournal = await readJournal(oldProfile, [active.id])
-      const nativeEvents = afterNativeJournal.filter((event) => event.type === "session.archived.1")
-      expect(nativeEvents).toHaveLength(1)
-      expect(nativeEvents[0]?.seq).toBe(1)
+      const archivedNative = await archiveBaseline(native, active.id)
+      expect(archivedNative.session.time.archived).not.toBeNull()
+      expect(archivedNative.events.filter((event) => event.type === "session.archived.1")).toHaveLength(1)
+      const archivedUpdated = archivedNative.session.time.updated
+      const archivedSequence = archivedNative.sequence
+      await archiveNative(native, active.id)
+      expect(await archiveBaseline(native, active.id)).toEqual(archivedNative)
+      await restoreNative(native, active.id)
+      const restoredNative = await archiveBaseline(native, active.id)
+      expect(restoredNative.session.time.archived).toBeNull()
+      expect(restoredNative.events.filter((event) => event.type === "session.unarchived.1")).toHaveLength(1)
+      expect(restoredNative.session.time.updated).not.toBe(archivedUpdated)
+      expect(restoredNative.sequence).toBe(archivedSequence + 1)
+      await restoreNative(native, active.id)
+      expect(await archiveBaseline(native, active.id)).toEqual(restoredNative)
+      expect(await configSnapshot(oldProfile)).toEqual(baseline.config)
+      await stopServer(native)
+      native = undefined
+      expect(await ownedProcessIDs(root)).toEqual([])
+
+      native = await startServer(manifest.native.path, oldProfile, password, "native-restart")
+      lifecycles.push(native.receipt)
+      expect(await archiveBaseline(native, active.id)).toEqual(restoredNative)
+      expect(await configSnapshot(oldProfile)).toEqual(baseline.config)
+      await archiveNative(native, active.id)
+      expect(
+        (await archiveBaseline(native, active.id)).events.filter((event) => event.type === "session.archived.1"),
+      ).toHaveLength(2)
       await stopServer(native)
       native = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
@@ -148,7 +181,9 @@ test.skipIf(!manifestPath && !required)(
       await copyProfile(preupgrade, oldProfile)
       old = await startServer(manifest.old_reference.path, oldProfile, password, "rollback")
       lifecycles.push(old.receipt)
-      expect(await sessionStates(old, [active.id, epoch.id, archived.id, restored.id])).toEqual(oldState)
+      expect(await typedBaseline(old, oldProfile, [active.id, epoch.id, archived.id, restored.id], active.id)).toEqual(
+        baseline,
+      )
       await stopServer(old)
       old = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
@@ -471,6 +506,11 @@ async function archiveNative(server: Server, sessionID: string) {
   expect(response.status).toBe(204)
 }
 
+async function restoreNative(server: Server, sessionID: string) {
+  const response = await request(server, `/api/session/${sessionID}`, "PATCH", { archived: false })
+  expect(response.status).toBe(204)
+}
+
 async function sessionStates(server: Server, ids: string[]) {
   const sessions = await Promise.all(
     ids.map(async (id) => {
@@ -495,19 +535,142 @@ async function request(server: Server, route: string, method: string, body?: unk
   })
 }
 
-async function readJournal(profile: string, sessionIDs: string[]) {
-  const database = path.join(profile, "data", "opencode.db")
-  const connection = new Database(database, { readonly: true })
+type SessionSnapshot = { id: string; time: { created: number; updated: number; archived: number | null } }
+type DurableEnvelope = {
+  id: string
+  aggregate_id: string
+  seq: number
+  created: number
+  type: string
+  data: unknown
+}
+type ArchiveBaseline = { session: SessionSnapshot; events: DurableEnvelope[]; sequence: number }
+type TypedBaseline = {
+  sessions: SessionSnapshot[]
+  legacy: DurableEnvelope[]
+  messages: unknown[]
+  config: Record<string, string>
+}
+
+async function typedBaseline(
+  server: Server,
+  profile: string,
+  ids: string[],
+  messageSessionID: string,
+): Promise<TypedBaseline> {
+  const sessions = await Promise.all(ids.map((id) => sessionSnapshot(server, id)))
+  const journal = await readEnvelopes(profile, ids)
+  const messages = await messageHistory(server, messageSessionID)
+  return {
+    sessions,
+    legacy: journal.filter((event) => event.type === "session.archive.changed.1"),
+    messages,
+    config: await configSnapshot(profile),
+  }
+}
+
+async function archiveBaseline(server: Server, sessionID: string): Promise<ArchiveBaseline> {
+  const [session, events, sequence] = await Promise.all([
+    sessionSnapshot(server, sessionID),
+    readEnvelopes(server.profile, [sessionID]),
+    sequenceFor(server.profile, sessionID),
+  ])
+  return { session, events, sequence }
+}
+
+async function sessionSnapshot(server: Server, id: string): Promise<SessionSnapshot> {
+  const response = await request(server, `/api/session/${id}`, "GET")
+  expect(response.status).toBe(200)
+  return requireSessionSnapshot(await response.json())
+}
+
+function requireSessionSnapshot(body: unknown): SessionSnapshot {
+  const value = typeof body === "object" && body !== null && "data" in body ? (body as { data: unknown }).data : body
+  const time = typeof value === "object" && value !== null ? (value as { time?: unknown }).time : undefined
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    typeof (value as { id?: unknown }).id !== "string" ||
+    typeof time !== "object" ||
+    time === null ||
+    typeof (time as { created?: unknown }).created !== "number" ||
+    typeof (time as { updated?: unknown }).updated !== "number"
+  )
+    throw new Error("fixture session HTTP response had an invalid typed snapshot")
+  const archived = (time as { archived?: unknown }).archived ?? null
+  if (archived !== null && typeof archived !== "number")
+    throw new Error("fixture session HTTP archive value had an invalid shape")
+  return {
+    id: (value as { id: string }).id,
+    time: { created: (time as { created: number }).created, updated: (time as { updated: number }).updated, archived },
+  }
+}
+
+async function readEnvelopes(profile: string, sessionIDs: string[]): Promise<DurableEnvelope[]> {
+  const connection = new Database(path.join(profile, "data", "opencode.db"), { readonly: true })
   const placeholders = sessionIDs.map(() => "?").join(", ")
   const rows: unknown = connection
-    .query(`select type, seq from event where aggregate_id in (${placeholders})`)
+    .query(
+      `select id, aggregate_id, seq, created, type, data from event where aggregate_id in (${placeholders}) order by aggregate_id, seq`,
+    )
     .all(...sessionIDs)
   connection.close()
-  if (!Array.isArray(rows)) throw new Error("fixture journal query returned invalid data")
-  return rows.filter(
-    (entry): entry is { type: string; seq: number } =>
-      typeof entry === "object" && entry !== null && typeof entry.type === "string" && typeof entry.seq === "number",
+  if (!Array.isArray(rows)) throw new Error("fixture envelope query returned invalid data")
+  return rows.map(requireEnvelope)
+}
+
+function requireEnvelope(value: unknown): DurableEnvelope {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    typeof (value as { id?: unknown }).id !== "string" ||
+    typeof (value as { aggregate_id?: unknown }).aggregate_id !== "string" ||
+    typeof (value as { seq?: unknown }).seq !== "number" ||
+    typeof (value as { created?: unknown }).created !== "number" ||
+    typeof (value as { type?: unknown }).type !== "string" ||
+    typeof (value as { data?: unknown }).data !== "string"
   )
+    throw new Error("fixture durable envelope row had an invalid shape")
+  return {
+    id: (value as { id: string }).id,
+    aggregate_id: (value as { aggregate_id: string }).aggregate_id,
+    seq: (value as { seq: number }).seq,
+    created: (value as { created: number }).created,
+    type: (value as { type: string }).type,
+    data: JSON.parse((value as { data: string }).data),
+  }
+}
+
+async function sequenceFor(profile: string, sessionID: string) {
+  const connection = new Database(path.join(profile, "data", "opencode.db"), { readonly: true })
+  const row: unknown = connection.query("select seq from event_sequence where aggregate_id = ?").get(sessionID)
+  connection.close()
+  if (typeof row !== "object" || row === null || typeof (row as { seq?: unknown }).seq !== "number")
+    throw new Error("fixture event sequence row had an invalid shape")
+  return (row as { seq: number }).seq
+}
+
+async function messageHistory(server: Server, sessionID: string) {
+  const response = await request(server, `/api/session/${sessionID}/message`, "GET")
+  expect(response.status).toBe(200)
+  const body: unknown = await response.json()
+  const value = typeof body === "object" && body !== null && "data" in body ? (body as { data: unknown }).data : body
+  if (!Array.isArray(value)) throw new Error("fixture message history response had an invalid shape")
+  return value
+}
+
+async function configSnapshot(profile: string) {
+  const root = path.join(profile, "config")
+  const files = await readdir(root, { recursive: true })
+  const pairs = await Promise.all(
+    files.sort().map(async (relative) => {
+      const absolute = path.join(root, relative)
+      const metadata = await lstat(absolute)
+      if (!metadata.isFile()) return undefined
+      return [relative, Buffer.from(await readFile(absolute)).toString("base64")] as const
+    }),
+  )
+  return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair !== undefined))
 }
 
 async function stopServer(server: OwnedProcess | undefined) {
