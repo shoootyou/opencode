@@ -18,8 +18,6 @@ import path from "node:path"
 
 const manifestPath = process.env.OPENCODE_COMPILED_FIXTURE_MANIFEST
 const required = process.env.OPENCODE_COMPILED_FIXTURE_REQUIRED === "1"
-const fixtureRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e8-d2c112b/shin-compiled-roundtrip")
-const evidenceRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e8-d2c112b/evidence")
 
 test.skipIf(!manifestPath && !required)(
   "compiled old/native populated fixture requires an explicit manifest",
@@ -27,9 +25,10 @@ test.skipIf(!manifestPath && !required)(
     if (!manifestPath)
       throw new Error("OPENCODE_COMPILED_FIXTURE_MANIFEST is required when compiled fixture execution is requested")
     const manifest = await readManifest(manifestPath!)
-    const priorRuns = (await readdir(fixtureRoot)).sort()
-    const root = await createRunRoot()
-    const receipt = path.join(evidenceRoot, `shin-compiled-fixture-${path.basename(root)}.json`)
+    const paths = fixturePaths(manifestPath!)
+    const priorRuns = (await readdir(paths.runRoot)).sort()
+    const root = await createRunRoot(paths.runRoot)
+    const receipt = path.join(paths.evidenceRoot, `shin-compiled-fixture-${path.basename(root)}.json`)
     const oldInput = await inputEntries(path.dirname(manifest.old_reference.path))
     const oldHash = await sha256(manifest.old_reference.path)
     const password = randomBytes(24).toString("hex")
@@ -94,7 +93,7 @@ test.skipIf(!manifestPath && !required)(
       expect(await ownedProcessIDs(root)).toEqual([])
       expect(await sha256(manifest.old_reference.path)).toBe(manifest.old_reference.sha256)
       expect(await inputEntries(path.dirname(manifest.old_reference.path))).toEqual(oldInput)
-      await mkdir(evidenceRoot, { recursive: true, mode: 0o700 })
+      await mkdir(paths.evidenceRoot, { recursive: true, mode: 0o700 })
       await writeFile(
         receipt,
         JSON.stringify({
@@ -119,13 +118,18 @@ test.skipIf(!manifestPath && !required)(
       )
       await rm(root, { recursive: true, force: false })
       expect(await Bun.file(root).exists()).toBe(false)
-      expect((await readdir(fixtureRoot)).sort()).toEqual(priorRuns)
+      expect((await readdir(paths.runRoot)).sort()).toEqual(priorRuns)
     }
   },
   30_000,
 )
 
-async function createRunRoot() {
+function fixturePaths(manifest: string) {
+  const base = path.dirname(path.resolve(manifest))
+  return { evidenceRoot: path.join(base, "evidence"), runRoot: path.join(base, "shin-compiled-roundtrip") }
+}
+
+async function createRunRoot(fixtureRoot: string) {
   const requested = await mkdtemp(path.join(fixtureRoot, "run-"))
   const [physical, metadata] = await Promise.all([realpath(requested), lstat(requested)])
   if (metadata.isSymbolicLink() || !metadata.isDirectory() || !physical.startsWith(`${fixtureRoot}${path.sep}`))
