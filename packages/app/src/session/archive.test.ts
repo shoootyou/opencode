@@ -27,12 +27,11 @@ test("archives once per captured server/session, hydrates, and releases pending"
 
   const actions = createSessionArchiveActions({
     update: async (x) => {
-      calls.push(`update:${x.server}:${x.archive}`)
+      calls.push(`update:${x.server}:${x.archived}`)
       await wait
     },
     sync: async (x) => calls.push(`sync:${x.server}`),
     toast: () => calls.push("toast"),
-    now: () => 0,
     onPendingChange: () => calls.push("pending"),
   })
 
@@ -55,7 +54,6 @@ test("reports update failure without sync but treats refresh failure as committe
       },
       sync: async () => {},
       toast: (n) => notices.push(n.kind),
-      now: () => 1,
     }).archiveSession({ server: "s", sessionID: "x" }),
   ).toBe(false)
   expect(
@@ -65,8 +63,7 @@ test("reports update failure without sync but treats refresh failure as committe
         throw refresh
       },
       toast: (n) => notices.push(n.kind),
-      now: () => 1,
-    }).setSessionArchive({ server: "s", sessionID: "x", archive: null }),
+    }).setSessionArchive({ server: "s", sessionID: "x", archived: false }),
   ).toBe(true)
   expect(notices).toEqual(["update", "refresh"])
 })
@@ -83,7 +80,6 @@ test("releases pending after a failed PATCH so the same target can retry", async
     },
     sync: async () => {},
     toast: () => {},
-    now: () => 0,
     onPendingChange: () => pending.push(actions.isPending({ server: "s", sessionID: "x" })),
   })
 

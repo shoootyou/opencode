@@ -43,7 +43,6 @@ test("uses the pre-PATCH neighbour snapshot and suppresses automatic tab navigat
 
       return true
     },
-    now: () => 0,
     isActive: () => true,
     currentRoute: () => current,
     navigate: async (landing: ArchiveLanding) => {
@@ -71,7 +70,6 @@ test("completes the already-admitted landing after no-auto removal disposes the 
     { target: { server: "s", sessionID: "a" }, session: root("a"), sessions: [root("a"), root("b")] },
     {
       setArchive: async () => true,
-      now: () => 0,
       isActive: () => active,
       currentRoute: () => ({ server: "s", sessionID: "a" }),
       removeTabs: () => {
@@ -99,7 +97,6 @@ test("uses the exact route-server identity when deciding whether archive may nav
 
         return true
       },
-      now: () => 7,
       isActive: () => true,
       currentRoute: () => ({ server: "selected-server", sessionID: "a" }),
       removeTabs: () => calls.push("remove"),
@@ -107,7 +104,7 @@ test("uses the exact route-server identity when deciding whether archive may nav
       toast: () => {},
     } as never,
   )
-  expect(patches).toEqual([{ server: "route-server", sessionID: "a", archive: 7 }])
+  expect(patches).toEqual([{ server: "route-server", sessionID: "a", archived: true }])
   expect(calls).toEqual(["remove"])
 })
 
@@ -134,7 +131,6 @@ test("issues no-auto tab removal in the same completion turn before an asynchron
     { target: { server: "s", sessionID: "a" }, session: root("a"), sessions: [root("a"), root("b")] },
     {
       setArchive: async () => true,
-      now: () => 0,
       isActive: () => true,
       currentRoute: () => ({ server: "s", sessionID: "a" }),
       removeTabs: () => calls.push("remove"),

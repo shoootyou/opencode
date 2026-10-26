@@ -257,8 +257,13 @@ test("discloses that an archived picker page is bounded to fifty sessions", asyn
     location: { directory: process.cwd() },
   }))
   const calls = createFetch((url) => {
-    if (url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
-    if (url.pathname === "/api/session") return json({ data: url.searchParams.get("archived") === "only" ? archived : [], cursor: {} })
+    if (url.pathname === "/api/location")
+      return json({
+        directory: process.cwd(),
+        project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+      })
+    if (url.pathname === "/api/session")
+      return json({ data: url.searchParams.get("archived") === "true" ? archived : [], cursor: {} })
     return undefined
   }, events)
   const temporary = await tmpdir()
@@ -269,12 +274,53 @@ test("discloses that an archived picker page is bounded to fifty sessions", asyn
     onMount(() => dialog.replace(() => <DialogSessionList />))
     return null
   }
-  const app = await testRender(() => <TestTuiContexts paths={{ state: temporary.path }}><TuiAppProvider value={{ name: "test", version: "test", channel: "test" }}><StorageProvider><ArgsProvider><ConfigProvider config={createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } })}><Keymap.Provider><ToastProvider><RouteProvider><ClientProvider api={createApi(calls.fetch)}><PermissionProvider><DataProvider directory={process.cwd()}><LocationProvider><SessionTabsProvider><ThemeProvider mode="dark" source={emptyThemeSource}><LocalProvider><DialogProvider><Probe /></DialogProvider></LocalProvider></ThemeProvider></SessionTabsProvider></LocationProvider></DataProvider></PermissionProvider></ClientProvider></RouteProvider></ToastProvider></Keymap.Provider></ConfigProvider></ArgsProvider></StorageProvider></TuiAppProvider></TestTuiContexts>, { width: 100, height: 30, kittyKeyboard: true })
+  const app = await testRender(
+    () => (
+      <TestTuiContexts paths={{ state: temporary.path }}>
+        <TuiAppProvider value={{ name: "test", version: "test", channel: "test" }}>
+          <StorageProvider>
+            <ArgsProvider>
+              <ConfigProvider
+                config={createTuiResolvedConfig({ keybinds: { "session.archived.toggle_visibility": "ctrl+b" } })}
+              >
+                <Keymap.Provider>
+                  <ToastProvider>
+                    <RouteProvider>
+                      <ClientProvider api={createApi(calls.fetch)}>
+                        <PermissionProvider>
+                          <DataProvider directory={process.cwd()}>
+                            <LocationProvider>
+                              <SessionTabsProvider>
+                                <ThemeProvider mode="dark" source={emptyThemeSource}>
+                                  <LocalProvider>
+                                    <DialogProvider>
+                                      <Probe />
+                                    </DialogProvider>
+                                  </LocalProvider>
+                                </ThemeProvider>
+                              </SessionTabsProvider>
+                            </LocationProvider>
+                          </DataProvider>
+                        </PermissionProvider>
+                      </ClientProvider>
+                    </RouteProvider>
+                  </ToastProvider>
+                </Keymap.Provider>
+              </ConfigProvider>
+            </ArgsProvider>
+          </StorageProvider>
+        </TuiAppProvider>
+      </TestTuiContexts>
+    ),
+    { width: 100, height: 30, kittyKeyboard: true },
+  )
   app.renderer.start()
   try {
     await app.waitForFrame((frame) => frame.includes("Sessions"))
     app.mockInput.pressKey("b", { ctrl: true })
-    await app.waitForFrame((frame) => frame.includes("Showing up to 50 archived sessions; refine search to find others."))
+    await app.waitForFrame((frame) =>
+      frame.includes("Showing up to 50 archived sessions; refine search to find others."),
+    )
   } finally {
     app.renderer.destroy()
     await storage.flush()

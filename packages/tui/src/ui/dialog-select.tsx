@@ -152,6 +152,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     selected: 0,
     filter: "",
   })
+  const [focusedAction, setFocusedAction] = createSignal<number>()
   let selection: { value: T; category?: string } | undefined
   let resetSelection = false
   let pendingScroll: (() => void) | undefined
@@ -207,6 +208,16 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       .filter((item) => item.label),
     ...(props.footerHints ?? []),
   ])
+  const actionItems = () =>
+    visibleActions()
+      .filter(isActionItem)
+      .filter((item) => !isActionDisabled(item))
+  const tabActions = () => shownActions().some((item) => item.showWhenUnbound)
+
+  createEffect(() => {
+    const index = focusedAction()
+    if (index !== undefined && index >= actionItems().length) setFocusedAction(undefined)
+  })
 
   const filtered = createMemo(() => {
     if (props.search) return props.search(store.filter).filter((x) => x.disabled !== true)
@@ -419,6 +430,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function moveTo(next: number, center = false, preserve = true) {
+    setFocusedAction(undefined)
     setStore("selected", next)
     const option = selected()
     if (option) {
@@ -464,10 +476,26 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   function submit() {
     if (props.locked) return
+    const index = focusedAction()
+    if (index !== undefined) {
+      trigger(actionItems()[index])
+      return
+    }
     const option = selected()
     if (!option) return
     option.onSelect?.(dialog)
     props.onSelect?.(option)
+  }
+
+  function moveAction(direction: 1 | -1) {
+    if (props.locked) return
+    const total = actionItems().length
+    if (total === 0) return
+    setFocusedAction((index) => {
+      if (index === undefined) return direction === 1 ? 0 : total - 1
+      const next = index + direction
+      return next < 0 || next >= total ? undefined : next
+    })
   }
 
   Keymap.createLayer(() => {
@@ -540,6 +568,22 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           bind: item.bind,
           run: () => trigger(item),
         })),
+        ...(tabActions()
+          ? [
+              {
+                bind: "tab",
+                title: "Next dialog action",
+                group: "Dialog",
+                run: () => moveAction(1),
+              },
+              {
+                bind: "shift+tab",
+                title: "Previous dialog action",
+                group: "Dialog",
+                run: () => moveAction(-1),
+              },
+            ]
+          : []),
         ...(props.bindings ?? []),
         ...(props.onCancel
           ? [
@@ -617,6 +661,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           title: actionTitle(item),
           key: item.label,
           disabled: isActionDisabled(item),
+          color:
+            !props.locked && actionItems().indexOf(item) === focusedAction()
+              ? theme.text.action.primary.focused
+              : undefined,
           onTrigger: () => trigger(item),
         },
       }

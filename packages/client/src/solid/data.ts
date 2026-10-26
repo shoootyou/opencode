@@ -739,14 +739,22 @@ export function createData(config: CreateDataInput) {
         })
         return
       }
-      case "session.archive.changed": {
+      case "session.archive.changed":
+      case "session.archived":
+      case "session.unarchived": {
+        const archived =
+          event.type === "session.archive.changed"
+            ? (event.data.archived ?? undefined)
+            : event.type === "session.archived"
+              ? event.created
+              : undefined
         refresh(() => {
           const family = sync.pending(`session.family:${event.data.sessionID}`)
             ? result.session.sync(event.data.sessionID, { children: true })
             : Promise.resolve()
           return Promise.all([result.session.sync(event.data.sessionID), family]).then(() => {
             if (store.session.info[event.data.sessionID])
-              setStore("session", "info", event.data.sessionID, "time", "archived", event.data.archived ?? undefined)
+              setStore("session", "info", event.data.sessionID, "time", "archived", archived)
           })
         })
         return
@@ -754,14 +762,6 @@ export function createData(config: CreateDataInput) {
       case "session.permissions":
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "permissions", event.data.permissions)
-        return
-      case "session.archived":
-        if (store.session.info[event.data.sessionID])
-          setStore("session", "info", event.data.sessionID, "time", "archived", event.created)
-        return
-      case "session.unarchived":
-        if (store.session.info[event.data.sessionID])
-          setStore("session", "info", event.data.sessionID, "time", "archived", undefined)
         return
       case "session.moved": {
         const current = store.session.info[event.data.sessionID]

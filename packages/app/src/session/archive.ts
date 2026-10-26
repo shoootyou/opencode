@@ -1,6 +1,6 @@
 export type ArchiveTarget = Readonly<{ server: string; sessionID: string }>
 
-export type ArchiveRequest = ArchiveTarget & Readonly<{ archive: number | null }>
+export type ArchiveRequest = ArchiveTarget & Readonly<{ archived: boolean }>
 
 export type ArchiveSession = Readonly<{
   id: string
@@ -29,7 +29,6 @@ export function createSessionArchiveActions(
     sync: (target: ArchiveTarget) => Promise<unknown>
     // oxlint-disable-next-line anti-slop/no-unknown-returns -- Toast renderers may return framework-owned values that this boundary intentionally ignores.
     toast: (notice: ArchiveNotice) => unknown
-    now: () => number
     // oxlint-disable-next-line anti-slop/no-unknown-returns -- Notification listeners may return framework-owned values that this boundary intentionally ignores.
     onPendingChange?: () => unknown
   }>,
@@ -82,7 +81,7 @@ export function createSessionArchiveActions(
 
   return {
     setSessionArchive,
-    archiveSession: (target) => setSessionArchive({ ...target, archive: deps.now() }),
+    archiveSession: (target) => setSessionArchive({ ...target, archived: true }),
     isPending,
   }
 }

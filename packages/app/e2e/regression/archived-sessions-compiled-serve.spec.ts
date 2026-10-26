@@ -581,7 +581,7 @@ test("keeps a bounded continuous archive list: programmatic movement cannot dema
   const cursors: Array<string | null> = []
 
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -646,7 +646,7 @@ test("does not spend a far-from-bottom native wheel demand after later programma
   }))
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -683,7 +683,7 @@ test("does not let upward wrapping spend stale keyboard demand after non-scrolli
   }))
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -740,7 +740,7 @@ test("expires non-scrolling ArrowDown demand before a later programmatic bottom 
   }))
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -786,7 +786,7 @@ test("opens a 300-session history without draining cursor pages", async () => {
   }))
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -812,7 +812,7 @@ test("uses one initial underfill probe, keeps a short cursor-bearing batch conti
   ]
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -851,7 +851,7 @@ test("does not defer initial underfill when a query is active before the first s
   const initial = Promise.withResolvers<void>()
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -901,7 +901,7 @@ test("preserves connected archive group and row nodes, native focus, active sele
   }))
   let continuationRequests = 0
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       if (cursor) continuationRequests++
@@ -993,7 +993,7 @@ for (const [action, key, userLeavesPendingAction] of [
     const cursors: Array<string | null> = []
     const expectedCursor = action === "Retry" ? "retry-cursor" : "load-cursor"
     await page.route(
-      (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+      (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
       async (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("cursor")
         cursors.push(cursor)
@@ -1086,7 +1086,7 @@ for (const [action, key, userLeavesPendingAction] of [
 test("does not recover stale load-more focus after the action settles, loses focus, and a later wheel exhausts", async () => {
   const cursors: Array<string | null> = []
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       const cursor = new URL(route.request().url()).searchParams.get("cursor")
       cursors.push(cursor)
@@ -1244,7 +1244,7 @@ async function mockArchivedPage(
   sessions: Array<{ id: string; title: string; directory: string; archived: number; updated?: number }>,
 ) {
   await page.route(
-    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "only",
+    (url) => url.pathname === "/api/session" && url.searchParams.get("archived") === "true",
     async (route) => {
       return route.fulfill({
         json: {

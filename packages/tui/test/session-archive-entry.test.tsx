@@ -34,7 +34,7 @@ test("opens Sessions through session.list and requests one archived-only page th
     fetch: (url) => {
       if (url.pathname !== "/api/session") return
       requests.push(url)
-      if (url.searchParams.get("archived")) return json({ data: [], cursor: { next: "older" } })
+      if (url.searchParams.get("archived") === "true") return json({ data: [], cursor: { next: "older" } })
       return json({ data: [active], cursor: {} })
     },
   })
@@ -51,7 +51,7 @@ test("opens Sessions through session.list and requests one archived-only page th
   await setup.waitForFrame((frame) => frame.includes("hide") && frame.includes("archived"))
   await setup.waitFor(() => requests.some((url) => url.searchParams.get("archived")))
   await setup.waitForVisualIdle({ quietFrames: 2 })
-  expect(requests.filter((url) => url.searchParams.get("archived") === "only")).toHaveLength(1)
+  expect(requests.filter((url) => url.searchParams.get("archived") === "true")).toHaveLength(1)
 }, 20000)
 
 test("toggles scope with Ctrl+A and archives through the default-none Tab fallback", async () => {
@@ -87,5 +87,5 @@ test("toggles scope with Ctrl+A and archives through the default-none Tab fallba
   setup.mockInput.pressTab()
   setup.mockInput.pressEnter()
   await setup.waitFor(() => patches.length === 1)
-  expect(patches).toEqual([{ archive: expect.any(Number) }])
+  expect(patches).toEqual([{ archived: true }])
 })

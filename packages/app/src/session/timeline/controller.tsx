@@ -274,7 +274,6 @@ export function createTimelineController(input: { session: TimelineSessionSource
         { target: { server: server.key, sessionID }, session, sessions: data.session.list() },
         {
           setArchive: global.sessionArchive.setSessionArchive,
-          now: Date.now,
           isActive: () => alive && global.serverCtx(server.key) === ctx,
           currentRoute: () => {
             const route = layout.route()

@@ -37,6 +37,7 @@ export default Runtime.handler(
                 client.session.list({
                   directory: location.directory,
                   parentID: null,
+                  archived: false,
                   order: "desc",
                   limit: 50,
                 }),

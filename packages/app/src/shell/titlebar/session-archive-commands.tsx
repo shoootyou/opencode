@@ -93,7 +93,6 @@ export function useTitlebarArchiveCommands(): void {
 
             return global.sessionArchive.setSessionArchive(input)
           },
-          now: Date.now,
           isActive: () => !mutationStarted || (alive && global.serverCtx(key) === ctx),
           currentRoute: () => {
             const current = layout.route()
@@ -106,7 +105,7 @@ export function useTitlebarArchiveCommands(): void {
         },
       )
     },
-    unarchive: (target) => global.sessionArchive.setSessionArchive({ ...target, archive: null }),
+    unarchive: (target) => global.sessionArchive.setSessionArchive({ ...target, archived: false }),
     browse: (server) => showArchivedSessionsDialog(dialog, server),
   })
 

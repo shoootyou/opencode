@@ -4,10 +4,10 @@
  * @behavior
  *   - Unmounting aborts owner-scoped archive PATCH and archived-pagination requests.
  *   - A disposed dialog does not refetch or publish after PATCH or shared canonical sync settles.
- *   - Restoring an archived row sends archive: null, awaits canonical refresh, then refetches the list.
+ *   - Restoring an archived row sends archived:false, awaits canonical refresh, then refetches the list.
  * @edge-cases
  *   - Shared createData sync may finish after unmount because it deliberately has no abort signal.
- *   - Archived visibility uses one archived-only request rather than automatic cursor pagination.
+ *   - Archived visibility uses one archived:true request rather than automatic cursor pagination.
  * @see ../src/component/dialog-session-list.tsx
  */
 /** @jsxImportSource @opentui/solid */
@@ -82,7 +82,14 @@ async function mount(input: {
   const calls = createFetch(async (url, request) => {
     const requestPhase = phase(url, request, listCount)
     if (url.pathname === "/api/session") listCount++
-    const tracked = { id: ++nextID, method: request.method, url, phase: requestPhase, signal: request.signal, body: request.clone().text() }
+    const tracked = {
+      id: ++nextID,
+      method: request.method,
+      url,
+      phase: requestPhase,
+      signal: request.signal,
+      body: request.clone().text(),
+    }
     requests.push(tracked)
     pending.add(tracked.id)
     try {
@@ -101,7 +108,13 @@ async function mount(input: {
     const keymap = Keymap.use()
     dispatch = keymap.dispatch
     onMount(() => onCleanup(keymap.mode.push("modal")))
-    return <Show when={mounted()}><Dialog onClose={() => {}}><DialogSessionList /></Dialog></Show>
+    return (
+      <Show when={mounted()}>
+        <Dialog onClose={() => {}}>
+          <DialogSessionList />
+        </Dialog>
+      </Show>
+    )
   }
 
   const app = await testRender(
@@ -121,7 +134,9 @@ async function mount(input: {
                               <SessionTabsProvider>
                                 <ThemeProvider mode="dark" source={emptyThemeSource}>
                                   <LocalProvider>
-                                    <DialogProvider><Harness /></DialogProvider>
+                                    <DialogProvider>
+                                      <Harness />
+                                    </DialogProvider>
                                   </LocalProvider>
                                 </ThemeProvider>
                               </SessionTabsProvider>
@@ -160,14 +175,19 @@ test.serial("unmounting during archive PATCH aborts it and blocks a later dialog
   const setup = await mount({
     respond(request) {
       if (request.url.pathname === "/api/location")
-        return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [active], cursor: {} })
       if (request.phase === "patch") return patch.promise
       return undefined
     },
   })
   try {
-    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), { maxPasses: 100 })
+    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), {
+      maxPasses: 100,
+    })
     await stableDrain(setup.pending)
     await setup.app.waitForFrame((frame) => frame.includes("Active root"), { maxPasses: 100 })
     setup.dispatch("session.archive.toggle")
@@ -188,7 +208,10 @@ test.serial("a shared canonical sync may drain after unmount but cannot refetch 
   const setup = await mount({
     respond(request) {
       if (request.url.pathname === "/api/location")
-        return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [active], cursor: {} })
       if (request.phase === "patch") return new Response(null, { status: 204 })
       if (request.phase === "canonical-sync") return canonical.promise
@@ -196,7 +219,9 @@ test.serial("a shared canonical sync may drain after unmount but cannot refetch 
     },
   })
   try {
-    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), { maxPasses: 100 })
+    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), {
+      maxPasses: 100,
+    })
     await stableDrain(setup.pending)
     await setup.app.waitForFrame((frame) => frame.includes("Active root"), { maxPasses: 100 })
     setup.dispatch("session.archive.toggle")
@@ -215,7 +240,10 @@ test.serial("archived visibility makes one archived-only request without followi
     keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
     respond(request) {
       if (request.url.pathname === "/api/location")
-        return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [], cursor: {} })
       if (request.url.pathname === "/api/session" && request.url.searchParams.get("archived"))
         return json({ data: [], cursor: { next: "older" } })
@@ -223,13 +251,15 @@ test.serial("archived visibility makes one archived-only request without followi
     },
   })
   try {
-    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), { maxPasses: 100 })
+    await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "initial-list"), {
+      maxPasses: 100,
+    })
     await stableDrain(setup.pending)
     await setup.app.waitForFrame((frame) => frame.includes("No sessions available"), { maxPasses: 100 })
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitFor(() => setup.requests.some((request) => request.url.searchParams.get("archived")))
     await stableDrain(setup.pending)
-    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "only")).toHaveLength(1)
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "true")).toHaveLength(1)
     expect(setup.requests.filter((request) => request.phase === "pagination")).toEqual([])
   } finally {
     await setup.dispose()
@@ -243,13 +273,18 @@ test.serial("selected archived row sends null, awaits sync, then refetches with 
   const setup = await mount({
     keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
     respond: async (request) => {
-      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+      if (request.url.pathname === "/api/location")
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [archived], cursor: {} })
       if (request.url.pathname === "/api/session" && request.url.searchParams.get("archived")) {
         archivedPageRequests++
         return json({ data: archivedPageRequests === 1 ? [archived] : [active], cursor: {} })
       }
-      if (request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH") return new Response(null, { status: 204 })
+      if (request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH")
+        return new Response(null, { status: 204 })
       if (request.url.pathname === "/api/session/ses_archived") return sync.promise
       if (request.phase === "dialog-refetch") return json({ data: [active], cursor: {} })
       return undefined
@@ -260,37 +295,59 @@ test.serial("selected archived row sends null, awaits sync, then refetches with 
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitForFrame((frame) => frame.includes("Archived root"), { maxPasses: 100 })
     setup.dispatch("session.archive.toggle")
-    await setup.app.waitFor(() => setup.requests.some((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH"))
-    const patch = setup.requests.find((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH")!
-    expect(JSON.parse(await patch.body)).toEqual({ archive: null })
-    await setup.app.waitFor(() => setup.requests.some((request) => request.url.pathname === "/api/session/ses_archived" && request.method === "GET"))
-    expect(setup.requests.filter((request) => request.url.searchParams.get("archived"))).toHaveLength(1)
+    await setup.app.waitFor(() =>
+      setup.requests.some(
+        (request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH",
+      ),
+    )
+    const patch = setup.requests.find(
+      (request) => request.url.pathname === "/api/session/ses_archived" && request.method === "PATCH",
+    )!
+    expect(JSON.parse(await patch.body)).toEqual({ archived: false })
+    await setup.app.waitFor(() =>
+      setup.requests.some(
+        (request) => request.url.pathname === "/api/session/ses_archived" && request.method === "GET",
+      ),
+    )
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "true")).toHaveLength(1)
     sync.resolve(json({ data: active }))
-    await setup.app.waitFor(() => setup.requests.filter((request) => request.url.searchParams.get("archived")).length === 2)
+    await setup.app.waitFor(
+      () => setup.requests.filter((request) => request.url.searchParams.get("archived") === "true").length === 2,
+    )
     await stableDrain(setup.pending)
     await setup.app.waitForFrame((frame) => !frame.includes("Archived root"), { maxPasses: 100 })
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitForFrame((frame) => frame.includes("Active root"), { maxPasses: 100 })
     setup.dispatch("session.archive.toggle")
-    await setup.app.waitFor(() => setup.requests.filter((request) => request.url.pathname === "/api/session/ses_active" && request.method === "PATCH").length === 1)
+    await setup.app.waitFor(
+      () =>
+        setup.requests.filter(
+          (request) => request.url.pathname === "/api/session/ses_active" && request.method === "PATCH",
+        ).length === 1,
+    )
   } finally {
     await setup.dispose()
   }
 })
 
-test.serial("selected archive sends one timestamp PATCH, awaits sync, then refetches the archived row", async () => {
+test.serial("selected archive sends one native PATCH, awaits sync, then refetches the archived row", async () => {
   const patch = Promise.withResolvers<Response>()
   const sync = Promise.withResolvers<Response>()
   let archived: number | undefined
   const setup = await mount({
     respond: async (request) => {
-      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+      if (request.url.pathname === "/api/location")
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [active], cursor: {} })
       if (request.phase === "patch") {
         return patch.promise
       }
       if (request.phase === "canonical-sync") return sync.promise
-      if (request.phase === "dialog-refetch") return json({ data: [{ ...active, time: { ...active.time, archived } }], cursor: {} })
+      if (request.phase === "dialog-refetch")
+        return json({ data: [{ ...active, time: { ...active.time, archived } }], cursor: {} })
       return undefined
     },
   })
@@ -300,9 +357,8 @@ test.serial("selected archive sends one timestamp PATCH, awaits sync, then refet
     setup.dispatch("session.archive.toggle")
     await setup.app.waitFor(() => setup.requests.filter((request) => request.phase === "patch").length === 1)
     const patchRequest = setup.requests.find((request) => request.phase === "patch")!
-    const payload = JSON.parse(await patchRequest.body) as { archive: number }
     expect(setup.requests.filter((request) => request.phase === "patch")).toHaveLength(1)
-    expect(payload.archive).toBeNumber()
+    expect(JSON.parse(await patchRequest.body)).toEqual({ archived: true })
     patch.resolve(new Response(null, { status: 204 }))
     await setup.app.waitFor(() => setup.requests.some((request) => request.phase === "canonical-sync"))
     expect(setup.requests.some((request) => request.phase === "dialog-refetch")).toBe(false)
@@ -320,7 +376,11 @@ test.serial("selected archive sends one timestamp PATCH, awaits sync, then refet
 test.serial("failed selected archive keeps the row and skips refetch", async () => {
   const setup = await mount({
     respond(request) {
-      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+      if (request.url.pathname === "/api/location")
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.phase === "initial-list") return json({ data: [active], cursor: {} })
       if (request.phase === "patch") return new Response(null, { status: 500 })
       return undefined
@@ -340,7 +400,11 @@ test.serial("selection-free show and hide archived uses archived-only mode", asy
   const setup = await mount({
     keybinds: { "session.archived.toggle_visibility": "ctrl+v" },
     respond(request) {
-      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
+      if (request.url.pathname === "/api/location")
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
       if (request.url.pathname === "/api/session") return json({ data: [], cursor: {} })
       return undefined
     },
@@ -349,7 +413,7 @@ test.serial("selection-free show and hide archived uses archived-only mode", asy
     await setup.app.waitForFrame((frame) => frame.includes("No sessions available"), { maxPasses: 100 })
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitFor(() => setup.requests.some((request) => request.url.searchParams.get("archived")))
-    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "only")).toHaveLength(1)
+    expect(setup.requests.filter((request) => request.url.searchParams.get("archived") === "true")).toHaveLength(1)
     setup.dispatch("session.archived.toggle_visibility")
     await setup.app.waitFor(() => setup.requests.filter((request) => request.phase === "dialog-refetch").length >= 2)
   } finally {
@@ -361,8 +425,19 @@ test.serial("selection-free show and hide archived uses archived-only mode", asy
 test.serial("initial list hides epoch-zero archived roots", async () => {
   const setup = await mount({
     respond(request) {
-      if (request.url.pathname === "/api/location") return json({ directory: process.cwd(), project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() } })
-      if (request.phase === "initial-list") return json({ data: [active, { ...active, id: "ses_archived", title: "Archived epoch root", time: { ...active.time, archived: 0 } }], cursor: {} })
+      if (request.url.pathname === "/api/location")
+        return json({
+          directory: process.cwd(),
+          project: { id: "proj_fixture", directory: process.cwd(), canonical: process.cwd() },
+        })
+      if (request.phase === "initial-list")
+        return json({
+          data: [
+            active,
+            { ...active, id: "ses_archived", title: "Archived epoch root", time: { ...active.time, archived: 0 } },
+          ],
+          cursor: {},
+        })
       return undefined
     },
   })
