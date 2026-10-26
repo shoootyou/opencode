@@ -11,6 +11,7 @@ export async function createAppFixture(
   input: {
     width?: number
     height?: number
+    mode?: "dark" | "light"
     state?: string
     config?: Config.Info
     args?: TuiInput["args"]
@@ -50,7 +51,7 @@ export async function createAppFixture(
         },
       },
       packages: { prepare: async () => ({ directory: "" }) },
-      terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: ready.resolve }),
+      terminalHandoff: async () => ({ renderer: setup.renderer, mode: input.mode ?? "dark", complete: ready.resolve }),
       args: input.args ?? {},
       log: () => {},
     }).pipe(

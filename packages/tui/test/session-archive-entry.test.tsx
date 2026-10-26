@@ -10,6 +10,7 @@
  *   - A cursor returned by that page does not trigger a second automatic request.
  * @see ../src/app.tsx
  */
+import { RGBA } from "@opentui/core"
 import { expect, test } from "bun:test"
 import { createAppFixture } from "./fixture/app"
 import { directory, json } from "./fixture/tui-client"
@@ -22,6 +23,19 @@ const active = {
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 2 },
   location: { directory },
+}
+
+function contrastRatio(foreground: RGBA, background: RGBA) {
+  const luminance = (color: RGBA) => {
+    const [red, green, blue] = color
+      .toInts()
+      .slice(0, 3)
+      .map((value) => value / 255)
+    const channel = (value: number) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+  }
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((left, right) => right - left)
+  return (light + 0.05) / (dark + 0.05)
 }
 
 test("opens Sessions through session.list and requests one archived-only page through a real keybind", async () => {
@@ -122,4 +136,49 @@ test("Shift+Tab activates the default-unbound archived-visibility action without
   await setup.waitFor(() => requests.some((url) => url.searchParams.get("archived") === "true"))
   expect(patches).toEqual([])
   expect(requests.filter((url) => url.searchParams.get("archived") === "true")).toHaveLength(1)
+})
+
+test.each(["dark", "light"] as const)("renders an AA focused footer action in %s mode", async (mode) => {
+  const patches: unknown[] = []
+  await using setup = await createAppFixture({
+    mode,
+    config: {
+      animations: false,
+      theme: { name: "opencode", mode },
+      keybinds: { "session.list": "ctrl+l" },
+    },
+    fetch: async (url, request) => {
+      if (!url.pathname.startsWith("/api/session")) return
+      if (request.method === "PATCH") {
+        patches.push(await request.json())
+        return new Response(null, { status: 204 })
+      }
+      if (url.pathname === "/api/session/ses_active") return json({ data: active })
+      return json({ data: [active], cursor: {} })
+    },
+  })
+  const span = (text: string) =>
+    setup
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
+      .find((entry) => entry.text.includes(text))
+
+  await setup.ready
+  await setup.waitForFrame((frame) => frame.includes("Ask anything"))
+  setup.mockInput.pressKey("l", { ctrl: true })
+  await setup.waitForFrame((frame) => frame.includes("Sessions") && frame.includes("Active root"))
+  await setup.waitForVisualIdle({ quietFrames: 3 })
+  setup.mockInput.pressTab()
+  setup.mockInput.pressTab()
+  setup.mockInput.pressTab()
+  await setup.waitForFrame((frame) => frame.includes("archive/unarchive"))
+  const action = span("archive/unarchive")!
+  const row = span("Active root")!
+  expect(action.bg.equals(RGBA.fromInts(0, 0, 0, 0))).toBe(false)
+  const ratio = contrastRatio(action.fg, action.bg)
+  expect(ratio, `focused archive action contrast was ${ratio.toFixed(2)}:1 in ${mode}`).toBeGreaterThanOrEqual(4.5)
+  expect(row.bg.equals(action.bg)).toBe(false)
+  setup.mockInput.pressEnter()
+  await setup.waitFor(() => patches.length === 1)
+  expect(patches).toEqual([{ archived: true }])
 })
