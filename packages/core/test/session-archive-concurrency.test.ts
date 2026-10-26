@@ -160,6 +160,63 @@ describe("native session archive commit admission", () => {
     }),
   )
 
+  it.effect("serializes a gated archive followed by restore into two native transitions", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let gates = 0
+      const sessions = yield* nativeSessionWithPublishGate(() => {
+        gates++
+        return gates === 1
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void
+      })
+      const archive = yield* sessions.forSession(sessionID).archive().pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(archive)
+      yield* sessions.forSession(sessionID).unarchive()
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: null,
+      })
+      expect(
+        (yield* db.select({ type: EventTable.type }).from(EventTable).orderBy(EventTable.seq).all()).map(
+          (row) => row.type,
+        ),
+      ).toEqual(["session.archived.1", "session.unarchived.1"])
+    }),
+  )
+
+  it.effect("makes concurrent native restores one transition followed by a no-op", () =>
+    Effect.gen(function* () {
+      const db = yield* seed(1)
+      const firstEntered = yield* Deferred.make<void>()
+      const secondEntered = yield* Deferred.make<void>()
+      const releaseFirst = yield* Deferred.make<void>()
+      const releaseSecond = yield* Deferred.make<void>()
+      let calls = 0
+      const sessions = yield* nativeSessionWithPublishGate(() => {
+        calls++
+        return calls === 1
+          ? Deferred.succeed(firstEntered, undefined).pipe(Effect.andThen(Deferred.await(releaseFirst)))
+          : Deferred.succeed(secondEntered, undefined).pipe(Effect.andThen(Deferred.await(releaseSecond)))
+      })
+      const first = yield* sessions.forSession(sessionID).unarchive().pipe(Effect.forkScoped)
+      yield* Deferred.await(firstEntered)
+      const second = yield* sessions.forSession(sessionID).unarchive().pipe(Effect.forkScoped)
+      yield* Deferred.await(secondEntered)
+      yield* Deferred.succeed(releaseFirst, undefined)
+      yield* Fiber.join(first)
+      yield* Deferred.succeed(releaseSecond, undefined)
+      yield* Fiber.join(second)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: null,
+      })
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(1)
+    }),
+  )
+
   it.effect(
     "requires an archive rollback to leave projection, sequence, retained rows, and notifications untouched",
     () =>
@@ -201,6 +258,24 @@ describe("native session archive commit admission", () => {
 
       const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+    }),
+  )
+
+  it.effect("fails after direct row deletion between observation and commit without recreating durable state", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      let deleted = false
+      const sessions = yield* nativeSessionWithPublishGate(() => {
+        if (deleted) return Effect.void
+        deleted = true
+        return db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie, Effect.asVoid)
+      })
+      const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(String(result)).toContain("Session.NotFoundError")
       expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
       expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
       expect(yield* db.select().from(EventTable).all()).toEqual([])
@@ -310,5 +385,35 @@ describe("native session archive commit admission", () => {
       })
       expect(notifications).toBe(0)
     }),
+  )
+
+  it.effect(
+    "admits six alternating transitions, returns the typed seventh rate refusal, and admits at exact expiry",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* seed()
+        const now = 4_000_000
+        yield* TestClock.setTime(now)
+        const session = yield* Session.Service
+        const transitions = [
+          session.archive,
+          session.unarchive,
+          session.archive,
+          session.unarchive,
+          session.archive,
+          session.unarchive,
+        ]
+        for (const transition of transitions) yield* transition(sessionID)
+        expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+        const denied = yield* session.archive(sessionID).pipe(Effect.exit)
+        expect(Exit.isFailure(denied)).toBe(true)
+        if (Exit.isFailure(denied))
+          expect(denied.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)).toMatchObject([
+            { _tag: "Session.ArchiveLimitError", kind: "rate", retryAfterMillis: 60_000 },
+          ])
+        yield* TestClock.adjust("60 seconds")
+        yield* session.archive(sessionID)
+        expect(yield* db.select().from(EventTable).all()).toHaveLength(7)
+      }),
   )
 })
