@@ -19,25 +19,6 @@ type Session = {
   title: string
   time: { archived?: number }
 }
-type Identity = {
-  query: string
-  allProjects: boolean
-  location: string
-  showArchived: boolean
-}
-type Result = {
-  identity: Identity
-  sessions: Session[]
-  error?: unknown
-}
-type SessionListModel = {
-  identity: Identity
-  request: { archived?: boolean }
-  visible(input: { local: Session[]; latest?: Result; result?: Result; loading: boolean }): Session[]
-}
-type SessionListModule = {
-  createSessionListModel?: (input: Identity) => SessionListModel
-}
 const active: Session = { id: "active", title: "Active root", time: {} }
 const archivedAtEpoch: Session = { id: "archived-zero", title: "Archived root", time: { archived: 0 } }
 const archivedChild: Session = {
@@ -48,9 +29,9 @@ const archivedChild: Session = {
 }
 
 async function createModel(showArchived: boolean) {
-  const subject: SessionListModule = await import("../src/component/dialog-session-list")
+  const subject = await import("../src/component/dialog-session-list")
   expect(subject.createSessionListModel).toBeTypeOf("function")
-  return subject.createSessionListModel!({ query: "", allProjects: true, location: "/fixture", showArchived })
+  return subject.createSessionListModel({ query: "", allProjects: true, location: "/fixture", showArchived })
 }
 test("defines archive dialog keybinds as discoverable opt-in commands", () => {
   expect(Definitions["session.archive.toggle"]).toEqual({
@@ -65,12 +46,12 @@ test("defines archive dialog keybinds as discoverable opt-in commands", () => {
 test("starts each session-list opening with active roots and an active-only request identity", async () => {
   const model = await createModel(false)
   expect(model.identity).toEqual({ query: "", allProjects: true, location: "/fixture", showArchived: false })
-  expect(model.request).toEqual({ archived: false })
+  expect(JSON.stringify(model.request)).toBe('{"archived":false}')
   expect(model.visible({ local: [active, archivedAtEpoch, archivedChild], loading: false })).toEqual([active])
 })
 test("shows only archived roots and uses archived-only HTTP mode when archive visibility is enabled", async () => {
   const model = await createModel(true)
-  expect(model.request).toEqual({ archived: true })
+  expect(JSON.stringify(model.request)).toBe('{"archived":true}')
   expect(model.visible({ local: [active, archivedAtEpoch, archivedChild], loading: false })).toEqual([archivedAtEpoch])
 })
 test("does not flash an in-flight result belonging to the prior archive filter", async () => {

@@ -64,7 +64,9 @@ async function withServer(run: (input: { url: string; requests: URL[] }) => Prom
     server.stop(true)
   }
 }
-async function runHandler(effect: Effect.Effect<void, unknown, Config.Service | Global.Service | FileSystem.FileSystem | Scope.Scope>) {
+async function runHandler(
+  effect: Effect.Effect<void, unknown, Config.Service | Global.Service | FileSystem.FileSystem | Scope.Scope>,
+) {
   const root = path.join(import.meta.dirname, "../.debug", `plan382-cli-session-${process.pid}-${crypto.randomUUID()}`)
   const config = path.join(root, "config")
   const state = path.join(root, "state")
