@@ -6,9 +6,16 @@
  *   - The interactive export picker requests active roots with archived:false before exporting its selected ID.
  *   - Explicit-ID export reads that ID directly without applying an archive-state list filter.
  * @edge-cases
- *   - The interactive picker remains non-TTY-safe through its mocked prompt boundary.
+ *   - The interactive picker runs behind an isolated mocked prompt boundary that cannot leak into sibling tests.
  * @see ../src/commands/handlers/session/list.ts
  */
+import { expect, test } from "bun:test"
+import { spawn } from "node:child_process"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import path from "node:path"
+type Result = { requests: string[]; prompts: Array<{ message: string; values: string[] }> }
+
+const harness = `
 import { expect, mock, test } from "bun:test"
 import { NodeFileSystem } from "@effect/platform-node"
 import { Global } from "@opencode/util/global"
@@ -16,116 +23,131 @@ import { Effect, FileSystem, Option, Scope } from "effect"
 import { mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { Config } from "../src/config"
-let selected = "ses_active"
-const prompts: Array<{ message: string; values: readonly string[] }> = []
+
+const prompts = []
 mock.module("@clack/prompts", () => ({
-  autocomplete: async (input: { message: string; options: Array<{ value: string }> }) => {
+  autocomplete: async (input) => {
     prompts.push({ message: input.message, values: input.options.map((option) => option.value) })
-    return selected
+    return "ses_active"
   },
-  cancel() {},
-  intro() {},
-  isCancel: () => false,
-  log: { error() {} },
-  outro() {},
+  cancel() {}, intro() {}, isCancel: () => false, log: { error() {} }, outro() {},
 }))
-const listHandler = (await import("../src/commands/handlers/session/list")).default
-const exportHandler = (await import("../src/commands/handlers/session/export")).default
-const session = (id: string) => ({
-  id,
-  projectID: "project_fixture",
-  title: id,
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: 1, updated: 2 },
-  location: { directory: "/fixture" },
-})
-async function withServer(run: (input: { url: string; requests: URL[] }) => Promise<void>) {
-  const requests: URL[] = []
-  const server = Bun.serve({
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url)
-      requests.push(url)
-      if (url.pathname === "/api/info") return Response.json({ version: "2.1.4", pid: process.pid, urls: [] })
-      if (url.pathname === "/api/location")
-        return Response.json({
-          directory: "/fixture",
-          project: { id: "project_fixture", directory: "/fixture", canonical: "/fixture" },
-        })
-      if (url.pathname === "/api/session") return Response.json({ data: [session("ses_active")], cursor: {} })
-      if (url.pathname.endsWith("/export")) return Response.json({ id: url.pathname.split("/").at(-2) })
-      return new Response(null, { status: 404 })
-    },
-  })
-  try {
-    await run({ url: server.url.toString(), requests })
-  } finally {
-    server.stop(true)
-  }
-}
-async function runHandler(
-  effect: Effect.Effect<void, unknown, Config.Service | Global.Service | FileSystem.FileSystem | Scope.Scope>,
-) {
-  const root = path.join(import.meta.dirname, "../.debug", `plan382-cli-session-${process.pid}-${crypto.randomUUID()}`)
+
+const session = (id) => ({ id, projectID: "project_fixture", title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 2 }, location: { directory: "/fixture" } })
+async function runHandler(effect) {
+  const root = path.join(import.meta.dirname, ".tmp-session-archive-child-" + process.pid + "-" + crypto.randomUUID())
   const config = path.join(root, "config")
   const state = path.join(root, "state")
   await Promise.all([mkdir(config, { recursive: true }), mkdir(state, { recursive: true })])
-  try {
-    await Effect.runPromise(
-      effect.pipe(
-        Effect.provide(Config.layer),
-        Effect.provide(Global.layerWith({ config, state })),
-        Effect.provide(NodeFileSystem.layer),
-        Effect.scoped,
-      ),
-    )
-  } finally {
-    await rm(root, { force: true, recursive: true })
-  }
+  try { await Effect.runPromise(effect.pipe(Effect.provide(Config.layer), Effect.provide(Global.layerWith({ config, state })), Effect.provide(NodeFileSystem.layer), Effect.scoped)) }
+  finally { await rm(root, { force: true, recursive: true }) }
 }
-test("session list sends archived:false through the public command handler", async () => {
-  await withServer(async ({ url, requests }) => {
-    await runHandler(
-      listHandler({ server: Option.some(url), standalone: false, maxCount: Option.some(1), format: "json" }),
-    )
-    expect(requests.find((request) => request.pathname === "/api/session")?.searchParams.get("archived")).toBe("false")
-  })
-})
-test("interactive export lists active roots before exporting the prompt-selected ID", async () => {
+
+test("isolated session archive caller", async () => {
+  const requests = []
+  const server = Bun.serve({ port: 0, fetch(request) {
+    const url = new URL(request.url)
+    requests.push(url.toString())
+    if (url.pathname === "/api/info") return Response.json({ version: "2.1.4", pid: process.pid, urls: [] })
+    if (url.pathname === "/api/location") return Response.json({ directory: "/fixture", project: { id: "project_fixture", directory: "/fixture", canonical: "/fixture" } })
+    if (url.pathname === "/api/session") return Response.json({ data: [session("ses_active")], cursor: {} })
+    if (url.pathname.endsWith("/export")) return Response.json({ id: url.pathname.split("/").at(-2) })
+    return new Response(null, { status: 404 })
+  }})
   const descriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
-  selected = "ses_active"
-  prompts.length = 0
-  Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true })
   try {
-    await withServer(async ({ url, requests }) => {
-      await runHandler(
-        exportHandler({ server: Option.some(url), standalone: false, session: Option.none(), sanitize: false }),
-      )
-      expect(requests.find((request) => request.pathname === "/api/session")?.searchParams.get("archived")).toBe(
-        "false",
-      )
-      expect(requests.some((request) => request.pathname === "/api/experimental/session/ses_active/export")).toBe(true)
-      expect(prompts).toEqual([{ message: "Select session to export", values: ["ses_active"] }])
-    })
+    const { default: listHandler } = await import("../src/commands/handlers/session/list")
+    const { default: exportHandler } = await import("../src/commands/handlers/session/export")
+    if (process.env.SCENARIO === "list") await runHandler(listHandler({ server: Option.some(server.url.toString()), standalone: false, maxCount: Option.some(1), format: "json" }))
+    if (process.env.SCENARIO === "interactive") {
+      Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true })
+      await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.none(), sanitize: false }))
+    }
+    if (process.env.SCENARIO === "explicit") await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.some("ses_archived"), sanitize: false }))
+    await Bun.write(process.env.RESULT_PATH, JSON.stringify({ requests, prompts }))
   } finally {
     if (descriptor) Object.defineProperty(process.stdin, "isTTY", descriptor)
     else Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: undefined })
+    server.stop(true)
   }
 })
+`
+
+async function runScenario(scenario: "list" | "interactive" | "explicit"): Promise<Result> {
+  const root = path.join(import.meta.dirname, `.tmp-session-archive-parent-${process.pid}-${crypto.randomUUID()}`)
+  const harnessPath = path.join(
+    import.meta.dirname,
+    `.tmp-session-archive-harness-${process.pid}-${crypto.randomUUID()}.test.ts`,
+  )
+  const resultPath = path.join(root, "result.json")
+  await mkdir(root, { recursive: true })
+  await writeFile(harnessPath, harness)
+  const allowed = ["HOME", "PATH", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]
+  const env = Object.fromEntries(
+    allowed.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
+  )
+  let child: ReturnType<typeof spawn> | undefined
+  try {
+    const output = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      child = spawn(
+        process.execPath,
+        ["--no-env-file", "test", "--preload", "@opentui/solid/preload", "--timeout", "30000", harnessPath],
+        {
+          cwd: import.meta.dirname,
+          detached: true,
+          env: { ...env, RESULT_PATH: resultPath, SCENARIO: scenario },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      )
+      let stdout = ""
+      let stderr = ""
+      if (!child.stdout || !child.stderr) {
+        reject(new Error("child process output pipes are unavailable"))
+        return
+      }
+      child.stdout.on("data", (chunk) => (stdout += chunk))
+      child.stderr.on("data", (chunk) => (stderr += chunk))
+      child.once("error", reject)
+      child.once("close", (code) => resolve({ code, stdout, stderr }))
+    })
+    expect(output.code, `${output.stdout}\n${output.stderr}`).toBe(0)
+    return JSON.parse(await readFile(resultPath, "utf8"))
+  } finally {
+    const pgid = child?.pid
+    if (pgid && child?.exitCode === null) process.kill(-pgid, "SIGTERM")
+    if (pgid) expect(() => process.kill(-pgid, 0)).toThrow()
+    await rm(harnessPath, { force: true })
+    await rm(root, { force: true, recursive: true })
+  }
+}
+
+test("session list sends archived:false through the public command handler", async () => {
+  const result = await runScenario("list")
+  expect(
+    new URL(result.requests.find((request) => new URL(request).pathname === "/api/session")!).searchParams.get(
+      "archived",
+    ),
+  ).toBe("false")
+})
+
+test("interactive export lists active roots before exporting the prompt-selected ID", async () => {
+  const result = await runScenario("interactive")
+  expect(
+    new URL(result.requests.find((request) => new URL(request).pathname === "/api/session")!).searchParams.get(
+      "archived",
+    ),
+  ).toBe("false")
+  expect(
+    result.requests.some((request) => new URL(request).pathname === "/api/experimental/session/ses_active/export"),
+  ).toBe(true)
+  expect(result.prompts).toEqual([{ message: "Select session to export", values: ["ses_active"] }])
+})
+
 test("explicit-ID export skips the active-only picker and exports an archived ID", async () => {
-  prompts.length = 0
-  await withServer(async ({ url, requests }) => {
-    await runHandler(
-      exportHandler({
-        server: Option.some(url),
-        standalone: false,
-        session: Option.some("ses_archived"),
-        sanitize: false,
-      }),
-    )
-    expect(requests.some((request) => request.pathname === "/api/session")).toBe(false)
-    expect(requests.some((request) => request.pathname === "/api/experimental/session/ses_archived/export")).toBe(true)
-    expect(prompts).toEqual([])
-  })
+  const result = await runScenario("explicit")
+  expect(result.requests.some((request) => new URL(request).pathname === "/api/session")).toBe(false)
+  expect(
+    result.requests.some((request) => new URL(request).pathname === "/api/experimental/session/ses_archived/export"),
+  ).toBe(true)
+  expect(result.prompts).toEqual([])
 })
