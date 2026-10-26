@@ -5,10 +5,12 @@
  *   - Populates active, epoch-zero archived, normally archived, and restored sessions through the old compiled HTTP API.
  *   - Captures an exact typed old-profile baseline (sessions, legacy archive envelopes, message history, and config) through the old binary and its SQLite state.
  *   - Requires native archive/restore transitions, repeated no-op behavior, and restart persistence without changing preserved profile configuration.
+ *   - Counts retained legacy and native archive-family rows after restart, then refuses the next real HTTP transition at the mixed rate boundary without mutation.
  *   - Restores the pre-upgrade backup and requires the old binary to read the complete typed baseline exactly.
  * @edge-cases
  *   - Missing an explicitly requested manifest fails configuration; normal runs may opt in with the manifest environment variable.
  *   - Every spawned server is an isolated process group whose identity, reaping, and absence are verified before profile snapshots or deletion.
+ *   - The old binary has no supported events.persist=false surface (serve --help exposes only hostname, port, cors, service, and stdio) and new sessions have empty message history with no model-free message-write surface; core retention suites cover both at unit level.
  * @see ../../../.debug/fixtures/plan382-r1-f7dcf30/fixture-pair.json
  */
 import { expect, test } from "bun:test"
@@ -101,6 +103,7 @@ test.skipIf(!manifestPath && !required)(
     let old: Server | undefined
     let native: Server | undefined
     let semanticOutcome = "exception"
+    let mixedBoundary: { q: number; admitted: number; q_at_refusal: number; retry_after_millis: number } | undefined
     const lifecycles: LifecycleReceipt[] = []
 
     try {
@@ -121,6 +124,7 @@ test.skipIf(!manifestPath && !required)(
       expect(await archiveBaseline(old, archived.id)).toEqual(archivedBeforeRepeat)
       await archiveOld(old, restored.id, 1_700_000_000_100)
       await archiveOld(old, restored.id, null)
+      const populatedAt = Date.now()
       const oldState = await sessionStates(old, [active.id, epoch.id, archived.id, restored.id])
       expect(oldState).toEqual({ active: null, archived: 1_700_000_000_000, epoch: 0, restored: null })
       const baseline = await typedBaseline(old, oldProfile, [active.id, epoch.id, archived.id, restored.id], active.id)
@@ -169,10 +173,58 @@ test.skipIf(!manifestPath && !required)(
       lifecycles.push(native.receipt)
       expect(await archiveBaseline(native, active.id)).toEqual(restoredNative)
       expect(await configSnapshot(oldProfile)).toEqual(baseline.config)
-      await archiveNative(native, active.id)
       expect(
-        (await archiveBaseline(native, active.id)).events.filter((event) => event.type === "session.archived.1"),
-      ).toHaveLength(2)
+        Date.now() - populatedAt,
+        "mixed admission sequence exceeded its 30-second anti-flake budget",
+      ).toBeLessThanOrEqual(30_000)
+      const legacy = baseline.legacy.filter((event) => event.aggregate_id === restored.id)
+      const q = qualifyingArchiveRows(legacy, Date.now()).length
+      expect(q).toBe(2)
+      let admitted = 0
+      let beforeLastAdmission: ArchiveBaseline | undefined
+      for (const archived of [true, false, true, false]) {
+        const before = await archiveBaseline(native, restored.id)
+        beforeLastAdmission = before
+        const response = await transitionNative(native, restored.id, archived)
+        expect(response.status).toBe(204)
+        admitted++
+        const after = await archiveBaseline(native, restored.id)
+        expect(after.sequence).toBe(before.sequence + 1)
+        expect(qualifyingArchiveRows(after.events, Date.now()).length).toBeLessThan(7)
+      }
+      expect(admitted).toBe(6 - q)
+      const beforeRefusal = await archiveBaseline(native, restored.id)
+      const sentAt = Date.now()
+      const refused = await transitionNative(native, restored.id, true)
+      const receivedAt = Date.now()
+      expect(refused.status).toBe(429)
+      const refusal = await refused.json()
+      expect(refusal).toMatchObject({
+        _tag: "SessionArchiveLimitError",
+        sessionID: restored.id,
+        kind: "rate",
+        message: "Archive transition rate limit exceeded",
+      })
+      if (
+        typeof refusal !== "object" ||
+        refusal === null ||
+        typeof (refusal as { retryAfterMillis?: unknown }).retryAfterMillis !== "number"
+      )
+        throw new Error("rate refusal omitted numeric retryAfterMillis")
+      const retryAfterMillis = (refusal as { retryAfterMillis: number }).retryAfterMillis
+      expect(retryAfterMillis).toBeGreaterThan(0)
+      expect(retryAfterMillis).toBeLessThanOrEqual(60_000 + 1_000)
+      const afterRefusal = await archiveBaseline(native, restored.id)
+      expect(afterRefusal).toEqual(beforeRefusal)
+      const qualifyingAtRefusal = definitelyQualifyingArchiveRows(afterRefusal.events, sentAt, receivedAt)
+      expect(qualifyingAtRefusal.length).toBeGreaterThanOrEqual(6)
+      expect(beforeLastAdmission).toBeDefined()
+      expect(qualifyingArchiveRows(beforeLastAdmission!.events, sentAt).length).toBeLessThan(6)
+      expect(
+        Date.now() - populatedAt,
+        "mixed admission sequence exceeded its 30-second anti-flake budget",
+      ).toBeLessThanOrEqual(30_000)
+      mixedBoundary = { q, admitted, q_at_refusal: qualifyingAtRefusal.length, retry_after_millis: retryAfterMillis }
       await stopServer(native)
       native = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
@@ -215,6 +267,7 @@ test.skipIf(!manifestPath && !required)(
           },
           harness_provenance: await harnessProvenance(manifest),
           outcome: semanticOutcome,
+          mixed_admission_boundary: mixedBoundary,
           owned_root: root,
           lifecycles,
           proof_sequence: [
@@ -502,13 +555,17 @@ async function archiveOld(server: Server, sessionID: string, archive: number | n
 }
 
 async function archiveNative(server: Server, sessionID: string) {
-  const response = await request(server, `/api/session/${sessionID}`, "PATCH", { archived: true })
+  const response = await transitionNative(server, sessionID, true)
   expect(response.status).toBe(204)
 }
 
 async function restoreNative(server: Server, sessionID: string) {
-  const response = await request(server, `/api/session/${sessionID}`, "PATCH", { archived: false })
+  const response = await transitionNative(server, sessionID, false)
   expect(response.status).toBe(204)
+}
+
+function transitionNative(server: Server, sessionID: string, archived: boolean) {
+  return request(server, `/api/session/${sessionID}`, "PATCH", { archived })
 }
 
 async function sessionStates(server: Server, ids: string[]) {
@@ -550,6 +607,20 @@ type TypedBaseline = {
   legacy: DurableEnvelope[]
   messages: unknown[]
   config: Record<string, string>
+}
+
+function qualifyingArchiveRows(rows: DurableEnvelope[], now: number) {
+  return rows.filter((row) => isArchiveFamily(row) && row.created > now - 60_000 && row.created <= now + 60_000)
+}
+
+function definitelyQualifyingArchiveRows(rows: DurableEnvelope[], sentAt: number, receivedAt: number) {
+  return rows.filter(
+    (row) => isArchiveFamily(row) && row.created > receivedAt - 60_000 && row.created <= sentAt + 60_000,
+  )
+}
+
+function isArchiveFamily(row: DurableEnvelope) {
+  return ["session.archive.changed.1", "session.archived.1", "session.unarchived.1"].includes(row.type)
 }
 
 async function typedBaseline(
