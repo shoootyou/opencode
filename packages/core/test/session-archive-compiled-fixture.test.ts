@@ -12,13 +12,14 @@
  */
 import { expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
-import { randomBytes, randomUUID } from "node:crypto"
-import { mkdir, readFile, readdir, rm } from "node:fs/promises"
+import { randomBytes } from "node:crypto"
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 const manifestPath = process.env.OPENCODE_COMPILED_FIXTURE_MANIFEST
 const required = process.env.OPENCODE_COMPILED_FIXTURE_REQUIRED === "1"
 const fixtureRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e4-05109/shin-compiled-roundtrip")
+const evidenceRoot = path.resolve(import.meta.dir, "../../../.debug/fixtures/plan382-e4-05109/evidence")
 
 test.skipIf(!manifestPath && !required)(
   "compiled old/native populated fixture requires an explicit manifest",
@@ -26,20 +27,24 @@ test.skipIf(!manifestPath && !required)(
     if (!manifestPath)
       throw new Error("OPENCODE_COMPILED_FIXTURE_MANIFEST is required when compiled fixture execution is requested")
     const manifest = await readManifest(manifestPath!)
-    const root = path.join(fixtureRoot, `run-${randomUUID()}`)
+    const priorRuns = (await readdir(fixtureRoot)).sort()
+    const root = await createRunRoot()
+    const receipt = path.join(evidenceRoot, `shin-compiled-fixture-${path.basename(root)}.json`)
     const oldInput = await inputEntries(path.dirname(manifest.old_reference.path))
     const oldHash = await sha256(manifest.old_reference.path)
     const password = randomBytes(24).toString("hex")
     let old: Server | undefined
     let native: Server | undefined
+    let semanticOutcome = "exception"
+    const starts: Array<{ pid: number; pgid: number; startticks: string }> = []
 
-    await mkdir(root, { recursive: true, mode: 0o700 })
     try {
       expect(oldHash).toBe(manifest.old_reference.sha256)
       expect(await sha256(manifest.native.path)).toBe(manifest.native.sha256)
 
       const oldProfile = await createProfile(root, "old")
       old = await startServer(manifest.old_reference.path, oldProfile, password, "old")
+      starts.push({ pid: old.child.pid, pgid: old.child.pid, startticks: old.start })
       const active = await createSession(old, "active")
       const epoch = await createSession(old, "epoch-zero")
       const archived = await createSession(old, "archived")
@@ -58,6 +63,7 @@ test.skipIf(!manifestPath && !required)(
       await Bun.write(path.join(root, "baseline.json"), JSON.stringify(oldState))
       await copyProfile(oldProfile, preupgrade)
       native = await startServer(manifest.native.path, oldProfile, password, "native")
+      starts.push({ pid: native.child.pid, pgid: native.child.pid, startticks: native.start })
       const nativeState = await sessionStates(native, [active.id, epoch.id, archived.id, restored.id])
       expect(nativeState).toEqual(oldState)
       const nativeJournal = await readJournal(oldProfile, [epoch.id, archived.id, restored.id])
@@ -75,20 +81,56 @@ test.skipIf(!manifestPath && !required)(
       await rm(oldProfile, { recursive: true, force: true })
       await copyProfile(preupgrade, oldProfile)
       old = await startServer(manifest.old_reference.path, oldProfile, password, "rollback")
+      starts.push({ pid: old.child.pid, pgid: old.child.pid, startticks: old.start })
       expect(await sessionStates(old, [active.id, epoch.id, archived.id, restored.id])).toEqual(oldState)
       await stopServer(old)
       old = undefined
       expect(await ownedProcessIDs(root)).toEqual([])
+      semanticOutcome = missingNativeRetention ? "semantic-red-missing-native-retention" : "unexpected-green"
       expect(missingNativeRetention).toBe(false)
     } finally {
       await Promise.all([stopServer(native), stopServer(old)])
       expect(await ownedProcessIDs(root)).toEqual([])
       expect(await sha256(manifest.old_reference.path)).toBe(manifest.old_reference.sha256)
       expect(await inputEntries(path.dirname(manifest.old_reference.path))).toEqual(oldInput)
+      await mkdir(evidenceRoot, { recursive: true, mode: 0o700 })
+      await writeFile(
+        receipt,
+        JSON.stringify({
+          native_sha256: manifest.native.sha256,
+          old_sha256: manifest.old_reference.sha256,
+          outcome: semanticOutcome,
+          owned_root: root,
+          starts,
+          process_groups_absent: true,
+          proof_sequence: [
+            "old-populate",
+            "old-stop",
+            "snapshot",
+            "native-read-write",
+            "native-stop",
+            "rollback",
+            "delete",
+          ],
+          snapshot_and_rollback: true,
+          source: "05109ed35e722d1dd0af1421fac8bedb2fcf74ea",
+        }),
+      )
+      await rm(root, { recursive: true, force: false })
+      expect(await Bun.file(root).exists()).toBe(false)
+      expect((await readdir(fixtureRoot)).sort()).toEqual(priorRuns)
     }
   },
   30_000,
 )
+
+async function createRunRoot() {
+  const requested = await mkdtemp(path.join(fixtureRoot, "run-"))
+  const [physical, metadata] = await Promise.all([realpath(requested), lstat(requested)])
+  if (metadata.isSymbolicLink() || !metadata.isDirectory() || !physical.startsWith(`${fixtureRoot}${path.sep}`))
+    throw new Error("compiled fixture root escaped the owned physical prefix")
+  return physical
+}
 
 async function readManifest(file: string) {
   const requested = path.resolve(file)
