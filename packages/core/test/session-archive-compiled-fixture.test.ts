@@ -8,7 +8,7 @@
  * @edge-cases
  *   - Missing an explicitly requested manifest fails configuration; normal runs may opt in with the manifest environment variable.
  *   - Every spawned server is an isolated process group whose identity, reaping, and absence are verified before profile snapshots or deletion.
- * @see ../../../.debug/fixtures/plan382-e8-d2c112b/fixture-pair.json
+ * @see ../../../.debug/fixtures/plan382-r1-f7dcf30/fixture-pair.json
  */
 import { expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
@@ -18,6 +18,71 @@ import path from "node:path"
 
 const manifestPath = process.env.OPENCODE_COMPILED_FIXTURE_MANIFEST
 const required = process.env.OPENCODE_COMPILED_FIXTURE_REQUIRED === "1"
+const pinnedBun = "/code-projects/personal/opencode/.debug/bin/bun-1.4.4/bun"
+
+test("lifecycle cleanup terminates an owned descendant after its leader exits", async () => {
+  const root = await adversarialRoot()
+  const process = await startOwnedProcess(["/bin/sh", "-c", "sleep 0.15; sleep 30 & exit 0"], {
+    cwd: root,
+    env: syntheticEnvironment(root),
+    label: "leader-first-exit",
+  })
+  try {
+    await exitsWithin(process.child, 1_000)
+    expect((await groupMembers(process.ownership.pgid)).some((member) => member.pid !== process.ownership.pid)).toBe(
+      true,
+    )
+    await stopServer(process)
+    expect(process.receipt.signals).toContain("SIGTERM")
+    expect(process.receipt.final_members).toEqual([])
+  } finally {
+    await stopServer(process).catch(() => undefined)
+    await cleanupSyntheticProcess(process)
+    expect(await scanGroupMembers(process.ownership.pgid)).toEqual([])
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("lifecycle refuses unstable ownership without signalling its synthetic child", async () => {
+  const root = await adversarialRoot()
+  let failure: OwnershipFailure | undefined
+  try {
+    await startOwnedProcess([pinnedBun, "-e", "await Bun.sleep(200)"], {
+      cwd: root,
+      env: syntheticEnvironment(root),
+      label: "unstable-group",
+      observe: (identity, sample) => (sample === 1 ? { ...identity, pgid: identity.pgid + 1 } : identity),
+    })
+  } catch (error) {
+    failure = error as OwnershipFailure
+  }
+  try {
+    expect(failure).toBeDefined()
+    expect(failure?.receipt.signals).toEqual([])
+    expect(await exitsWithin(failure!.child, 1_000)).toBe(true)
+    expect(await groupMembers(failure!.actual.pgid)).toEqual([])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("lifecycle refuses identity mismatch without signalling its synthetic child", async () => {
+  const root = await adversarialRoot()
+  const process = await startOwnedProcess([pinnedBun, "-e", "await Bun.sleep(200)"], {
+    cwd: root,
+    env: syntheticEnvironment(root),
+    label: "identity-mismatch",
+  })
+  process.ownership = { ...process.ownership, start: "0" }
+  try {
+    await expect(stopServer(process)).rejects.toThrow("recycled process-group leader")
+    expect(process.receipt.signals).toEqual([])
+    expect(await exitsWithin(process.child, 1_000)).toBe(true)
+    expect(await groupMembers(process.receipt.leader.pgid)).toEqual([])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test.skipIf(!manifestPath && !required)(
   "compiled old/native populated fixture requires an explicit manifest",
@@ -26,16 +91,16 @@ test.skipIf(!manifestPath && !required)(
       throw new Error("OPENCODE_COMPILED_FIXTURE_MANIFEST is required when compiled fixture execution is requested")
     const manifest = await readManifest(manifestPath!)
     const paths = fixturePaths(manifestPath!)
+    await mkdir(paths.runRoot, { recursive: true, mode: 0o700 })
     const priorRuns = (await readdir(paths.runRoot)).sort()
     const root = await createRunRoot(paths.runRoot)
-    const receipt = path.join(paths.evidenceRoot, `shin-compiled-fixture-${path.basename(root)}.json`)
     const oldInput = await inputEntries(path.dirname(manifest.old_reference.path))
     const oldHash = await sha256(manifest.old_reference.path)
     const password = randomBytes(24).toString("hex")
     let old: Server | undefined
     let native: Server | undefined
     let semanticOutcome = "exception"
-    const starts: Array<{ pid: number; pgid: number; startticks: string }> = []
+    const lifecycles: LifecycleReceipt[] = []
 
     try {
       expect(oldHash).toBe(manifest.old_reference.sha256)
@@ -43,7 +108,7 @@ test.skipIf(!manifestPath && !required)(
 
       const oldProfile = await createProfile(root, "old")
       old = await startServer(manifest.old_reference.path, oldProfile, password, "old")
-      starts.push({ pid: old.child.pid, pgid: old.child.pid, startticks: old.start })
+      lifecycles.push(old.receipt)
       const active = await createSession(old, "active")
       const epoch = await createSession(old, "epoch-zero")
       const archived = await createSession(old, "archived")
@@ -62,7 +127,7 @@ test.skipIf(!manifestPath && !required)(
       await Bun.write(path.join(root, "baseline.json"), JSON.stringify(oldState))
       await copyProfile(oldProfile, preupgrade)
       native = await startServer(manifest.native.path, oldProfile, password, "native")
-      starts.push({ pid: native.child.pid, pgid: native.child.pid, startticks: native.start })
+      lifecycles.push(native.receipt)
       const nativeState = await sessionStates(native, [active.id, epoch.id, archived.id, restored.id])
       expect(nativeState).toEqual(oldState)
       const nativeJournal = await readJournal(oldProfile, [epoch.id, archived.id, restored.id])
@@ -82,7 +147,7 @@ test.skipIf(!manifestPath && !required)(
       await rm(oldProfile, { recursive: true, force: true })
       await copyProfile(preupgrade, oldProfile)
       old = await startServer(manifest.old_reference.path, oldProfile, password, "rollback")
-      starts.push({ pid: old.child.pid, pgid: old.child.pid, startticks: old.start })
+      lifecycles.push(old.receipt)
       expect(await sessionStates(old, [active.id, epoch.id, archived.id, restored.id])).toEqual(oldState)
       await stopServer(old)
       old = undefined
@@ -93,16 +158,30 @@ test.skipIf(!manifestPath && !required)(
       expect(await ownedProcessIDs(root)).toEqual([])
       expect(await sha256(manifest.old_reference.path)).toBe(manifest.old_reference.sha256)
       expect(await inputEntries(path.dirname(manifest.old_reference.path))).toEqual(oldInput)
-      await mkdir(paths.evidenceRoot, { recursive: true, mode: 0o700 })
+      const receiptRoot = path.join(paths.evidenceRoot, semanticOutcome === "exception" ? "failed" : "accepted")
+      const receipt = path.join(receiptRoot, `shin-compiled-fixture-${path.basename(root)}.json`)
+      await mkdir(receiptRoot, { recursive: true, mode: 0o700 })
       await writeFile(
         receipt,
         JSON.stringify({
-          native_sha256: manifest.native.sha256,
-          old_sha256: manifest.old_reference.sha256,
+          binary_provenance: {
+            native: {
+              sha256: manifest.native.sha256,
+              source_commit: manifest.source.commit,
+              source_tree: manifest.source.tree,
+              reported_version: manifest.native.reported_version,
+            },
+            old_reference: {
+              sha256: manifest.old_reference.sha256,
+              source_commit: manifest.old_reference.source_commit,
+              source_tree: manifest.old_reference.source_tree,
+            },
+            production_source_identity_check: manifest.source.production_source_tree_identical,
+          },
+          harness_provenance: await harnessProvenance(manifest),
           outcome: semanticOutcome,
           owned_root: root,
-          starts,
-          process_groups_absent: true,
+          lifecycles,
           proof_sequence: [
             "old-populate",
             "old-stop",
@@ -113,7 +192,6 @@ test.skipIf(!manifestPath && !required)(
             "delete",
           ],
           snapshot_and_rollback: true,
-          source: "d2c112bad4ee61a94e4fbef731ab611aa284f269",
         }),
       )
       await rm(root, { recursive: true, force: false })
@@ -148,8 +226,9 @@ async function readManifest(file: string) {
 }
 
 function isManifest(value: unknown): value is {
-  old_reference: { path: string; sha256: string }
-  native: { path: string; sha256: string }
+  old_reference: { path: string; sha256: string; source_commit: string; source_tree: string }
+  native: { path: string; sha256: string; reported_version: string }
+  source: { commit: string; tree: string; production_source_tree_identical: boolean }
 } {
   if (typeof value !== "object" || value === null) return false
   const record = value as Record<string, unknown>
@@ -161,7 +240,15 @@ function isManifest(value: unknown): value is {
     typeof record.native === "object" &&
     record.native !== null &&
     typeof (record.native as Record<string, unknown>).path === "string" &&
-    typeof (record.native as Record<string, unknown>).sha256 === "string"
+    typeof (record.native as Record<string, unknown>).sha256 === "string" &&
+    typeof (record.native as Record<string, unknown>).reported_version === "string" &&
+    typeof (record.old_reference as Record<string, unknown>).source_commit === "string" &&
+    typeof (record.old_reference as Record<string, unknown>).source_tree === "string" &&
+    typeof record.source === "object" &&
+    record.source !== null &&
+    typeof (record.source as Record<string, unknown>).commit === "string" &&
+    typeof (record.source as Record<string, unknown>).tree === "string" &&
+    typeof (record.source as Record<string, unknown>).production_source_tree_identical === "boolean"
   )
 }
 
@@ -191,27 +278,108 @@ async function inputEntries(root: string): Promise<string[]> {
   return entries.sort()
 }
 
-type Server = { child: Bun.Subprocess; origin: string; password: string; profile: string; start: string }
+type ProcessIdentity = { pid: number; pgid: number; sid: number; start: string }
+type LifecycleReceipt = {
+  label: string
+  leader: ProcessIdentity
+  runner_groups: number[]
+  stabilization_samples: ProcessIdentity[]
+  members_before_term: ProcessIdentity[]
+  signals: string[]
+  waits: Array<{ signal: string; outcome: "empty" | "timed-out" }>
+  final_members: ProcessIdentity[]
+}
+type OwnedProcess = { child: Bun.Subprocess; ownership: ProcessIdentity; receipt: LifecycleReceipt }
+type Server = OwnedProcess & { origin: string; password: string; profile: string }
+type OwnershipFailure = Error & { child: Bun.Subprocess; receipt: LifecycleReceipt; actual: ProcessIdentity }
 
 async function startServer(binary: string, profile: string, password: string, label: string): Promise<Server> {
-  const child = Bun.spawn([binary, "serve", "--hostname", "127.0.0.1", "--port", "0"], {
+  const process = await startOwnedProcess([binary, "serve", "--hostname", "127.0.0.1", "--port", "0"], {
     cwd: path.join(profile, "workspace"),
-    detached: true,
     env: childEnvironment(profile, password),
+    label,
+  })
+  const output = await announcedOrigin(process.child, label)
+  const origin = new URL(output)
+  if (origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" || !origin.port)
+    throw new Error(`${label} announced non-loopback origin`)
+  const server = { ...process, origin: origin.origin, password, profile }
+  await health(server, label)
+  return server
+}
+
+async function startOwnedProcess(
+  command: string[],
+  options: {
+    cwd: string
+    env: Record<string, string>
+    label: string
+    observe?: (identity: ProcessIdentity, sample: number) => ProcessIdentity
+  },
+): Promise<OwnedProcess> {
+  const runnerGroups = await ancestorGroups()
+  await capabilityPreflight(runnerGroups)
+  const child = Bun.spawn(command, {
+    cwd: options.cwd,
+    detached: true,
+    env: options.env,
     stdout: "pipe",
     stderr: "pipe",
   })
   if (child.stderr instanceof ReadableStream) void new Response(child.stderr).text()
-  if (!child.pid) throw new Error(`${label} server had no pid`)
-  const start = await processIdentity(child.pid)
-  if (!start || start.pgid !== child.pid) throw new Error(`${label} server did not establish an owned process group`)
-  const output = await announcedOrigin(child, label)
-  const origin = new URL(output)
-  if (origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" || !origin.port)
-    throw new Error(`${label} announced non-loopback origin`)
-  const server = { child, origin: origin.origin, password, profile, start: start.start }
-  await health(server, label)
-  return server
+  if (!child.pid) throw new Error(`${options.label} process had no pid`)
+  const samples: ProcessIdentity[] = []
+  for (let sample = 0; sample < 3; sample++) {
+    const observed = await processIdentity(child.pid)
+    if (!observed) throw new Error(`${options.label} leader exited before ownership stabilization`)
+    samples.push(options.observe?.(observed, sample) ?? observed)
+    if (sample < 2) await Bun.sleep(20)
+  }
+  const receipt: LifecycleReceipt = {
+    label: options.label,
+    leader: samples[0]!,
+    runner_groups: runnerGroups,
+    stabilization_samples: samples,
+    members_before_term: [],
+    signals: [],
+    waits: [],
+    final_members: [],
+  }
+  try {
+    const ownership = requireStableOwnership(child.pid, samples, runnerGroups, options.label)
+    return {
+      child,
+      ownership,
+      receipt: { ...receipt, leader: ownership },
+    }
+  } catch (error) {
+    const actual = await processIdentity(child.pid)
+    if (!actual) throw error
+    Object.assign(error as Error, { child, receipt, actual })
+    throw error
+  }
+}
+
+async function capabilityPreflight(runnerGroups: number[]) {
+  if (process.platform !== "linux")
+    throw new Error("compiled lifecycle fixture requires Linux /proc process inspection")
+  const self = await processIdentity(process.pid)
+  if (!self || runnerGroups.length === 0 || !Number.isInteger(self.sid))
+    throw new Error("compiled lifecycle fixture cannot establish process-group inspection capability")
+}
+
+function requireStableOwnership(pid: number, samples: ProcessIdentity[], runnerGroups: number[], label: string) {
+  const first = samples[0]
+  if (
+    !first ||
+    samples.length !== 3 ||
+    samples.some(
+      (sample) => sample.pid !== pid || sample.pgid !== pid || sample.sid !== pid || sample.start !== first.start,
+    ) ||
+    runnerGroups.includes(pid)
+  )
+    throw new Error(`${label} process failed owned session/process-group stabilization`)
+  return first
 }
 
 function childEnvironment(profile: string, password: string) {
@@ -229,6 +397,21 @@ function childEnvironment(profile: string, password: string) {
     XDG_DATA_HOME: path.join(profile, "data"),
     XDG_RUNTIME_DIR: path.join(profile, "runtime"),
     XDG_STATE_HOME: path.join(profile, "state"),
+  }
+}
+
+async function adversarialRoot() {
+  const base = path.resolve(import.meta.dir, "../.debug/compiled-fixture-lifecycle")
+  await mkdir(base, { recursive: true, mode: 0o700 })
+  return createRunRoot(base)
+}
+
+function syntheticEnvironment(root: string) {
+  return {
+    HOME: root,
+    LANG: "C.UTF-8",
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    TMPDIR: root,
   }
 }
 
@@ -327,22 +510,62 @@ async function readJournal(profile: string, sessionIDs: string[]) {
   )
 }
 
-async function stopServer(server: Server | undefined) {
-  if (!server || server.child.exitCode !== null) return
-  const before = await processIdentity(server.child.pid)
-  if (!before || before.pgid !== server.child.pid || before.start !== server.start)
-    throw new Error("refusing to signal an unverified process group")
-  process.kill(-server.child.pid, "SIGTERM")
-  if (!(await exitsWithin(server.child, 5_000))) process.kill(-server.child.pid, "SIGKILL")
-  if (!(await exitsWithin(server.child, 5_000))) throw new Error("owned server did not reap after SIGKILL")
-  expect(await groupProcessIDs(server.child.pid)).toEqual([])
+async function stopServer(server: OwnedProcess | undefined) {
+  if (!server) return
+  const before = await groupMembers(server.ownership.pgid)
+  server.receipt.members_before_term = before
+  assertOwnedGroup(server, before)
+  if (before.length > 0) {
+    process.kill(-server.ownership.pgid, "SIGTERM")
+    server.receipt.signals.push("SIGTERM")
+  }
+  const afterTerm = await waitForEmptyGroup(server.ownership.pgid, 500)
+  server.receipt.waits.push({ signal: "SIGTERM", outcome: afterTerm.length === 0 ? "empty" : "timed-out" })
+  if (afterTerm.length > 0) {
+    assertOwnedGroup(server, afterTerm)
+    process.kill(-server.ownership.pgid, "SIGKILL")
+    server.receipt.signals.push("SIGKILL")
+  }
+  const final = await waitForEmptyGroup(server.ownership.pgid, 500)
+  server.receipt.waits.push({ signal: "SIGKILL", outcome: final.length === 0 ? "empty" : "timed-out" })
+  server.receipt.final_members = final
+  if (final.length > 0) throw new Error("owned process group did not become empty after bounded cleanup")
+  await exitsWithin(server.child, 500)
+}
+
+function assertOwnedGroup(server: OwnedProcess, members: ProcessIdentity[]) {
+  const leader = members.find((member) => member.pid === server.ownership.pid)
+  if (leader && !sameIdentity(leader, server.ownership))
+    throw new Error("refusing to signal a recycled process-group leader")
+  if (
+    members.some(
+      (member) =>
+        member.pgid !== server.ownership.pgid ||
+        member.sid !== server.ownership.sid ||
+        BigInt(member.start) < BigInt(server.ownership.start),
+    )
+  )
+    throw new Error("refusing to signal a process group whose membership is not continuously owned")
+}
+
+function sameIdentity(left: ProcessIdentity, right: ProcessIdentity) {
+  return left.pid === right.pid && left.pgid === right.pgid && left.sid === right.sid && left.start === right.start
+}
+
+async function waitForEmptyGroup(pgid: number, milliseconds: number) {
+  const deadline = Date.now() + milliseconds
+  for (;;) {
+    const members = await groupMembers(pgid)
+    if (members.length === 0 || Date.now() >= deadline) return members
+    await Bun.sleep(20)
+  }
 }
 
 async function exitsWithin(child: Bun.Subprocess, milliseconds: number) {
   return Promise.race([child.exited.then(() => true), Bun.sleep(milliseconds).then(() => false)])
 }
 
-async function processIdentity(pid: number) {
+async function processIdentity(pid: number): Promise<ProcessIdentity | undefined> {
   const source = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => undefined)
   if (!source) return undefined
   const close = source.lastIndexOf(")")
@@ -350,15 +573,94 @@ async function processIdentity(pid: number) {
     .slice(close + 2)
     .trim()
     .split(" ")
-  return { pgid: Number(fields[2]), start: fields[19] }
+  if (fields.length < 20 || !/^\d+$/.test(fields[19] ?? "")) return undefined
+  return { pid, pgid: Number(fields[2]), sid: Number(fields[3]), start: fields[19] }
 }
 
-async function groupProcessIDs(pgid: number) {
+async function groupMembers(pgid: number) {
+  return scanGroupMembers(pgid)
+}
+
+async function scanGroupMembers(pgid: number) {
   const entries = await readdir("/proc")
   const identities = await Promise.all(
     entries.filter((entry) => /^\d+$/.test(entry)).map((entry) => processIdentity(Number(entry))),
   )
-  return identities.filter((identity) => identity?.pgid === pgid)
+  return identities.filter((identity): identity is ProcessIdentity => identity?.pgid === pgid)
+}
+
+async function cleanupSyntheticProcess(owned: OwnedProcess) {
+  const members = await scanGroupMembers(owned.receipt.leader.pgid)
+  if (members.length === 0) return
+  const leader = members.find((member) => member.pid === owned.receipt.leader.pid)
+  if (leader && !sameIdentity(leader, owned.receipt.leader))
+    throw new Error("synthetic cleanup refused recycled leader")
+  if (
+    members.some(
+      (member) => member.sid !== owned.receipt.leader.sid || BigInt(member.start) < BigInt(owned.receipt.leader.start),
+    )
+  )
+    throw new Error("synthetic cleanup refused unowned group")
+  process.kill(-owned.receipt.leader.pgid, "SIGKILL")
+  expect(await waitForEmptyGroupDirect(owned.receipt.leader.pgid, 500)).toEqual([])
+}
+
+async function waitForEmptyGroupDirect(pgid: number, milliseconds: number) {
+  const deadline = Date.now() + milliseconds
+  for (;;) {
+    const members = await scanGroupMembers(pgid)
+    if (members.length === 0 || Date.now() >= deadline) return members
+    await Bun.sleep(20)
+  }
+}
+
+async function ancestorGroups() {
+  const groups: number[] = []
+  let pid = process.pid
+  for (let depth = 0; depth < 32; depth++) {
+    const source = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => undefined)
+    if (!source) break
+    const close = source.lastIndexOf(")")
+    const fields = source
+      .slice(close + 2)
+      .trim()
+      .split(" ")
+    const pgid = Number(fields[2])
+    const parent = Number(fields[1])
+    if (!Number.isInteger(pgid) || !Number.isInteger(parent)) break
+    groups.push(pgid)
+    if (parent <= 1 || parent === pid) break
+    pid = parent
+  }
+  return [...new Set(groups)]
+}
+
+async function harnessProvenance(manifest: Awaited<ReturnType<typeof readManifest>>) {
+  const cwd = path.resolve(import.meta.dir, "../../..")
+  const [head, tree, status] = await Promise.all([
+    gitOutput(cwd, ["rev-parse", "HEAD"]),
+    gitOutput(cwd, ["rev-parse", "HEAD^{tree}"]),
+    gitOutput(cwd, ["status", "--porcelain", "--untracked-files=no"]),
+  ])
+  return {
+    commit: head,
+    tree,
+    dirty: status !== "",
+    command: ["bun", "--no-env-file", "run", "script/test.ts", "session-archive-compiled-fixture.test.ts"],
+    env_names: ["OPENCODE_COMPILED_FIXTURE_MANIFEST", "OPENCODE_COMPILED_FIXTURE_REQUIRED", "PATH"],
+    differs_from_binary_source: head !== manifest.source.commit,
+    test_only_commits_do_not_change_production_source: manifest.source.production_source_tree_identical,
+  }
+}
+
+async function gitOutput(cwd: string, args: string[]) {
+  const child = Bun.spawn(["git", "-C", cwd, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { PATH: process.env.PATH ?? "" },
+  })
+  if ((await child.exited) !== 0) throw new Error(`git ${args[0]} failed while capturing harness provenance`)
+  return (await new Response(child.stdout).text()).trim()
 }
 
 async function ownedProcessIDs(root: string) {
