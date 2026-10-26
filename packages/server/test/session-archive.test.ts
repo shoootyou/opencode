@@ -89,6 +89,39 @@ it.live("requires the real decoder to reject legacy and excess root fields befor
   }).pipe(Effect.scoped),
 )
 
+it.live("rejects invalid archived values and non-object roots while preserving the empty-object no-op", () =>
+  Effect.gen(function* () {
+    const handler = yield* ServerFetch.make(options)
+    const session = yield* create(handler)
+    const before = yield* get(handler, session.id)
+    const cases = [
+      { body: JSON.stringify({ title: "must-not-apply", metadata: { changed: true }, archived: null }), status: 400 },
+      { body: JSON.stringify({ title: "must-not-apply", metadata: { changed: true }, archived: 0 }), status: 400 },
+      { body: JSON.stringify({ title: "must-not-apply", metadata: { changed: true }, archived: "true" }), status: 400 },
+      { body: JSON.stringify({}), status: 204 },
+      { body: JSON.stringify([]), status: 400 },
+    ]
+
+    for (const fixture of cases) {
+      const response = yield* update(handler, session.id, fixture.body)
+      expect(response.status).toBe(fixture.status)
+      if (fixture.status === 400) {
+        expect(response.headers.get("content-type")).toContain("application/json")
+        expect(yield* Effect.promise(() => response.json())).toMatchObject({
+          _tag: "InvalidRequestError",
+          kind: "Payload",
+        })
+      }
+      if (fixture.status === 204) expect(yield* text(response)).toBe("")
+      const after = yield* get(handler, session.id)
+      expect(after.title).toBe(before.title)
+      expect(after.metadata).toEqual(before.metadata)
+      expect(after.time.archived).toEqual(before.time.archived)
+      expect(after.time.updated).toEqual(before.time.updated)
+    }
+  }).pipe(Effect.scoped),
+)
+
 it.live("retains native media and malformed-payload HTTP contracts without a raw handler", () =>
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make(options)

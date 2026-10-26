@@ -11,7 +11,7 @@
  *   - A legacy payload sessionID must equal its durable aggregateID.
  */
 import { describe, expect } from "bun:test"
-import { Effect, Exit, Layer, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { eq } from "drizzle-orm"
 import { TestClock } from "effect/testing"
 import { Bus } from "@opencode/core/bus"
@@ -97,6 +97,16 @@ const seed = (
   })
 
 const nativeType = (archived: boolean) => `session.${archived ? "archived" : "unarchived"}.1`
+
+const expectTypedInvalidDurableEvent = (exit: Exit.Exit<unknown, unknown>, type: string) => {
+  expect(Exit.isFailure(exit)).toBe(true)
+  if (!Exit.isFailure(exit)) return
+  expect(exit.cause.reasons.some(Cause.isDieReason)).toBe(false)
+  const failures = exit.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)
+  expect(failures).toHaveLength(1)
+  expect(failures[0]).toMatchObject({ _tag: "Bus.InvalidDurableEvent", type })
+  return failures[0] as Bus.InvalidDurableEventError
+}
 
 describe("v2.1.4 archive compatibility contract", () => {
   it.effect("characterizes legacy replay as preserving its journal identity and payload archive time", () =>
@@ -190,6 +200,146 @@ describe("v2.1.4 archive compatibility contract", () => {
             .where(eq(SessionTable.id, otherID))
             .get(),
         ).toEqual({ archived: null, updated: 9 })
+      }),
+  )
+
+  it.effect(
+    "fails malformed recognized legacy replay in the typed error channel without retaining payload values",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* seed()
+        const bus = yield* Bus.Service
+        const malformed = [
+          { id: "evt_v214_bad_archived", data: { sessionID, archived: "not-a-number" }, marker: "not-a-number" },
+          { id: "evt_v214_missing_session", data: { archived: 0 }, marker: "evt_v214_missing_session" },
+        ] as const
+
+        for (const event of malformed) {
+          const exit = yield* bus
+            .replay({
+              id: Event.ID.make(event.id),
+              aggregateID: sessionID,
+              seq: 0,
+              created: 1234,
+              type: "session.archive.changed.1",
+              data: event.data as Record<string, unknown>,
+            })
+            .pipe(Effect.exit)
+          const error = expectTypedInvalidDurableEvent(exit, "session.archive.changed")
+          expect(error?.message).not.toContain(event.marker)
+          expect(yield* db.select().from(EventTable).all()).toEqual([])
+          expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+        }
+        expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+          archived: null,
+        })
+      }),
+  )
+
+  it.effect("fails a malformed recognized legacy log page in the typed error channel before a synced marker", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 0 }).run()
+      yield* db
+        .insert(EventTable)
+        .values({
+          id: Event.ID.make("evt_v214_bad_log"),
+          aggregate_id: sessionID,
+          seq: 0,
+          created: 1234,
+          type: "session.archive.changed.1",
+          data: { sessionID, archived: "invalid-log-value" },
+        })
+        .run()
+
+      const exit = yield* Stream.runCollect((yield* Bus.Service).log({ aggregateID: sessionID })).pipe(Effect.exit)
+      const error = expectTypedInvalidDurableEvent(exit, "session.archive.changed")
+      expect(error?.message).not.toContain("invalid-log-value")
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(1)
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([
+        { aggregate_id: sessionID, seq: 0, owner_id: null },
+      ])
+    }),
+  )
+
+  it.effect(
+    "requires legacy replay ownership to fail without changing durable state while ordinary replay remains non-strict",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* seed()
+        const bus = yield* Bus.Service
+        const first = {
+          id: Event.ID.make("evt_v214_owned_0"),
+          aggregateID: sessionID,
+          seq: 0,
+          created: 10,
+          type: "session.archive.changed.1",
+          data: { sessionID, archived: 0 },
+        }
+        yield* bus.replay(first, { ownerID: "owner-a" })
+        const before = yield* db.select().from(EventTable).all()
+        const sequence = yield* db.select().from(EventSequenceTable).all()
+
+        for (const replay of [
+          { ...first, id: Event.ID.make("evt_v214_owned_1"), seq: 1, created: 11, data: { sessionID, archived: null } },
+          first,
+          {
+            ...first,
+            id: Event.ID.make("evt_v214_owned_missing"),
+            seq: 1,
+            created: 12,
+            data: { sessionID, archived: null },
+          },
+        ]) {
+          const options =
+            replay.id === first.id
+              ? { ownerID: "owner-b" }
+              : replay.id === Event.ID.make("evt_v214_owned_missing")
+                ? undefined
+                : { ownerID: "owner-b" }
+          const exit = yield* bus.replay(replay, options).pipe(Effect.exit)
+          expectTypedInvalidDurableEvent(exit, "session.archive.changed")
+          expect(yield* db.select().from(EventTable).all()).toEqual(before)
+          expect(yield* db.select().from(EventSequenceTable).all()).toEqual(sequence)
+          expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+            archived: 0,
+          })
+        }
+
+        yield* bus.replay(
+          {
+            ...first,
+            id: Event.ID.make("evt_v214_owned_same"),
+            seq: 1,
+            created: 13,
+            data: { sessionID, archived: null },
+          },
+          { ownerID: "owner-a" },
+        )
+        expect(yield* db.select().from(EventTable).all()).toHaveLength(2)
+
+        const ordinary = {
+          id: Event.ID.make("evt_v214_ordinary_0"),
+          aggregateID: otherID,
+          seq: 0,
+          created: 20,
+          type: "session.renamed.1",
+          data: { sessionID: otherID, title: "ordinary" },
+        }
+        yield* bus.replay(ordinary, { ownerID: "owner-a" })
+        const ordinaryExit = yield* bus
+          .replay(
+            {
+              ...ordinary,
+              id: Event.ID.make("evt_v214_ordinary_1"),
+              seq: 1,
+              created: 21,
+              data: { sessionID: otherID, title: "ignored" },
+            },
+            { ownerID: "owner-b" },
+          )
+          .pipe(Effect.exit)
+        expect(Exit.isSuccess(ordinaryExit)).toBe(true)
       }),
   )
 
