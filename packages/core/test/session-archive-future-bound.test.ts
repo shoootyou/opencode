@@ -446,7 +446,11 @@ it.effect("refuses archive at 1,023 future rows while an archived 1,024-row hist
         })),
       )
       .run()
-    expectLimit(yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit), "retention")
+    const active = yield* Session.Service
+    expectLimit(yield* active.archive(sessionID).pipe(Effect.exit), "retention")
+    const activeNoop = yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, sessionID)).all()
+    yield* active.unarchive(sessionID)
+    expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, sessionID)).all()).toEqual(activeNoop)
 
     const archivedID = SessionID.make("ses_archive_future_retention_archived")
     yield* seed(true, archivedID)
