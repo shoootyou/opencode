@@ -10,6 +10,8 @@
  */
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { TestClock } from "effect/testing"
+import { eq } from "drizzle-orm"
 import { Bus } from "@opencode/core/bus"
 import { Database } from "@opencode/core/database/database"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
@@ -29,6 +31,7 @@ import { SessionStore } from "@opencode/core/session/store"
 import { FSUtil } from "@opencode/util/fs-util"
 import { EventSequenceTable, EventTable } from "@opencode/core/event/sql"
 import { SessionTable } from "@opencode/core/session/sql"
+import { Event } from "@opencode/schema/event"
 import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { SessionID } from "@opencode/schema/session-id"
@@ -92,7 +95,7 @@ const seed = (archived: number | null = null) =>
     return db
   })
 
-const nativeSessionWithPublishGate = (gate: (archived: boolean) => Effect.Effect<void>) =>
+const nativeSessionWithPublishGate = (gate: (archived: boolean, real: Bus.Interface) => Effect.Effect<void>) =>
   Effect.gen(function* () {
     const real = yield* Bus.Service
     const database = yield* Database.Service
@@ -106,7 +109,7 @@ const nativeSessionWithPublishGate = (gate: (archived: boolean) => Effect.Effect
         const archived = definition.type === SessionEvent.Archived.type
         const unarchived = definition.type === SessionEvent.Unarchived.type
         if (!archived && !unarchived) return real.publish(definition, data, options)
-        return gate(archived).pipe(Effect.andThen(real.publish(definition, data, options)))
+        return gate(archived, real).pipe(Effect.andThen(real.publish(definition, data, options)))
       },
     }
     return yield* make().pipe(
@@ -183,5 +186,72 @@ describe("native session archive commit admission", () => {
         expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
         expect(notifications).toBe(0)
       }),
+  )
+
+  it.effect("does not recreate a session deleted between native archive observation and commit", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      let deleted = false
+      const sessions = yield* nativeSessionWithPublishGate((_archived, real) => {
+        if (deleted) return Effect.void
+        deleted = true
+        return real.publish(SessionEvent.Deleted, { sessionID }).pipe(Effect.asVoid)
+      })
+
+      const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([])
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+    }),
+  )
+
+  it.effect("retries native archive exactly eight times after its initial stale commit attempt", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      let attempts = 0
+      const sessions = yield* nativeSessionWithPublishGate((_archived, real) =>
+        Effect.sync(() => ++attempts).pipe(
+          Effect.andThen(real.publish(SessionEvent.Renamed, { sessionID, title: `stale-${attempts}` })),
+          Effect.asVoid,
+        ),
+      )
+
+      const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(attempts).toBe(9)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: null,
+      })
+    }),
+  )
+
+  it.effect("counts future-dated native archive history against the rolling admission budget", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const now = 3_000_000
+      yield* TestClock.setTime(now)
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 5 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 6 }, (_, seq) => ({
+            id: Event.ID.make(`evt_archive_future_${seq}`),
+            aggregate_id: sessionID,
+            seq,
+            created: now + 1,
+            type: `session.${seq % 2 === 0 ? "archived" : "unarchived"}.1`,
+            data: { sessionID },
+          })),
+        )
+        .run()
+
+      const result = yield* (yield* Session.Service).archive(sessionID).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(yield* db.select().from(EventTable).all()).toHaveLength(6)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: null,
+      })
+    }),
   )
 })
