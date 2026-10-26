@@ -262,6 +262,13 @@
         }
       }
     },
+    "background": {
+      "action": {
+        "primary": {
+          "$focused": "$hue.interactive.100"
+        }
+      }
+    },
     "border": {
       "base": "#b8b8b8"
     },

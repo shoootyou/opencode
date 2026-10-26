@@ -661,10 +661,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           title: actionTitle(item),
           key: item.label,
           disabled: isActionDisabled(item),
-          color:
-            !props.locked && actionItems().indexOf(item) === focusedAction()
-              ? theme.text.action.primary.focused
-              : undefined,
+          focused: !props.locked && actionItems().indexOf(item) === focusedAction(),
           onTrigger: () => trigger(item),
         },
       }
@@ -752,7 +749,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               </>
             }
           >
-            <DialogHeader titleView={searchInput()} gap={2} onClose={props.onCancel} />
+            <DialogHeader
+              titleView={
+                props.titleView ? (
+                  <box flexDirection="row" flexGrow={1} gap={2}>
+                    {props.titleView}
+                    <box flexGrow={1}>{searchInput()}</box>
+                  </box>
+                ) : (
+                  searchInput()
+                )
+              }
+              gap={2}
+              onClose={props.onCancel}
+            />
           </Show>
         </box>
       }
@@ -825,7 +835,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                   </Show>
                   <For each={options}>
                     {(option) => {
-                      const active = createMemo(() => !props.locked && isDeepEqual(option.value, selected()?.value))
+                      const active = createMemo(
+                        () => !props.locked && focusedAction() === undefined && isDeepEqual(option.value, selected()?.value),
+                      )
                       const current = createMemo(() => isDeepEqual(option.value, props.current))
                       return (
                         <box
