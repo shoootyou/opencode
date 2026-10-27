@@ -462,7 +462,7 @@ export function configured(options?: Options) {
                       }),
                     { behavior: "immediate" },
                   )
-                  .pipe(Effect.orDie)
+                  .pipe(Effect.catchTags({ "Bus.InvalidDurableEvent": Effect.fail }, Effect.die))
                 if (committed) {
                   committed.route()
                   yield* Effect.forEach(
