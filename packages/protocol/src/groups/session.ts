@@ -672,7 +672,9 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           follow: BooleanFromString.pipe(Schema.optional),
         },
         success: HttpApiSchema.StreamSse({
-          data: Schema.Union([SessionEvent.Durable, EventLog.Synced]).annotate({ identifier: "SessionLogItem" }),
+          data: Schema.Union([SessionEvent.Durable, EventLog.Synced, EventLog.Error]).annotate({
+            identifier: "SessionLogItem",
+          }),
         }),
         error: SessionNotFoundError,
       }).annotateMerge(
@@ -680,7 +682,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           identifier: "session.log",
           summary: "Read the session log",
           description:
-            "Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true.",
+            'Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true. A terminal {"type":"log.error","reason":"Session log unavailable"} item closes the stream without a later log.synced marker.',
         }),
       ),
     )

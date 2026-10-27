@@ -1,3 +1,4 @@
+import { Bus } from "@opencode/core/bus"
 import { Session } from "@opencode/core/session"
 import { SessionStats } from "@opencode/core/session/stats"
 import { SessionTitle } from "@opencode/core/session/title"
@@ -23,6 +24,7 @@ import {
   SkillNotFoundError,
 } from "@opencode/protocol/errors"
 import { AbsolutePath } from "@opencode/core/schema"
+import { EventLog } from "@opencode/schema/event-log"
 import { locationErrors } from "../location"
 import { failedMessageDecode, failedSnapshot, missingMessage, missingSession } from "./session-error"
 
@@ -602,7 +604,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           yield* session.get(ctx.params.sessionID).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
           return session
             .log({ sessionID: ctx.params.sessionID, after: ctx.query.after, follow: ctx.query.follow })
-            .pipe(Stream.orDie)
+            .pipe(
+              Stream.catchTags({
+                "Bus.InvalidDurableEvent": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+                "Session.NotFoundError": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+              }),
+            )
         }),
       )
       .handle(
