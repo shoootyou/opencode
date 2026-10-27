@@ -476,23 +476,79 @@ it.effect("refuses archive at 1,023 future rows while an archived 1,024-row hist
   }),
 )
 
-it.effect(
-  "preserves future envelopes through duplicate replay and log watermark while no-op commands bypass poisoned admission",
-  () =>
-    Effect.gen(function* () {
-      const db = yield* seed(true)
-      yield* TestClock.setTime(T)
-      const bus = yield* Bus.Service
-      const first = event("evt_future_duplicate", 0, future, "session.archived.1")
-      yield* bus.replay(first)
-      yield* bus.replay(first)
-      expect(Exit.isFailure(yield* bus.replay({ ...first, created: future + 1 }).pipe(Effect.exit))).toBe(true)
-      const log = Array.from(yield* Stream.runCollect(bus.log({ aggregateID: sessionID })))
-      expect(log[0]).toMatchObject({ id: first.id, created: future, durable: { seq: 0 } })
-      expect(log.at(-1)).toMatchObject({ type: "log.synced", seq: 0 })
-      yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 1023 }).onConflictDoNothing().run()
-      const before = yield* snapshot(db)
-      yield* (yield* Session.Service).archive(sessionID)
-      expect(yield* snapshot(db)).toEqual(before)
-    }),
+it.effect("preserves future envelopes through duplicate replay and log watermark", () =>
+  Effect.gen(function* () {
+    yield* seed(true)
+    yield* TestClock.setTime(T)
+    const bus = yield* Bus.Service
+    const first = event("evt_future_duplicate", 0, future, "session.archived.1")
+    yield* bus.replay(first)
+    yield* bus.replay(first)
+    expect(Exit.isFailure(yield* bus.replay({ ...first, created: future + 1 }).pipe(Effect.exit))).toBe(true)
+    const log = Array.from(yield* Stream.runCollect(bus.log({ aggregateID: sessionID })))
+    expect(log[0]).toMatchObject({ id: first.id, created: future, durable: { seq: 0 } })
+    expect(log.at(-1)).toMatchObject({ type: "log.synced", seq: 0 })
+  }),
+)
+
+it.effect("bypasses exhausted retention and rate admission only for same-state archive commands", () =>
+  Effect.gen(function* () {
+    const db = yield* seed(true)
+    yield* TestClock.setTime(T)
+    yield* db.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 1022 }).run()
+    yield* db
+      .insert(EventTable)
+      .values(
+        Array.from({ length: 1023 }, (_, seq) => ({
+          id: Event.ID.make(`evt_noop_retention_${seq}`),
+          aggregate_id: sessionID,
+          seq,
+          created: future + seq,
+          type: types[seq % 3],
+          data: types[seq % 3] === "session.archive.changed.1" ? { sessionID, archived: future } : { sessionID },
+        })),
+      )
+      .run()
+    expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, sessionID)).all()).toHaveLength(1023)
+    let notifications = 0
+    yield* (yield* Bus.Service).listen(() => Effect.sync(() => ++notifications))
+    const retentionBefore = yield* snapshot(db)
+    yield* (yield* Session.Service).archive(sessionID)
+    expect(yield* snapshot(db)).toEqual(retentionBefore)
+    expect(notifications).toBe(0)
+
+    const archivedRateID = SessionID.make("ses_archive_noop_rate_archived")
+    const activeRateID = SessionID.make("ses_archive_noop_rate_active")
+    yield* seed(true, archivedRateID)
+    yield* seed(false, activeRateID)
+    for (const id of [archivedRateID, activeRateID]) {
+      yield* db.insert(EventSequenceTable).values({ aggregate_id: id, seq: 5 }).run()
+      yield* db
+        .insert(EventTable)
+        .values(
+          Array.from({ length: 6 }, (_, seq) => ({
+            id: Event.ID.make(`evt_noop_rate_${id}_${seq}`),
+            aggregate_id: id,
+            seq,
+            created: T,
+            type: types[seq % 3],
+            data: types[seq % 3] === "session.archive.changed.1" ? { sessionID: id, archived: T } : { sessionID: id },
+          })),
+        )
+        .run()
+      expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, id)).all()).toHaveLength(6)
+    }
+
+    const session = yield* Session.Service
+    const archivedBefore = yield* snapshot(db)
+    yield* session.archive(archivedRateID)
+    expect(yield* snapshot(db)).toEqual(archivedBefore)
+    expectLimit(yield* session.unarchive(archivedRateID).pipe(Effect.exit), "rate", 60_000)
+
+    const activeBefore = yield* snapshot(db)
+    yield* session.unarchive(activeRateID)
+    expect(yield* snapshot(db)).toEqual(activeBefore)
+    expectLimit(yield* session.archive(activeRateID).pipe(Effect.exit), "rate", 60_000)
+    expect(notifications).toBe(0)
+  }),
 )

@@ -3,6 +3,7 @@
  * @interface Session.archive(sessionID) / Session.unarchive(sessionID): Effect<void>
  * @behavior
  *   - Same-direction concurrent native archive calls commit one transition with one retained event.
+ *   - A stale archive retries after an intervening archive and restore, preserving the final archive transition.
  *   - Native admission rejects mixed archive-family rate and retention overages atomically at the Bus commit boundary.
  * @edge-cases
  *   - A rejected native transaction changes neither projection, sequence, retained rows, nor notifications.
@@ -185,6 +186,56 @@ describe("native session archive commit admission", () => {
           (row) => row.type,
         ),
       ).toEqual(["session.archived.1", "session.unarchived.1"])
+    }),
+  )
+
+  it.effect("preserves the last committed archive/restore transition without losing either caller", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const observedAt = 1_000
+      let first = true
+      let competingTransitionFinished = false
+      let suspendedAttempts = 0
+      yield* TestClock.setTime(observedAt)
+      const sessions = yield* nativeSessionWithPublishGate((archived) => {
+        if (first) {
+          first = false
+          suspendedAttempts++
+          return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+        }
+        if (competingTransitionFinished && archived) suspendedAttempts++
+        return Effect.void
+      })
+
+      const suspended = yield* sessions.forSession(sessionID).archive().pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      yield* sessions.forSession(sessionID).archive()
+      yield* sessions.forSession(sessionID).unarchive()
+      competingTransitionFinished = true
+      yield* TestClock.adjust("1 second")
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(suspended)
+
+      expect(suspendedAttempts).toBe(2)
+      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
+        archived: observedAt + 1_000,
+      })
+      expect(
+        yield* db
+          .select({ seq: EventTable.seq, type: EventTable.type, created: EventTable.created })
+          .from(EventTable)
+          .orderBy(EventTable.seq)
+          .all(),
+      ).toEqual([
+        { seq: 0, type: "session.archived.1", created: observedAt },
+        { seq: 1, type: "session.unarchived.1", created: observedAt },
+        { seq: 2, type: "session.archived.1", created: observedAt + 1_000 },
+      ])
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([
+        { aggregate_id: sessionID, seq: 2, owner_id: null },
+      ])
     }),
   )
 
