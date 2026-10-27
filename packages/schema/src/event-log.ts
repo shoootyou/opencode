@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { Event } from "./event.js"
 import { optional } from "./schema.js"
 
-export const UnavailableReason = "Session log unavailable"
+export const UnavailableReason = "Session log unavailable" as const
 
 /** Non-durable terminal refusal for a session log read. */
 export const Error = Schema.Struct({

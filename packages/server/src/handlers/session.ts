@@ -1,4 +1,3 @@
-import { Bus } from "@opencode/core/bus"
 import { Session } from "@opencode/core/session"
 import { SessionStats } from "@opencode/core/session/stats"
 import { SessionTitle } from "@opencode/core/session/title"
