@@ -131,11 +131,27 @@ test("Shift+Tab activates the default-unbound archived-visibility action without
   await setup.waitForFrame((frame) => frame.includes("Ask anything"))
   setup.mockInput.pressKey("l", { ctrl: true })
   await setup.waitForFrame((frame) => frame.includes("Sessions") && frame.includes("Active root"))
+  try {
+    await setup.waitForFrame((frame) => frame.includes("show archived") && frame.includes("Tab"))
+  } catch {
+    throw new Error(
+      `archive visibility action was not rendered as the default-unbound Tab action: ${setup.captureCharFrame()}`,
+    )
+  }
   setup.mockInput.pressTab({ shift: true })
   setup.mockInput.pressEnter()
-  await setup.waitFor(() => requests.some((url) => url.searchParams.get("archived") === "true"))
-  expect(patches).toEqual([])
-  expect(requests.filter((url) => url.searchParams.get("archived") === "true")).toHaveLength(1)
+  try {
+    await setup.waitFor(() => requests.some((url) => url.searchParams.get("archived") === "true"))
+  } catch {
+    throw new Error(
+      `Shift+Tab/Enter did not request the archived-only list; requests=${requests.map((url) => url.search).join(",")}; frame=${JSON.stringify(setup.captureCharFrame())}`,
+    )
+  }
+  expect(patches, "Shift+Tab/Enter must activate the visibility action instead of the selected row").toEqual([])
+  expect(
+    requests.filter((url) => url.searchParams.get("archived") === "true"),
+    "Shift+Tab/Enter must request exactly one native archived=true page",
+  ).toHaveLength(1)
 })
 
 test.each(["dark", "light"] as const)("renders an AA focused footer action in %s mode", async (mode) => {

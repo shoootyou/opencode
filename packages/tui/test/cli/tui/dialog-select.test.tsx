@@ -1,3 +1,13 @@
+/**
+ * @spec-handoff
+ * @interface DialogSelect<T>({ actions }): dialog selection and footer actions
+ * @behavior
+ *   - Tab and Shift+Tab preserve row selection when every footer action is key-bound.
+ *   - Tab focuses a visible showWhenUnbound action so Enter invokes that action, not the selected row.
+ * @edge-cases
+ *   - A bound action without showWhenUnbound never captures Tab traversal.
+ * @see ../../../src/ui/dialog-select.tsx
+ */
 /** @jsxImportSource @opentui/solid */
 import { InputRenderable, type RGBA } from "@opentui/core"
 import { testRender } from "@opentui/solid"
@@ -23,6 +33,10 @@ async function renderSelect(
   onGlobal: () => void,
   onRow: (option: DialogSelectOption<string>) => void,
   current?: string,
+  onSelect?: (option: DialogSelectOption<string>) => void,
+  showGlobalWhenUnbound = false,
+  includeRowAction = true,
+  globalCommand = "dialog.move_session.new",
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
@@ -46,18 +60,24 @@ async function renderSelect(
           options={options}
           current={current}
           actions={[
+            ...(includeRowAction
+              ? [
+                  {
+                    command: "dialog.move_session.delete",
+                    title: "delete",
+                    onTrigger: onRow,
+                  },
+                ]
+              : []),
             {
-              command: "dialog.move_session.delete",
-              title: "delete",
-              onTrigger: onRow,
-            },
-            {
-              command: "dialog.move_session.new",
+              command: globalCommand,
               title: "new",
               selection: "none",
               onTrigger: onGlobal,
+              showWhenUnbound: showGlobalWhenUnbound,
             },
           ]}
+          onSelect={onSelect}
         />
       )
     }
@@ -437,6 +457,65 @@ test("row actions receive the selected option", async () => {
     app.mockInput.pressKey("d", { ctrl: true })
 
     expect(rows).toEqual(["alpha"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Tab and Shift+Tab leave a key-bound footer action unfocused and select the row", async () => {
+  for (const reverse of [false, true]) {
+    await using tmp = await tmpdir()
+    const actions: string[] = []
+    const selected: string[] = []
+    const app = await renderSelect(
+      tmp.path,
+      [{ title: "Alpha", value: "alpha" }],
+      () => actions.push("new"),
+      () => actions.push("delete"),
+      undefined,
+      (option) => selected.push(option.value),
+    )
+
+    try {
+      await app.waitForFrame((frame) => frame.includes("delete ctrl+d"))
+      app.mockInput.pressTab({ shift: reverse })
+      app.mockInput.pressEnter()
+      expect(actions, `${reverse ? "Shift+Tab" : "Tab"} must not focus or trigger the key-bound delete action`).toEqual(
+        [],
+      )
+      expect(selected, `${reverse ? "Shift+Tab" : "Tab"} must leave Enter bound to the selected row`).toEqual(["alpha"])
+    } finally {
+      app.renderer.destroy()
+    }
+  }
+})
+
+test("Tab focuses a visible showWhenUnbound footer action instead of selecting the row", async () => {
+  await using tmp = await tmpdir()
+  const actions: string[] = []
+  const selected: string[] = []
+  const app = await renderSelect(
+    tmp.path,
+    [{ title: "Alpha", value: "alpha" }],
+    () => actions.push("new"),
+    () => actions.push("delete"),
+    undefined,
+    (option) => selected.push(option.value),
+    true,
+    false,
+    "test.default-unbound-action",
+  )
+
+  try {
+    try {
+      await app.waitForFrame((frame) => frame.includes("new Tab"))
+    } catch {
+      throw new Error(`showWhenUnbound action did not render with the Tab fallback: ${app.captureCharFrame()}`)
+    }
+    app.mockInput.pressTab()
+    app.mockInput.pressEnter()
+    expect(actions, "Tab must focus and activate the visible default-unbound footer action").toEqual(["new"])
+    expect(selected, "Tab/Enter must not submit the selected row when a default-unbound action is focused").toEqual([])
   } finally {
     app.renderer.destroy()
   }
