@@ -6,6 +6,7 @@
  *   - Native writes retain session.archived.1/session.unarchived.1; legacy session.archive.changed.1 remains replayable unchanged.
  *   - List archived:false returns active, true returns archived, and omission returns both.
  *   - Admission counts native and legacy retained archive transitions together.
+ *   - A legacy owner conflict discovered only after replay's unlocked precheck stays a typed refusal.
  * @edge-cases
  *   - Legacy payload archive time 0 is distinct from envelope creation time, and null restores.
  *   - A legacy payload sessionID must equal its durable aggregateID.
@@ -33,10 +34,41 @@ import { Event } from "@opencode/schema/event"
 import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { SessionID } from "@opencode/schema/session-id"
+import { Global } from "@opencode/util/global"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { offlineModels } from "./fixture/models"
 import { testEffect } from "./lib/effect"
 import { globalProjectNode } from "./lib/project"
+
+let afterReplayOwnerRead: (() => Effect.Effect<void, unknown>) | undefined
+
+const databaseWithReplayOwnerReadHook = makeGlobalNode({
+  service: Database.Service,
+  deps: [Global.node],
+  layer: Layer.effect(
+    Database.Service,
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const wrap = (target: object): object =>
+        new Proxy(target, {
+          get(target, property) {
+            const value = (target as Record<PropertyKey, unknown>)[property]
+            if (typeof value !== "function") return value
+            return (...args: ReadonlyArray<unknown>) => {
+              const result = value.apply(target, args)
+              if (property !== "get") return result && typeof result === "object" ? wrap(result) : result
+              const hook = afterReplayOwnerRead
+              if (!hook) return result
+              afterReplayOwnerRead = undefined
+              return (result as Effect.Effect<unknown>).pipe(Effect.tap(hook))
+            }
+          },
+        })
+      return Database.Service.of({ db: wrap(database.db) as typeof database.db })
+    }),
+  ).pipe(Layer.provide(Database.layer())),
+})
 
 const it = testEffect(
   AppNodeBuilder.build(
@@ -51,6 +83,7 @@ const it = testEffect(
       LocationServiceMap.node,
     ]),
     [
+      Database.node.replace(databaseWithReplayOwnerReadHook),
       Bus.node.replace(Bus.configured()),
       CoreProject.node.replace(globalProjectNode),
       SessionExecution.node.replace(SessionExecution.noopLayer),
@@ -98,6 +131,18 @@ const seed = (
 
 const nativeType = (archived: boolean) => `session.${archived ? "archived" : "unarchived"}.1`
 
+const durableState = (db: ReturnType<typeof Database.Service.of>["db"]) =>
+  Effect.all({
+    projection: db
+      .select({ archived: SessionTable.time_archived, updated: SessionTable.time_updated })
+      .from(SessionTable)
+      .all(),
+    rows: db.select().from(EventTable).orderBy(EventTable.seq).all(),
+    sequence: db.select().from(EventSequenceTable).all(),
+  })
+
+type DurableState = Effect.Success<ReturnType<typeof durableState>>
+
 const expectTypedInvalidDurableEvent = (exit: Exit.Exit<unknown, unknown>, type: string) => {
   expect(Exit.isFailure(exit)).toBe(true)
   if (!Exit.isFailure(exit)) return
@@ -109,6 +154,80 @@ const expectTypedInvalidDurableEvent = (exit: Exit.Exit<unknown, unknown>, type:
 }
 
 describe("v2.1.4 archive compatibility contract", () => {
+  it.effect("keeps an owner conflict injected after the unlocked legacy precheck in the typed failure channel", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const bus = yield* Bus.Service
+      const competing = {
+        id: Event.ID.make("evt_v214_owner_race_competing"),
+        aggregateID: sessionID,
+        seq: 0,
+        created: 10,
+        type: "session.archive.changed.1",
+        data: { sessionID, archived: 0 },
+      }
+      const refused = {
+        id: Event.ID.make("evt_v214_owner_race_refused"),
+        aggregateID: sessionID,
+        seq: 1,
+        created: 11,
+        type: "session.archive.changed.1",
+        data: { sessionID, archived: null },
+      }
+      let notifications = 0
+      let beforeRefusal: DurableState | undefined
+      yield* bus.listen(() => Effect.sync(() => ++notifications))
+      afterReplayOwnerRead = () =>
+        bus.replay(competing, { ownerID: "owner-a", publish: true }).pipe(
+          Effect.tap(() => Effect.sync(() => expect(notifications).toBe(1))),
+          Effect.tap(() =>
+            durableState(db).pipe(
+              Effect.tap((state) =>
+                Effect.sync(() => {
+                  beforeRefusal = state
+                }),
+              ),
+            ),
+          ),
+        )
+
+      const exit = yield* bus.replay(refused, { ownerID: "owner-b" }).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      expect(exit.cause.reasons.filter(Cause.isDieReason)).toEqual([])
+      const errors = exit.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ _tag: "Bus.InvalidDurableEvent", message: "Invalid legacy archive event" })
+      expect((errors[0] as Bus.InvalidDurableEventError).message).not.toContain(String(refused.id))
+      expect((errors[0] as Bus.InvalidDurableEventError).message).not.toContain(String(sessionID))
+      expect((errors[0] as Bus.InvalidDurableEventError).message).not.toContain("owner-b")
+      expect(beforeRefusal).toBeDefined()
+      if (!beforeRefusal) return
+      expect(yield* durableState(db)).toEqual(beforeRefusal)
+      expect(notifications).toBe(1)
+    }).pipe(Effect.ensuring(Effect.sync(() => (afterReplayOwnerRead = undefined)))),
+  )
+
+  it.effect("accepts legacy replay when the owner-read wrapper does not inject a competing owner", () =>
+    Effect.gen(function* () {
+      const db = yield* seed()
+      const event = {
+        id: Event.ID.make("evt_v214_owner_race_control"),
+        aggregateID: sessionID,
+        seq: 0,
+        created: 10,
+        type: "session.archive.changed.1",
+        data: { sessionID, archived: 0 },
+      }
+      yield* (yield* Bus.Service).replay(event, { ownerID: "owner-b" })
+      expect(yield* durableState(db)).toMatchObject({
+        projection: [{ archived: 0, updated: 10 }],
+        rows: [{ id: event.id, aggregate_id: sessionID, seq: 0 }],
+        sequence: [{ aggregate_id: sessionID, seq: 0, owner_id: "owner-b" }],
+      })
+    }),
+  )
+
   it.effect("characterizes legacy replay as preserving its journal identity and payload archive time", () =>
     Effect.gen(function* () {
       const db = yield* seed([{ id: sessionID, updated: 5 }])
