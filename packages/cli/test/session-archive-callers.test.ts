@@ -11,7 +11,7 @@
  */
 import { expect, test } from "bun:test"
 import { spawn } from "node:child_process"
-import { chmod, lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 type Result = { requests: string[]; prompts: Array<{ message: string; values: string[] }> }
 
@@ -77,6 +77,59 @@ test("isolated session archive caller", async () => {
 })
 `
 
+async function ensureDebugDirectory(debugRoot: string) {
+  const existing = await lstat(debugRoot).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return
+    throw error
+  })
+  if (existing?.isSymbolicLink()) throw new Error("session archive caller debug directory must not be a symlink")
+  await mkdir(debugRoot, { recursive: true, mode: 0o700 })
+  await chmod(debugRoot, 0o700)
+  const [physicalDebugRoot, physicalCliRoot, metadata] = await Promise.all([
+    realpath(debugRoot),
+    realpath(path.dirname(import.meta.dirname)),
+    lstat(debugRoot),
+  ])
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    !physicalDebugRoot.startsWith(`${physicalCliRoot}${path.sep}`) ||
+    (metadata.mode & 0o777) !== 0o700
+  )
+    throw new Error("session archive caller debug directory escaped the CLI package")
+  return physicalDebugRoot
+}
+
+async function removeOwnedDirectory(root: string, debugRoot: string) {
+  const [physicalRoot, physicalDebugRoot, metadata] = await Promise.all([
+    realpath(root),
+    realpath(debugRoot),
+    lstat(root),
+  ])
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    !physicalRoot.startsWith(`${physicalDebugRoot}${path.sep}`)
+  )
+    throw new Error("refusing to remove session archive caller harness outside the owned debug directory")
+  await rm(physicalRoot, { force: true, recursive: true })
+}
+
+async function createHarnessRoot(debugRoot: string) {
+  const physicalDebugRoot = await ensureDebugDirectory(debugRoot)
+  const root = await mkdtemp(path.join(physicalDebugRoot, "session-archive-callers-"))
+  await chmod(root, 0o700)
+  const [physicalRoot, metadata] = await Promise.all([realpath(root), lstat(root)])
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    !physicalRoot.startsWith(`${physicalDebugRoot}${path.sep}`) ||
+    (metadata.mode & 0o777) !== 0o700
+  )
+    throw new Error("session archive caller harness root escaped the owned private debug directory")
+  return { root: physicalRoot, debugRoot: physicalDebugRoot }
+}
+
 async function runScenario(scenario: "list" | "interactive" | "explicit"): Promise<Result> {
   const debugRoot = path.join(path.dirname(import.meta.dirname), ".debug")
   let root: string | undefined
@@ -86,22 +139,10 @@ async function runScenario(scenario: "list" | "interactive" | "explicit"): Promi
   )
   let child: ReturnType<typeof spawn> | undefined
   try {
-    root = await mkdtemp(path.join(debugRoot, "session-archive-callers-"))
-    await chmod(root, 0o700)
-    const [physicalRoot, debugPhysicalRoot, metadata] = await Promise.all([
-      realpath(root),
-      realpath(debugRoot),
-      lstat(root),
-    ])
-    if (
-      metadata.isSymbolicLink() ||
-      !metadata.isDirectory() ||
-      !physicalRoot.startsWith(`${debugPhysicalRoot}${path.sep}`) ||
-      (metadata.mode & 0o777) !== 0o700
-    )
-      throw new Error("session archive caller harness root escaped the owned private debug directory")
-    const harnessPath = path.join(physicalRoot, "harness.test.ts")
-    const resultPath = path.join(physicalRoot, "result.json")
+    const harnessRoot = await createHarnessRoot(debugRoot)
+    root = harnessRoot.root
+    const harnessPath = path.join(root, "harness.test.ts")
+    const resultPath = path.join(root, "result.json")
     await writeFile(harnessPath, harness)
     const output = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       child = spawn(
@@ -131,22 +172,28 @@ async function runScenario(scenario: "list" | "interactive" | "explicit"): Promi
     const pgid = child?.pid
     if (pgid && child?.exitCode === null) process.kill(-pgid, "SIGTERM")
     if (pgid) expect(() => process.kill(-pgid, 0)).toThrow()
-    if (root) {
-      const [physicalRoot, debugPhysicalRoot, metadata] = await Promise.all([
-        realpath(root),
-        realpath(debugRoot),
-        lstat(root),
-      ])
-      if (
-        metadata.isSymbolicLink() ||
-        !metadata.isDirectory() ||
-        !physicalRoot.startsWith(`${debugPhysicalRoot}${path.sep}`)
-      )
-        throw new Error("refusing to remove session archive caller harness outside the owned debug directory")
-      await rm(physicalRoot, { force: true, recursive: true })
-    }
+    if (root) await removeOwnedDirectory(root, debugRoot)
   }
 }
+
+test("creates a missing private debug parent before allocating its child", async () => {
+  const debugRoot = await ensureDebugDirectory(path.join(path.dirname(import.meta.dirname), ".debug"))
+  const privateRoot = await mkdtemp(path.join(debugRoot, "session-archive-callers-parent-"))
+  await chmod(privateRoot, 0o700)
+  const missingParent = path.join(privateRoot, "missing-parent")
+  let root: string | undefined
+  try {
+    const harnessRoot = await createHarnessRoot(missingParent)
+    root = harnessRoot.root
+    const metadata = await lstat(missingParent)
+    expect(metadata.isDirectory()).toBe(true)
+    expect(metadata.mode & 0o777).toBe(0o700)
+    expect(root.startsWith(`${await realpath(missingParent)}${path.sep}`)).toBe(true)
+  } finally {
+    if (root) await removeOwnedDirectory(root, missingParent)
+    await removeOwnedDirectory(privateRoot, debugRoot)
+  }
+})
 
 test("session list sends archived:false through the public command handler", async () => {
   const result = await runScenario("list")
