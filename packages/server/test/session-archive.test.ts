@@ -4,6 +4,8 @@
  * @behavior
  *   - Native true archives, false restores, and omitted archived leaves state unchanged.
  *   - A malformed recognized legacy log row becomes one value-free terminal SSE error frame.
+ *   - A valid-shaped legacy log row whose payload session ID mismatches its aggregate becomes the same terminal frame.
+ *   - Session-log SSE responses prevent caching, transformation, and proxy buffering.
  *   - The real HTTP decoder rejects legacy archive and unknown root keys before any session mutation.
  *   - Authentication runs before payload decoding; native media and schema failures retain their HTTP contracts.
  * @edge-cases
@@ -223,7 +225,10 @@ it.live(
           const filename = path.join(tmp.path, "server.sqlite")
           const sessionID = SessionID.make("ses_server_legacy_log")
           const validID = SessionID.make("ses_server_legacy_log_valid")
+          const bindingAggregateID = SessionID.make("ses_server_legacy_log_binding_aggregate")
+          const bindingPayloadID = SessionID.make("ses_server_legacy_log_binding_payload")
           const malformedID = Event.ID.make("evt_server_legacy_log_sentinel")
+          const bindingID = Event.ID.make("evt_server_legacy_log_binding_sentinel")
           const db = yield* Database.Service
           yield* db.db
             .insert(ProjectTable)
@@ -232,7 +237,7 @@ it.live(
           yield* db.db
             .insert(SessionTable)
             .values(
-              [sessionID, validID].map((id) => ({
+              [sessionID, validID, bindingAggregateID].map((id) => ({
                 id,
                 project_id: Project.ID.global,
                 directory: "/project",
@@ -253,6 +258,18 @@ it.live(
               created: 1,
               type: "session.archive.changed.1",
               data: { sessionID: "ses_server_legacy_log_other", archived: "server-log-secret-sentinel" },
+            })
+            .run()
+          yield* db.db.insert(EventSequenceTable).values({ aggregate_id: bindingAggregateID, seq: 0 }).run()
+          yield* db.db
+            .insert(EventTable)
+            .values({
+              id: bindingID,
+              aggregate_id: bindingAggregateID,
+              seq: 0,
+              created: 2,
+              type: "session.archive.changed.1",
+              data: { sessionID: bindingPayloadID, archived: 0 },
             })
             .run()
           yield* db.db.insert(EventSequenceTable).values({ aggregate_id: validID, seq: 0 }).run()
@@ -280,6 +297,13 @@ it.live(
           const validBody = yield* text(valid)
           expect(valid.status).toBe(200)
           expect(valid.headers.get("content-type")).toContain("text/event-stream")
+          expect(valid.headers.get("Cache-Control"), "session log SSE is missing Cache-Control").toBe(
+            "no-cache, no-transform",
+          )
+          expect(valid.headers.get("X-Accel-Buffering"), "session log SSE is missing X-Accel-Buffering").toBe("no")
+          expect(valid.headers.get("X-Content-Type-Options"), "session log SSE is missing X-Content-Type-Options").toBe(
+            "nosniff",
+          )
           expect(validBody).toContain('"type":"session.archive.changed"')
           expect(validBody).toContain('"type":"log.synced"')
 
@@ -290,10 +314,42 @@ it.live(
             const body = yield* text(response)
             expect(response.status).toBe(200)
             expect(response.headers.get("content-type")).toContain("text/event-stream")
+            expect(response.headers.get("Cache-Control"), "session log SSE is missing Cache-Control").toBe(
+              "no-cache, no-transform",
+            )
+            expect(response.headers.get("X-Accel-Buffering"), "session log SSE is missing X-Accel-Buffering").toBe("no")
+            expect(
+              response.headers.get("X-Content-Type-Options"),
+              "session log SSE is missing X-Content-Type-Options",
+            ).toBe("nosniff")
             expect(body).toBe('data: {"type":"log.error","reason":"Session log unavailable"}\n\n')
             expect(body).not.toContain("server-log-secret-sentinel")
             expect(body).not.toContain(String(malformedID))
             expect(body).not.toContain(String(sessionID))
+            expect(body).not.toContain("log.synced")
+          }
+
+          for (const follow of [false, true]) {
+            const response = yield* request(
+              handler,
+              `/api/experimental/session/${bindingAggregateID}/log?follow=${follow}`,
+              { method: "GET" },
+            )
+            const body = yield* text(response)
+            expect(response.status).toBe(200)
+            expect(response.headers.get("content-type")).toContain("text/event-stream")
+            expect(response.headers.get("Cache-Control"), "session log SSE is missing Cache-Control").toBe(
+              "no-cache, no-transform",
+            )
+            expect(response.headers.get("X-Accel-Buffering"), "session log SSE is missing X-Accel-Buffering").toBe("no")
+            expect(
+              response.headers.get("X-Content-Type-Options"),
+              "session log SSE is missing X-Content-Type-Options",
+            ).toBe("nosniff")
+            expect(body).toBe('data: {"type":"log.error","reason":"Session log unavailable"}\n\n')
+            expect(body).not.toContain(String(bindingID))
+            expect(body).not.toContain(String(bindingAggregateID))
+            expect(body).not.toContain(String(bindingPayloadID))
             expect(body).not.toContain("log.synced")
           }
 
@@ -304,10 +360,15 @@ it.live(
               rows: db.db.select().from(EventTable).all(),
             }),
           ).toEqual(before)
+          yield* Effect.log("session-log-capture-witness")
           const output = JSON.stringify([...(yield* TestConsole.logLines), ...(yield* TestConsole.errorLines)])
+          expect(output).toContain("session-log-capture-witness")
           expect(output).not.toContain("server-log-secret-sentinel")
           expect(output).not.toContain(String(malformedID))
           expect(output).not.toContain(String(sessionID))
+          expect(output).not.toContain(String(bindingID))
+          expect(output).not.toContain(String(bindingAggregateID))
+          expect(output).not.toContain(String(bindingPayloadID))
 
           const missing = yield* request(handler, "/api/experimental/session/ses_server_log_missing/log", {
             method: "GET",
