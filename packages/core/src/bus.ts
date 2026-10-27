@@ -462,7 +462,11 @@ export function configured(options?: Options) {
                       }),
                     { behavior: "immediate" },
                   )
-                  .pipe(Effect.catchTags({ "Bus.InvalidDurableEvent": Effect.fail }, Effect.die))
+                  .pipe(
+                    Effect.catch((error: unknown) =>
+                      error instanceof InvalidDurableEventError ? Effect.fail(error) : Effect.die(error),
+                    ),
+                  )
                 if (committed) {
                   committed.route()
                   yield* Effect.forEach(
@@ -494,11 +498,17 @@ export function configured(options?: Options) {
               const aggregateID = (event.data as Record<string, unknown>)[definition.durable.aggregate]
               if (typeof aggregateID !== "string")
                 return yield* commitDurableEvent(definition, event as Event.Payload, undefined, commit).pipe(
+                  Effect.orDie,
                   Effect.as(event),
                 )
               return yield* durableLocks.withLock(aggregateID)(
                 Effect.gen(function* () {
-                  const committed = yield* commitDurableEvent(definition, event as Event.Payload, undefined, commit)
+                  const committed = yield* commitDurableEvent(
+                    definition,
+                    event as Event.Payload,
+                    undefined,
+                    commit,
+                  ).pipe(Effect.orDie)
                   if (!committed) return event
                   event = committed.event as Event.Payload<D>
                   yield* notify(event as Event.Payload, true)

@@ -150,6 +150,8 @@ export type SessionMessageToolStateRunning1 = {
   metadata: { [x: string]: JsonValue }
 }
 
+export type EventLogError = { type: "log.error"; reason: "Session log unavailable" }
+
 export type SessionInterruptResponse = { interrupted: boolean }
 
 export type FormID = string
@@ -2689,7 +2691,7 @@ export type V2Event =
   | V2EventRpc
   | V2EventServerConnected
 
-export type SessionLogItem = SessionEventDurable | EventLogSynced
+export type SessionLogItem = SessionEventDurable | EventLogSynced | EventLogError
 
 export type InvalidRequestError = {
   readonly _tag: "InvalidRequestError"
