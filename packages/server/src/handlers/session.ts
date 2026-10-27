@@ -5,6 +5,7 @@ import { SessionTransfer } from "@opencode/core/session/transfer"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Form } from "@opencode/core/form"
 import { DateTime, Effect, Stream } from "effect"
+import { HttpEffect, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
 import { Api } from "../api"
 import {
@@ -601,6 +602,15 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.log",
         Effect.fn(function* (ctx) {
           yield* session.get(ctx.params.sessionID).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(
+              HttpServerResponse.setHeaders(response, {
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+              }),
+            ),
+          )
           return session
             .log({ sessionID: ctx.params.sessionID, after: ctx.query.after, follow: ctx.query.follow })
             .pipe(
