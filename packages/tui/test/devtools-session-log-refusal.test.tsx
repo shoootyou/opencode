@@ -1,0 +1,96 @@
+/**
+ * @spec-handoff
+ * @interface DevToolsBar session-log dump: AsyncIterable<unknown> -> debug snapshot
+ * @behavior
+ *   - Treats a terminal `log.error` SSE item as a failed session-log dump.
+ *   - Uses the existing fallback history instead of serializing the refusal item.
+ *   - A normal durable item followed by `log.synced` completes and serializes that item.
+ * @edge-cases
+ *   - The refusal stream ends immediately after its one terminal SSE frame.
+ * @see ../src/component/devtools-bar.tsx
+ */
+import { expect, test } from "bun:test"
+import { unlink } from "node:fs/promises"
+import { createAppFixture } from "./fixture/app"
+import { directory, json } from "./fixture/tui-client"
+
+const session = {
+  id: "ses_log_refusal",
+  title: "Log refusal fixture",
+  projectID: "proj_test",
+  location: { directory },
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 0, updated: 0 },
+}
+
+const refusal = `data: {"type":"log.error","reason":"Session log unavailable"}\n\n`
+const synced = `data: {"id":"evt_model","created":1,"type":"session.model.selected","durable":{"aggregateID":"ses_log_refusal","seq":1,"version":1},"data":{"sessionID":"ses_log_refusal","model":{"providerID":"fixture","id":"fixture"}}}\n\ndata: {"type":"log.synced","aggregateID":"ses_log_refusal","seq":1}\n\n`
+
+async function dump(stream: string) {
+  await using setup = await createAppFixture({
+    width: 112,
+    height: 34,
+    config: { animations: false, debug: { devtools: true } },
+    args: { sessionID: session.id },
+    fetch: (url) => {
+      if (url.pathname === "/api/session") return json({ data: [session], cursor: {} })
+      if (url.pathname === `/api/session/${session.id}`) return json({ data: session })
+      if (url.pathname === `/api/session/${session.id}/inbox`) return json({ data: [] })
+      if (url.pathname === `/api/session/${session.id}/message`) return json({ data: [], cursor: {} })
+      if (url.pathname === `/api/experimental/session/${session.id}/log`)
+        return new Response(stream, { headers: { "content-type": "text/event-stream" } })
+    },
+  })
+
+  await setup.ready
+  await setup.waitForFrame((frame) => frame.includes("Tools"))
+  const tools = setup
+    .captureCharFrame()
+    .split("\n")
+    .findIndex((line) => line.includes("Tools"))
+  if (tools === -1) throw new Error(`DevTools Tools action was not rendered: ${setup.captureCharFrame()}`)
+  await setup.mockMouse.click(setup.captureCharFrame().split("\n")[tools]!.indexOf("Tools") + 1, tools)
+  await setup.waitForFrame((frame) => frame.includes("Write debug snapshot"))
+  const row = setup
+    .captureCharFrame()
+    .split("\n")
+    .findIndex((line) => line.includes("Write debug snapshot"))
+  if (row === -1) throw new Error(`DevTools snapshot action was not rendered: ${setup.captureCharFrame()}`)
+  await setup.mockMouse.click(setup.captureCharFrame().split("\n")[row]!.indexOf("Write debug snapshot") + 1, row)
+  await setup.waitForFrame((frame) => frame.includes("opencode-debug-"))
+  const frame = setup.captureCharFrame().split("\n")
+  const first = frame.findIndex((line) => line.includes("opencode-debug-"))
+  const column = frame[first]?.indexOf("/tmp/opencode-debug-")
+  const file =
+    column === undefined || column < 0 || !frame[first + 1]
+      ? undefined
+      : `${frame[first]!.slice(column).trim()}${frame[first + 1]!.slice(column).trim()}`
+  if (!file?.match(/^\/tmp\/opencode-debug-[\w-]+\.json$/))
+    throw new Error(`Debug snapshot path was not rendered: ${setup.captureCharFrame()}`)
+  try {
+    return JSON.parse(await Bun.file(file).text()) as { events: { type: string }[] }
+  } finally {
+    await unlink(file)
+  }
+}
+
+test("falls back when the session log ends with a terminal refusal", async () => {
+  const snapshot = await dump(refusal)
+
+  expect(
+    snapshot.events.map((event) => event.type),
+    "terminal refusal must not enter durable debug history",
+  ).not.toContain("log.error")
+  expect(
+    snapshot.events.map((event) => event.type),
+    "terminal refusal must not be mistaken for synchronization",
+  ).not.toContain("log.synced")
+})
+
+test("dumps durable session log items when a synced marker ends the stream", async () => {
+  const snapshot = await dump(synced)
+
+  expect(snapshot.events.map((event) => event.type)).toContain("session.model.selected")
+  expect(snapshot.events.map((event) => event.type)).not.toContain("log.synced")
+})
