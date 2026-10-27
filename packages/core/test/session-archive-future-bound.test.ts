@@ -117,7 +117,7 @@ const event = (
   type,
   data:
     type === "session.archive.changed.1"
-      ? { sessionID: aggregateID, archived: archived ?? 0 }
+      ? { sessionID: aggregateID, archived: archived === undefined ? 0 : archived }
       : { sessionID: aggregateID },
 })
 
@@ -224,11 +224,14 @@ describe("bounded future archive admission", () => {
                 event(`evt_future_${index}_${seq}`, seq, future, direction(type), undefined, id),
               )
         for (const row of retained) yield* bus.replay(row)
-        yield* db
-          .update(SessionTable)
-          .set({ time_archived: endsArchived ? future : null, time_updated: future })
-          .where(eq(SessionTable.id, id))
-          .run()
+        expect(
+          yield* db
+            .select({ archived: SessionTable.time_archived, updated: SessionTable.time_updated })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, id))
+            .get(),
+          `replayed ${variants.indexOf(variant) === 0 ? "legacy alternating" : "native or mixed"} history must project its terminal archive state`,
+        ).toEqual({ archived: endsArchived ? future : null, updated: future })
         const before = yield* db
           .select()
           .from(EventTable)

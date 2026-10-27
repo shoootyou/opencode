@@ -11,7 +11,7 @@
  */
 import { expect, test } from "bun:test"
 import { spawn } from "node:child_process"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 type Result = { requests: string[]; prompts: Array<{ message: string; values: string[] }> }
 
@@ -22,7 +22,11 @@ import { Global } from "@opencode/util/global"
 import { Effect, FileSystem, Option, Scope } from "effect"
 import { mkdir, rm } from "node:fs/promises"
 import path from "node:path"
-import { Config } from "../src/config"
+import { pathToFileURL } from "node:url"
+
+const cliRoot = process.env.CLI_ROOT
+if (!cliRoot) throw new Error("CLI_ROOT is required for the isolated session archive harness")
+const { Config } = await import(pathToFileURL(path.join(cliRoot, "src/config/index.ts")).href)
 
 const prompts = []
 mock.module("@clack/prompts", () => ({
@@ -56,8 +60,8 @@ test("isolated session archive caller", async () => {
   }})
   const descriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
   try {
-    const { default: listHandler } = await import("../src/commands/handlers/session/list")
-    const { default: exportHandler } = await import("../src/commands/handlers/session/export")
+    const { default: listHandler } = await import(pathToFileURL(path.join(cliRoot, "src/commands/handlers/session/list.ts")).href)
+    const { default: exportHandler } = await import(pathToFileURL(path.join(cliRoot, "src/commands/handlers/session/export.ts")).href)
     if (process.env.SCENARIO === "list") await runHandler(listHandler({ server: Option.some(server.url.toString()), standalone: false, maxCount: Option.some(1), format: "json" }))
     if (process.env.SCENARIO === "interactive") {
       Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true })
@@ -74,20 +78,31 @@ test("isolated session archive caller", async () => {
 `
 
 async function runScenario(scenario: "list" | "interactive" | "explicit"): Promise<Result> {
-  const root = path.join(import.meta.dirname, `.tmp-session-archive-parent-${process.pid}-${crypto.randomUUID()}`)
-  const harnessPath = path.join(
-    import.meta.dirname,
-    `.tmp-session-archive-harness-${process.pid}-${crypto.randomUUID()}.test.ts`,
-  )
-  const resultPath = path.join(root, "result.json")
-  await mkdir(root, { recursive: true })
-  await writeFile(harnessPath, harness)
+  const debugRoot = path.join(path.dirname(import.meta.dirname), ".debug")
+  let root: string | undefined
   const allowed = ["HOME", "PATH", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]
   const env = Object.fromEntries(
     allowed.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
   )
   let child: ReturnType<typeof spawn> | undefined
   try {
+    root = await mkdtemp(path.join(debugRoot, "session-archive-callers-"))
+    await chmod(root, 0o700)
+    const [physicalRoot, debugPhysicalRoot, metadata] = await Promise.all([
+      realpath(root),
+      realpath(debugRoot),
+      lstat(root),
+    ])
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isDirectory() ||
+      !physicalRoot.startsWith(`${debugPhysicalRoot}${path.sep}`) ||
+      (metadata.mode & 0o777) !== 0o700
+    )
+      throw new Error("session archive caller harness root escaped the owned private debug directory")
+    const harnessPath = path.join(physicalRoot, "harness.test.ts")
+    const resultPath = path.join(physicalRoot, "result.json")
+    await writeFile(harnessPath, harness)
     const output = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       child = spawn(
         process.execPath,
@@ -95,7 +110,7 @@ async function runScenario(scenario: "list" | "interactive" | "explicit"): Promi
         {
           cwd: import.meta.dirname,
           detached: true,
-          env: { ...env, RESULT_PATH: resultPath, SCENARIO: scenario },
+          env: { ...env, CLI_ROOT: path.dirname(import.meta.dirname), RESULT_PATH: resultPath, SCENARIO: scenario },
           stdio: ["ignore", "pipe", "pipe"],
         },
       )
@@ -116,8 +131,20 @@ async function runScenario(scenario: "list" | "interactive" | "explicit"): Promi
     const pgid = child?.pid
     if (pgid && child?.exitCode === null) process.kill(-pgid, "SIGTERM")
     if (pgid) expect(() => process.kill(-pgid, 0)).toThrow()
-    await rm(harnessPath, { force: true })
-    await rm(root, { force: true, recursive: true })
+    if (root) {
+      const [physicalRoot, debugPhysicalRoot, metadata] = await Promise.all([
+        realpath(root),
+        realpath(debugRoot),
+        lstat(root),
+      ])
+      if (
+        metadata.isSymbolicLink() ||
+        !metadata.isDirectory() ||
+        !physicalRoot.startsWith(`${debugPhysicalRoot}${path.sep}`)
+      )
+        throw new Error("refusing to remove session archive caller harness outside the owned debug directory")
+      await rm(physicalRoot, { force: true, recursive: true })
+    }
   }
 }
 

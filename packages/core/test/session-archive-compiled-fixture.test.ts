@@ -21,7 +21,14 @@ import path from "node:path"
 
 const manifestPath = process.env.OPENCODE_COMPILED_FIXTURE_MANIFEST
 const required = process.env.OPENCODE_COMPILED_FIXTURE_REQUIRED === "1"
-const pinnedBun = "/code-projects/personal/opencode/.debug/bin/bun-1.4.4/bun"
+const runtime = process.execPath
+
+test("compiled fixture harness does not commit a workspace-root executable path", async () => {
+  const source = await readFile(new URL(import.meta.url), "utf8")
+  const workspaceRoots = ["/" + "code-projects" + "/", "/" + "workspace" + "/"]
+  for (const root of workspaceRoots)
+    expect(source, `compiled fixture harness must not commit workspace root ${root}`).not.toContain(root)
+})
 
 test("lifecycle cleanup terminates an owned descendant after its leader exits", async () => {
   const root = await adversarialRoot()
@@ -50,7 +57,7 @@ test("lifecycle refuses unstable ownership without signalling its synthetic chil
   const root = await adversarialRoot()
   let failure: OwnershipFailure | undefined
   try {
-    await startOwnedProcess([pinnedBun, "-e", "await Bun.sleep(200)"], {
+    await startOwnedProcess([runtime, "-e", "await Bun.sleep(200)"], {
       cwd: root,
       env: syntheticEnvironment(root),
       label: "unstable-group",
@@ -71,7 +78,7 @@ test("lifecycle refuses unstable ownership without signalling its synthetic chil
 
 test("lifecycle refuses identity mismatch without signalling its synthetic child", async () => {
   const root = await adversarialRoot()
-  const process = await startOwnedProcess([pinnedBun, "-e", "await Bun.sleep(200)"], {
+  const process = await startOwnedProcess([runtime, "-e", "await Bun.sleep(200)"], {
     cwd: root,
     env: syntheticEnvironment(root),
     label: "identity-mismatch",

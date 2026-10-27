@@ -773,7 +773,10 @@ async function renderTitleViewSelect(root: string, newDesigns: boolean, titleVie
                       <DialogSelect
                         title="Sessions"
                         titleView={titleView ? <text>Showing the first 50 results. Refine your search.</text> : undefined}
-                        options={[{ title: "Archived session", value: "archived" }]}
+                        options={[
+                          { title: "Archived session", value: "archived" },
+                          { title: "Current session", value: "current" },
+                        ]}
                         searchInTitle
                       />
                     )
@@ -796,8 +799,26 @@ test("preserves a DialogSelect titleView beside the new-designs search input", a
   const message = "Showing the first 50 results. Refine your search."
   const app = await renderTitleViewSelect(tmp.path, true, true)
   try {
-    await app.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
+    await app.waitForFrame(
+      (frame) =>
+        frame.includes("Search") &&
+        frame.includes("Archived session") &&
+        frame.includes("Current session") &&
+        app.renderer.currentFocusedRenderable instanceof InputRenderable,
+    )
     expect(app.captureCharFrame(), `new-designs dropped titleView: ${message}`).toContain(message)
+    await app.mockInput.typeText("Archived")
+    await app.waitForFrame(
+      (frame) =>
+        frame.includes("Archived session") &&
+        !frame.includes("Current session") &&
+        frame.includes(message) &&
+        app.renderer.currentFocusedRenderable instanceof InputRenderable,
+    )
+    expect(
+      app.captureCharFrame(),
+      "new-designs search input must receive typed keys, filter visible rows, and retain titleView",
+    ).toContain("Archived session")
   } finally {
     app.renderer.destroy()
   }
