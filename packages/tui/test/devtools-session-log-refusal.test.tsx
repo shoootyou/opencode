@@ -10,7 +10,7 @@
  * @see ../src/component/devtools-bar.tsx
  */
 import { expect, test } from "bun:test"
-import { lstat, mkdtemp, readdir, realpath, rm } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { createAppFixture } from "./fixture/app"
@@ -30,15 +30,59 @@ const partial = `data: {"id":"evt_partial","created":1,"type":"session.agent.sel
 const refusal = `${partial}data: {"type":"log.error","reason":"Session log unavailable"}\n\n`
 const synced = `data: {"id":"evt_model","created":1,"type":"session.model.selected","durable":{"aggregateID":"ses_log_refusal","seq":1,"version":1},"data":{"sessionID":"ses_log_refusal","model":{"providerID":"fixture","id":"fixture"}}}\n\ndata: {"type":"log.synced","aggregateID":"ses_log_refusal","seq":1}\n\n`
 
-async function dump(stream: string, temporaryParent = tmpdir()) {
-  const temporaryDirectory = await mkdtemp(path.join(temporaryParent, "opencode-devtools-refusal-"))
-  const physicalTemporaryDirectory = await realpath(temporaryDirectory)
-  const metadata = await lstat(temporaryDirectory)
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new Error("Expected an owned temporary directory")
-  const previousTemporaryDirectory = process.env.TMPDIR
-  process.env.TMPDIR = physicalTemporaryDirectory
+const temporaryVariables = ["TMPDIR", "TEMP", "TMP"] as const
+
+async function ensureLongTemporaryParent(temporaryParent: string) {
+  const existing = await lstat(temporaryParent).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return
+    throw error
+  })
+  if (existing?.isSymbolicLink()) throw new Error("DevTools long temporary parent must not be a symlink")
+  await mkdir(temporaryParent, { recursive: true, mode: 0o700 })
+  await chmod(temporaryParent, 0o700)
+  const [physicalTemporaryParent, physicalPackageRoot, metadata] = await Promise.all([
+    realpath(temporaryParent),
+    realpath(path.dirname(import.meta.dir)),
+    lstat(temporaryParent),
+  ])
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    !physicalTemporaryParent.startsWith(`${physicalPackageRoot}${path.sep}`) ||
+    (metadata.mode & 0o777) !== 0o700
+  )
+    throw new Error("DevTools long temporary parent escaped the TUI package")
+  return physicalTemporaryParent
+}
+
+function temporaryEnvironment() {
+  return Object.fromEntries(temporaryVariables.map((key) => [key, process.env[key]]))
+}
+
+async function dump(stream: string, temporaryParent = tmpdir(), long = false) {
+  let temporaryDirectory: string | undefined
+  let physicalTemporaryDirectory: string | undefined
+  let physicalTemporaryParent: string | undefined
+  let previousTemporaryEnvironment: Record<string, string | undefined> | undefined
 
   try {
+    physicalTemporaryParent = long ? await ensureLongTemporaryParent(temporaryParent) : await realpath(temporaryParent)
+    temporaryDirectory = await mkdtemp(path.join(physicalTemporaryParent, "opencode-devtools-refusal-"))
+    await chmod(temporaryDirectory, 0o700)
+    physicalTemporaryDirectory = await realpath(temporaryDirectory)
+    const metadata = await lstat(temporaryDirectory)
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isDirectory() ||
+      !physicalTemporaryDirectory.startsWith(`${physicalTemporaryParent}${path.sep}`) ||
+      (metadata.mode & 0o777) !== 0o700
+    )
+      throw new Error("Expected an owned private temporary directory")
+    previousTemporaryEnvironment = temporaryEnvironment()
+    temporaryVariables.forEach((key) => (process.env[key] = physicalTemporaryDirectory!))
+    expect(temporaryEnvironment()).toEqual(
+      Object.fromEntries(temporaryVariables.map((key) => [key, physicalTemporaryDirectory])),
+    )
     await using setup = await createAppFixture({
       width: 112,
       height: 34,
@@ -77,23 +121,39 @@ async function dump(stream: string, temporaryParent = tmpdir()) {
       events: { type: string }[]
     }
   } finally {
-    if (previousTemporaryDirectory === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = previousTemporaryDirectory
-    if ((await realpath(temporaryDirectory)) !== physicalTemporaryDirectory)
-      throw new Error("Temporary directory escaped")
-    await rm(physicalTemporaryDirectory, { recursive: true, force: true })
+    const environment = previousTemporaryEnvironment
+    if (environment)
+      temporaryVariables.forEach((key) => {
+        const value = environment[key]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      })
+    if (temporaryDirectory && physicalTemporaryDirectory && physicalTemporaryParent) {
+      const [physicalRoot, metadata] = await Promise.all([realpath(temporaryDirectory), lstat(temporaryDirectory)])
+      if (
+        metadata.isSymbolicLink() ||
+        !metadata.isDirectory() ||
+        path.basename(temporaryDirectory).startsWith("opencode-devtools-refusal-") === false ||
+        !physicalRoot.startsWith(`${physicalTemporaryParent}${path.sep}`) ||
+        (metadata.mode & 0o777) !== 0o700
+      )
+        throw new Error("Refusing to remove an unproven DevTools temporary directory")
+      await rm(physicalRoot, { recursive: true, force: true })
+    }
   }
 }
 
 const temporaryParents = [
-  ["default", undefined],
-  ["long", path.join(import.meta.dir, "../.debug")],
+  ["default", undefined, false],
+  ["long", path.join(import.meta.dir, "../.debug"), true],
 ] as const
 
 test.each(temporaryParents)(
   "falls back to existing history when the session log ends with a terminal refusal (%s TMPDIR)",
-  async (_, temporaryParent) => {
-    const snapshot = await dump(refusal, temporaryParent)
+  async (_, temporaryParent, long) => {
+    const environment = temporaryEnvironment()
+    const snapshot = await dump(refusal, temporaryParent, long)
+    expect(temporaryEnvironment()).toEqual(environment)
 
     expect(
       snapshot.events.map((event) => event.type),
@@ -116,8 +176,10 @@ test.each(temporaryParents)(
 
 test.each(temporaryParents)(
   "dumps durable session log items when a synced marker ends the stream (%s TMPDIR)",
-  async (_, temporaryParent) => {
-    const snapshot = await dump(synced, temporaryParent)
+  async (_, temporaryParent, long) => {
+    const environment = temporaryEnvironment()
+    const snapshot = await dump(synced, temporaryParent, long)
+    expect(temporaryEnvironment()).toEqual(environment)
 
     expect(snapshot.events.map((event) => event.type)).toContain("session.model.selected")
     expect(snapshot.events.map((event) => event.type)).not.toContain("log.synced")
