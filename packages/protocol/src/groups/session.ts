@@ -311,9 +311,8 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           }),
         }),
         success: HttpApiSchema.NoContent,
-        error: [ConflictError, SessionArchiveLimitError, SessionNotFoundError],
+        error: [ConflictError, SessionArchiveLimitError, SessionNotFoundError, LocationNotFoundError],
       })
-        .middleware(sessionLocationMiddleware)
         .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
         .annotateMerge(
         OpenApi.annotations({
