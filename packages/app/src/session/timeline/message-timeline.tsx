@@ -664,6 +664,9 @@ function MessageTimelineView(
                         <Menu.Item onSelect={() => void props.action.export(id)}>
                           {language.t("common.export")}…
                         </Menu.Item>
+                        <Menu.Item disabled={props.pending.archive()} onSelect={() => void props.action.archive()}>
+                          {language.t(props.action.archiveLabel())}
+                        </Menu.Item>
                         <Menu.Separator />
                         <Menu.Item onSelect={() => props.action.showDelete(id)}>
                           {language.t("common.delete")}…

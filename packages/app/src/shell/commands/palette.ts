@@ -276,7 +276,7 @@ export function createServerSessionEntries(props: {
     const category = search ? props.category() : props.recentCategory()
 
     return sessions.flatMap((session) => {
-      if (session.time.archived) return []
+      if (session.time.archived !== undefined) return []
 
       const project = projectForSession(session, projects)
 
@@ -372,7 +372,7 @@ export function createKnownServerSessions(server: ServerCtx) {
     const merged = new Map([...cached, ...server.data.session.list()].map((session) => [session.id, session] as const))
 
     return server.data.session.apply(
-      [...merged.values()].filter((session) => !session.parentID && !session.time.archived),
+      [...merged.values()].filter((session) => !session.parentID && session.time.archived === undefined),
     )
   }
 }

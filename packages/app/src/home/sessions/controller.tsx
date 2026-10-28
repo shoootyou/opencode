@@ -21,6 +21,7 @@ import { sessionLabel, sessionTitle } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import { archiveHomeSession } from "./archive"
 import { homeSessionsQuery } from "./queries"
+import { useGlobal } from "@/runtime/server/runtime"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, homeSessionLocation, type HomeSessionRecord } from "./records"
 
@@ -41,6 +42,7 @@ export function createHomeSessionsController(home: HomeController) {
   const language = useLanguage()
   const platform = usePlatform()
   const queryClient = useQueryClient()
+  const global = useGlobal()
 
   const projectDirectories = createMemo(() => {
     const selected = home.selection.value().directory
@@ -318,7 +320,7 @@ export function createHomeSessionsController(home: HomeController) {
         if (!ctx) return
         const result = await ctx.sdk.api.session.get({ sessionID })
 
-        if (result.time.archived) return
+        if (result.time.archived !== undefined) return
 
         return buildHomeSessionRecords({
           sessions: () => [result],
@@ -356,18 +358,20 @@ export function createHomeSessionsController(home: HomeController) {
         const ctx = home.server.focusedContext()
 
         if (!conn || !ctx) return
-        await archiveHomeSession({
-          server: ServerConnection.key(conn),
-          session,
-          // TODO: Restore archiving when the V2 client exposes a session archive API.
-          archive: async (_sessionID) => Promise.reject(new Error("Session archiving is unavailable")),
-          remove() {},
-          onError: (cause) =>
-            showToast({
-              title: language.t("common.requestFailed"),
-              description: errorMessage(cause, language.t("common.requestFailed")),
-            }),
-        })
+        await archiveHomeSession(
+          { server: ServerConnection.key(conn), session },
+          {
+            archiveSession: global.sessionArchive.archiveSession,
+            remove: () => ctx.data.session.evict(session.id),
+            notifyTabsRemoved: (detail) =>
+              notifySessionTabsRemoved({
+                ...detail,
+                server: detail.server as ServerConnection.Key,
+                sessionIDs: [...detail.sessionIDs],
+              }),
+            isActive: () => home.server.focusedContext() === ctx,
+          },
+        )
       },
       rename,
       export: exportSession,

@@ -1,5 +1,5 @@
 import { createSimpleContext } from "@opencode/ui/context"
-import { Accessor, batch, createEffect, createMemo, createResource, createRoot, getOwner, untrack } from "solid-js"
+import { Accessor, batch, createEffect, createMemo, createResource, createRoot, createSignal, getOwner, untrack } from "solid-js"
 import { createServerProjects, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
 import { useServerHealth } from "@/runtime/server/health"
@@ -24,6 +24,7 @@ import type { SessionInfo } from "@opencode/client/promise"
 import { projectForSession } from "@/shell/layout/helpers"
 import { isProjectDirectory } from "@/workspaces/paths"
 import type { Project } from "@/runtime/server/types"
+import { createSessionArchiveActions } from "@/session/archive"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -36,6 +37,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
     )
 
     const models = createGlobalModels()
+    const language = useLanguage()
     const notificationCoordinator = createNotificationCoordinator()
 
     const serverCtxs = new Map<ServerConnection.Key, ReturnType<typeof createServerController>>()
@@ -104,6 +106,27 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       }
     })
 
+    const [archiveVersion, setArchiveVersion] = createSignal(0)
+    const archiveActions = createSessionArchiveActions({
+      update: async ({ server: key, sessionID, archived }) => {
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+        if (!ctx) throw new Error("Server is unavailable")
+        await ctx.sdk.api.session.update({ sessionID, archived })
+      },
+      sync: async ({ server: key, sessionID }) => {
+        const ctx = serverCtxs.get(key as ServerConnection.Key)
+        if (!ctx) throw new Error("Server is unavailable")
+        ctx.data.session.invalidate(sessionID)
+        await ctx.data.session.sync(sessionID)
+      },
+      toast: ({ kind, error }) =>
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: kind === "refresh" ? language.t("session.archive.refreshFailed") : formatServerError(error, language.t),
+        }),
+      onPendingChange: () => setArchiveVersion((value) => value + 1),
+    })
+
     return {
       servers: {
         list: () => server.list,
@@ -111,6 +134,13 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
         retry: serverHealth.retry,
       },
       models,
+      sessionArchive: {
+        ...archiveActions,
+        isPending(target: Parameters<typeof archiveActions.isPending>[0]) {
+          archiveVersion()
+          return archiveActions.isPending(target)
+        },
+      },
       /** Runs each keyed sound and system notification once across windows; notifications only while none has focus. */
       notifications: notificationCoordinator,
       ensureServerCtx(conn: ServerConnection.Any) {

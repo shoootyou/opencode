@@ -71,7 +71,7 @@ export function SessionUIProvider(
   const sessionTitle = (id: string) => {
     const session = data.session.get(id)
 
-    return session && !session.time.archived ? session.title || language.t("command.session.new") : undefined
+    return session && session.time.archived === undefined ? session.title || language.t("command.session.new") : undefined
   }
 
   const providers = useProviders(directory)
