@@ -225,6 +225,7 @@ export function createArchivedSessionsModel<Tab>(
           continuationError: value.continuationError,
         }
         await deps.openProject({ server: deps.server, directory: session.location.directory })
+        if (disposed || version !== generation) return true
         deps.touchProject({ server: deps.server, directory: session.location.directory })
         const tab = deps.addTab({ server: deps.server, sessionId: sessionID })
         deps.selectTab(tab)
