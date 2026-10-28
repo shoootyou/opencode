@@ -1,5 +1,5 @@
 import { type FilteredListProps, useFilteredList } from "@opencode/ui/hooks"
-import { createEffect, For, type JSX, on, Show } from "solid-js"
+import { createEffect, For, type JSX, on, Show, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useI18n } from "../context/i18n"
@@ -48,6 +48,7 @@ export interface ListProps<T> extends FilteredListProps<T> {
   divider?: boolean
   add?: ListAddProps
   groupHeader?: (group: { category: string; items: T[] }) => JSX.Element
+  onScroll?: JSX.EventHandlerUnion<HTMLDivElement, Event>
 }
 
 export interface ListRef {
@@ -139,20 +140,20 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
   )
 
   createEffect(() => {
-    const all = flat()
+    const key = active()
+    filter()
+    const all = props.preserveActiveKey ? untrack(flat) : flat()
 
     if (store.mouseActive || all.length === 0) return
     const scroll = scrollRef()
 
     if (!scroll) return
 
-    if (active() === props.key(all[0])) {
+    if (key === props.key(all[0])) {
       scroll.scrollTo(0, 0)
 
       return
     }
-
-    const key = active()
 
     if (!key) return
     const element = findByKey(scroll, key)
@@ -329,7 +330,7 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
           {searchAction()}
         </div>
       </Show>
-      <div ref={setScrollRef} data-slot="list-scroll">
+      <div ref={setScrollRef} data-slot="list-scroll" onScroll={props.onScroll}>
         <Show
           when={flat().length > 0 || showAdd()}
           fallback={

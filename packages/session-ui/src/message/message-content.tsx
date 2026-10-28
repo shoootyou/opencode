@@ -53,6 +53,7 @@ import type { SessionUserActions, SessionUserAttachmentReference, SessionUserCom
 import { agentLabel } from "./agent-label"
 import { relativeTime, useNow } from "./relative-time"
 import { attached, typeLabel } from "../components/message-file"
+import { assistantModelLabel } from "./model-label"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -82,7 +83,7 @@ export async function writeClipboard(text: string): Promise<boolean> {
   )
 }
 
-type MetaItem = { label: string; variant?: boolean }
+type MetaItem = { label: string; variant?: boolean; ltr?: boolean }
 
 const RELATIVE_TIME_KEYS = {
   minute: "ui.message.time.minutesAgo",
@@ -112,7 +113,7 @@ function MetaItems(props: { items: MetaItem[]; slot: "user-message" | "text-part
           <span
             data-slot={`${props.slot}-meta-item`}
             data-variant={item.variant ? "" : undefined}
-            dir={props.slot === "text-part" ? "auto" : undefined}
+            dir={item.ltr ? "ltr" : props.slot === "text-part" ? "auto" : undefined}
           >
             {item.label}
           </span>
@@ -1016,8 +1017,11 @@ export function AssistantTextContent(props: {
 
   const labels = createMemo<MetaItem[]>(() => {
     const agent = agentLabel(props.message.agent, data.agents)
+    const model = assistantModelLabel(props.message.model, data.store.provider?.all, (model, variant) =>
+      i18n.t("ui.message.modelVariant", { model, variant }),
+    )
 
-    return [...(agent ? [{ label: agent }] : []), ...modelItems(data, props.message.model)]
+    return [...(agent ? [{ label: agent }] : []), ...(model ? [{ label: model, ltr: true }] : [])]
   })
 
   const duration = createMemo(() => {

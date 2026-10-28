@@ -1,6 +1,6 @@
 import fuzzysort from "fuzzysort"
 import { createEffect, createMemo, createResource, on } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createMutable, createStore } from "solid-js/store"
 import { createList } from "solid-list"
 
 export interface FilteredListProps<T> {
@@ -13,6 +13,8 @@ export interface FilteredListProps<T> {
   sortGroupsBy?: (a: { category: string; items: T[] }, b: { category: string; items: T[] }) => number
   skipFilter?: (item: T) => boolean
   onSelect?: (value: T | undefined, index: number) => void
+  noInitialSelection?: boolean
+  preserveActiveKey?: boolean
 }
 
 export function groupItems<T>(
@@ -39,9 +41,13 @@ export function groupItems<T>(
 export function useFilteredList<T>(props: FilteredListProps<T>) {
   const [store, setStore] = createStore<{ filter: string }>({ filter: "" })
 
-  type Group = { category: string; items: [T, ...T[]] }
+  type Group = { category: string; items: T[] }
 
   const empty: Group[] = []
+  const stableGroups = new Map<string, Group>()
+  let committedFilter: string | undefined
+  let filterChanged = false
+  let previousGroups = empty
 
   const search = (all: T[], needle: string) => {
     const skipFilter = props.skipFilter
@@ -77,17 +83,45 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
     { initialValue: empty },
   )
 
-  const flat = createMemo(() => (grouped.latest || []).flatMap((x) => x.items))
+  const committedGroups = createMemo(() => {
+    const next = grouped()
+    filterChanged = committedFilter !== undefined && committedFilter !== store.filter
+    committedFilter = store.filter
+    if (!props.preserveActiveKey) return next
+    if (filterChanged) stableGroups.clear()
+    const categories = new Set(next.map((group) => group.category))
+    for (const category of stableGroups.keys()) if (!categories.has(category)) stableGroups.delete(category)
+    return next.map((group) => {
+      const existing = stableGroups.get(group.category)
+      if (existing) {
+        existing.items = group.items
+        return existing
+      }
+      const stable = createMutable(group)
+      stableGroups.set(group.category, stable)
+      return stable
+    })
+  })
+
+  const flat = createMemo(() => committedGroups().flatMap((x) => x.items))
+  const filteredGroups = committedGroups as typeof committedGroups & { readonly latest: Group[]; readonly loading: boolean }
+  Object.defineProperties(filteredGroups, {
+    latest: { get: committedGroups },
+    loading: { get: () => grouped.loading },
+  })
 
   // Lists open on their first row; `current` only marks the selected item.
   const list = createList({
     items: () => flat().map(props.key),
-    initialActive: flat()[0] ? props.key(flat()[0]) : "",
+    initialActive: props.noInitialSelection ? "" : flat()[0] ? props.key(flat()[0]) : "",
     loop: true,
   })
 
-  const reset = () => {
-    const all = flat()
+  const reset = (all = flat()) => {
+    if (props.noInitialSelection) {
+      list.setActive("")
+      return
+    }
 
     if (all.length === 0) return
     list.setActive(props.key(all[0]))
@@ -120,7 +154,15 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
 
   createEffect(
     on(grouped, () => {
-      reset()
+      const next = committedGroups()
+      const active = list.active()
+      const previousHadRows = previousGroups.some((group) => group.items.length > 0)
+      const keepActive =
+        props.preserveActiveKey &&
+        !filterChanged &&
+        (active ? next.some((group) => group.items.some((item) => props.key(item) === active)) : previousHadRows)
+      if (!keepActive) reset(next.flatMap((group) => group.items))
+      previousGroups = next
     }),
   )
 
@@ -129,7 +171,7 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
   }
 
   return {
-    grouped,
+    grouped: filteredGroups,
     filter: () => store.filter,
     flat,
     reset,

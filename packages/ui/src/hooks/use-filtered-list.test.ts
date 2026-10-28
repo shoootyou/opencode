@@ -1,5 +1,62 @@
 import { expect, test } from "bun:test"
-import { groupItems } from "./use-filtered-list"
+import { createRoot, createSignal } from "solid-js"
+import { groupItems, useFilteredList } from "./use-filtered-list"
+
+const flush = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+test("keeps the first row selected by default after an item append", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((stop) => {
+    dispose = stop
+    const [items, set] = createSignal([{ id: "first" }, { id: "third" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id })
+  })
+  await flush()
+  list.setActive("third")
+  setItems([{ id: "first" }, { id: "third" }, { id: "new" }])
+  await flush()
+  expect(list.active()).toBe("first")
+  dispose()
+})
+
+test("preserves the active key for opted-in unchanged-filter appends", async () => {
+  let dispose!: () => void
+  let setItems!: (items: { id: string }[]) => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((stop) => {
+    dispose = stop
+    const [items, set] = createSignal([{ id: "first" }, { id: "third" }])
+    setItems = set
+    list = useFilteredList({ items, key: (item) => item.id, preserveActiveKey: true })
+  })
+  await flush()
+  list.setActive("third")
+  const group = list.grouped.latest[0]
+  setItems([{ id: "first" }, { id: "third" }, { id: "new" }])
+  await flush()
+  expect(list.active()).toBe("third")
+  expect(list.grouped.latest[0]).toBe(group)
+  dispose()
+})
+
+test("does not initially select when opted out", async () => {
+  let dispose!: () => void
+  let list!: ReturnType<typeof useFilteredList<{ id: string }>>
+  createRoot((stop) => {
+    dispose = stop
+    const [items] = createSignal([{ id: "first" }])
+    list = useFilteredList({ items, key: (item) => item.id, noInitialSelection: true })
+  })
+  await flush()
+  expect(list.active()).toBe("")
+  dispose()
+})
 
 test("groups under one empty category without a groupBy", () => {
   expect(groupItems(["b", "a"], {})).toEqual([{ category: "", items: ["b", "a"] }])
