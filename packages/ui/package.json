@@ -103,7 +103,7 @@
     "pack": "bun run script/pack.ts",
     "typecheck": "bun check --no-script",
     "typecheck:tsc": "tsc --noEmit",
-    "test": "bun test src --only-failures",
+    "test": "bun test --conditions=browser src --only-failures",
     "dev": "vite",
     "bench:motion": "bun script/motion-bench.ts",
     "generate:tailwind": "bun run script/tailwind.ts",

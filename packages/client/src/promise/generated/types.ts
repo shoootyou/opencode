@@ -158,6 +158,8 @@ export type SessionMessageToolStateRunning1 = {
   metadata: { [x: string]: JsonValue }
 }
 
+export type EventLogError = { type: "log.error"; reason: "Session log unavailable" }
+
 export type SessionInterruptResponse = { interrupted: boolean }
 
 export type FormID = string
@@ -1086,6 +1088,16 @@ export type SessionRenamed = {
   durable: { aggregateID: string; seq: EventSeq; version: 1 }
   location?: LocationRef
   data: { sessionID: SessionID; title: string }
+}
+
+export type SessionArchiveChanged = {
+  id: EventID
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.archive.changed"
+  durable: { aggregateID: string; seq: EventSeq; version: 1 }
+  location?: LocationRef
+  data: { sessionID: SessionID; archived: number | null }
 }
 
 export type SessionMetadataUpdated = {
@@ -2626,6 +2638,7 @@ export type SessionEventDurable =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchiveChanged
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -2691,6 +2704,7 @@ export type V2Event =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchiveChanged
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -2775,7 +2789,7 @@ export type V2Event =
   | V2EventRpc
   | V2EventServerConnected
 
-export type SessionLogItem = SessionEventDurable | EventLogSynced
+export type SessionLogItem = SessionEventDurable | EventLogSynced | EventLogError
 
 export type InvalidRequestError = {
   readonly _tag: "InvalidRequestError"
@@ -2858,6 +2872,16 @@ export type MessageNotFoundError = {
 }
 export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
+
+export type SessionArchiveLimitError = {
+  readonly _tag: "SessionArchiveLimitError"
+  readonly sessionID: string
+  readonly kind: "rate" | "retention"
+  readonly retryAfterMillis?: number | undefined
+  readonly message: string
+}
+export const isSessionArchiveLimitError = (value: unknown): value is SessionArchiveLimitError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionArchiveLimitError"
 
 export type CommandNotFoundError = {
   readonly _tag: "CommandNotFoundError"
@@ -4152,6 +4176,7 @@ export type EventSubscribeInput = {
         | "session.model.selected"
         | "session.moved"
         | "session.renamed"
+        | "session.archive.changed"
         | "session.metadata.updated"
         | "session.permissions"
         | "session.viewed"

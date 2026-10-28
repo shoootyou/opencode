@@ -1954,6 +1954,7 @@ export type EventSubscribeInput = {
         | "session.model.selected"
         | "session.moved"
         | "session.renamed"
+        | "session.archive.changed"
         | "session.metadata.updated"
         | "session.permissions"
         | "session.viewed"
