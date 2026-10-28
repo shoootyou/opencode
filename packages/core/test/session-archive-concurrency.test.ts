@@ -388,12 +388,25 @@ describe("native session archive commit admission", () => {
         ),
       )
 
+      const before = yield* Effect.all({
+        session: db.select().from(SessionTable).get(),
+        events: db.select().from(EventTable).all(),
+        sequence: db.select().from(EventSequenceTable).all(),
+      })
       const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
       expect(attempts).toBe(9)
-      expect(yield* db.select({ archived: SessionTable.time_archived }).from(SessionTable).get()).toEqual({
-        archived: null,
-      })
+      if (Exit.isFailure(result))
+        expect(result.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)).toMatchObject([
+          { _tag: "Session.ArchiveConflictError", sessionID },
+        ])
+      expect(
+        yield* Effect.all({
+          session: db.select().from(SessionTable).get(),
+          events: db.select().from(EventTable).all(),
+          sequence: db.select().from(EventSequenceTable).all(),
+        }),
+      ).toEqual(before)
     }),
   )
 
