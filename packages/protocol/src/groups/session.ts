@@ -9,7 +9,7 @@ import { DateTimeUtcFromMillis, NonNegativeInt, PositiveInt } from "@opencode/sc
 import { Event } from "@opencode/schema/event"
 import { SessionLegacy } from "@opencode/schema/session-legacy"
 import { Context, Schema, SchemaGetter, Struct } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
 import {
   ConflictError,
   LocationNotFoundError,
@@ -22,6 +22,7 @@ import {
   InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
+  SessionArchiveLimitError,
   SessionBusyError,
   SessionNotFoundError,
   SkillNotFoundError,
@@ -304,14 +305,17 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           title: Schema.String.pipe(Schema.optional),
           metadata: Session.Metadata.pipe(Schema.optional),
           permissions: Permission.Ruleset.pipe(Schema.optional),
-          archived: Schema.Boolean.pipe(Schema.optional).annotate({
+          archived: Schema.optionalKey(Schema.Boolean).annotate({
             description:
               "Archive the session with true or restore it with false. Repeating the current state is a no-op.",
           }),
         }),
         success: HttpApiSchema.NoContent,
-        error: [SessionNotFoundError, LocationNotFoundError],
-      }).annotateMerge(
+        error: [ConflictError, SessionArchiveLimitError, SessionNotFoundError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "session.update",
           summary: "Update session",
@@ -660,7 +664,9 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           follow: BooleanFromString.pipe(Schema.optional),
         },
         success: HttpApiSchema.StreamSse({
-          data: Schema.Union([SessionEvent.Durable, EventLog.Synced]).annotate({ identifier: "SessionLogItem" }),
+          data: Schema.Union([SessionEvent.Durable, EventLog.Synced, EventLog.Error]).annotate({
+            identifier: "SessionLogItem",
+          }),
         }),
         error: SessionNotFoundError,
       }).annotateMerge(
@@ -668,7 +674,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
           identifier: "session.log",
           summary: "Read the session log",
           description:
-            "Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true.",
+            'Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true. A terminal {"type":"log.error","reason":"Session log unavailable"} item closes the stream without a later log.synced marker.',
         }),
       ),
     )

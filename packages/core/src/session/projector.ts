@@ -1,6 +1,6 @@
 export * as SessionProjector from "./projector.js"
 
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Layer, Schema, Stream } from "effect"
 import path from "path"
 import { Database } from "../database/database.js"
@@ -633,6 +633,19 @@ const layer = Layer.effectDiscard(
         .run()
         .pipe(Effect.orDie),
     )
+    yield* bus.project(SessionEvent.ArchiveChanged, (event) =>
+      db
+        .update(SessionTable)
+        .set({ time_archived: event.data.archived, time_updated: event.created })
+        .where(
+          and(
+            eq(SessionTable.id, event.data.sessionID),
+            event.data.archived === null ? isNotNull(SessionTable.time_archived) : isNull(SessionTable.time_archived),
+          ),
+        )
+        .run()
+        .pipe(Effect.orDie),
+    )
     yield* bus.project(SessionEvent.Viewed, (event) => {
       const idle = event.data.idle
       return db
@@ -651,7 +664,7 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ time_archived: event.created, time_updated: event.created })
-        .where(eq(SessionTable.id, event.data.sessionID))
+        .where(and(eq(SessionTable.id, event.data.sessionID), isNull(SessionTable.time_archived)))
         .run()
         .pipe(Effect.orDie),
     )
@@ -659,7 +672,7 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ time_archived: null, time_updated: event.created })
-        .where(eq(SessionTable.id, event.data.sessionID))
+        .where(and(eq(SessionTable.id, event.data.sessionID), isNotNull(SessionTable.time_archived)))
         .run()
         .pipe(Effect.orDie),
     )

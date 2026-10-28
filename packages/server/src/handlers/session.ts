@@ -6,7 +6,7 @@ import { SessionTransfer } from "@opencode/core/session/transfer"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Form } from "@opencode/core/form"
 import { DateTime, Effect, Stream } from "effect"
-import { HttpServerResponse } from "effect/http"
+import { HttpEffect, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
 import { SessionMediaMessageResponse } from "@opencode/protocol/groups/message"
 import { SessionMediaInboxResponse } from "@opencode/protocol/groups/session"
@@ -23,10 +23,12 @@ import {
   InvalidCursorError,
   MessageNotFoundError,
   ServiceUnavailableError,
+  SessionArchiveLimitError,
   SessionBusyError,
   SkillNotFoundError,
 } from "@opencode/protocol/errors"
 import { AbsolutePath } from "@opencode/core/schema"
+import { EventLog } from "@opencode/schema/event-log"
 import { locationErrors } from "../location"
 import { failedMessageDecode, failedSnapshot, missingMessage, missingSession } from "./session-error"
 
@@ -258,6 +260,23 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           if (ctx.payload.archived !== undefined)
             yield* (ctx.payload.archived ? session.archive : session.unarchive)(ctx.params.sessionID).pipe(
               Effect.catchTag("Session.NotFoundError", missingSession),
+              Effect.catchTag(
+                "Session.ArchiveConflictError",
+                (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
+              ),
+              Effect.catchTag(
+                "Session.ArchiveLimitError",
+                (error) =>
+                  new SessionArchiveLimitError({
+                    sessionID: error.sessionID,
+                    kind: error.kind,
+                    ...(error.retryAfterMillis === undefined ? {} : { retryAfterMillis: error.retryAfterMillis }),
+                    message:
+                      error.kind === "rate"
+                        ? "Archive transition rate limit exceeded"
+                        : "Archive history limit reached; restore remains available.",
+                  }),
+              ),
             )
           return HttpApiSchema.NoContent.make()
         }),
@@ -599,9 +618,25 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.log",
         Effect.fn(function* (ctx) {
           yield* session.get(ctx.params.sessionID).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(
+              HttpServerResponse.setHeaders(response, {
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+              }),
+            ),
+          )
           return session
             .log({ sessionID: ctx.params.sessionID, after: ctx.query.after, follow: ctx.query.follow })
-            .pipe(Stream.orDie)
+            .pipe(
+              Stream.catchTags({
+                "Bus.InvalidDurableEvent": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+                "Session.NotFoundError": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+              }),
+            )
         }),
       )
       .handle(

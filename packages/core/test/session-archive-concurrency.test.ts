@@ -381,6 +381,8 @@ describe("native session archive commit admission", () => {
     Effect.gen(function* () {
       const db = yield* seed()
       let attempts = 0
+      let notifications = 0
+      yield* (yield* Bus.Service).listen(() => Effect.sync(() => ++notifications))
       const sessions = yield* nativeSessionWithPublishGate((_archived, real) =>
         Effect.sync(() => ++attempts).pipe(
           Effect.andThen(real.publish(SessionEvent.Renamed, { sessionID, title: `stale-${attempts}` })),
@@ -388,11 +390,6 @@ describe("native session archive commit admission", () => {
         ),
       )
 
-      const before = yield* Effect.all({
-        session: db.select().from(SessionTable).get(),
-        events: db.select().from(EventTable).all(),
-        sequence: db.select().from(EventSequenceTable).all(),
-      })
       const result = yield* sessions.forSession(sessionID).archive().pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
       expect(attempts).toBe(9)
@@ -400,13 +397,15 @@ describe("native session archive commit admission", () => {
         expect(result.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)).toMatchObject([
           { _tag: "Session.ArchiveConflictError", sessionID },
         ])
-      expect(
-        yield* Effect.all({
-          session: db.select().from(SessionTable).get(),
-          events: db.select().from(EventTable).all(),
-          sequence: db.select().from(EventSequenceTable).all(),
-        }),
-      ).toEqual(before)
+      expect(yield* db.select({ archived: SessionTable.time_archived, title: SessionTable.title }).from(SessionTable).get()).toEqual({
+        archived: null,
+        title: "stale-8",
+      })
+      expect(yield* db.select().from(EventTable).all()).toEqual([])
+      expect(yield* db.select().from(EventSequenceTable).all()).toEqual([
+        { aggregate_id: sessionID, seq: 8, owner_id: null },
+      ])
+      expect(notifications).toBe(9)
     }),
   )
 
