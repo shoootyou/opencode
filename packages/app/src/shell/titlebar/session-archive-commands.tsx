@@ -36,7 +36,9 @@ export function useTitlebarArchiveCommands(): void {
 
                 return draft ? { type: "draft" as const, server: draft.server } : { type: "draft" as const }
               })()
-            : route
+            : route.type === "home" || route.type === "settings" || route.type === "connect"
+              ? route
+              : { type: "home" as const }
 
       if (route.type !== "session") return { route: normalized, servers, selectedServer, pending: false }
       const session = global.serverCtx(route.server)?.data.session.get(route.sessionId)
