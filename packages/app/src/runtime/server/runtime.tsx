@@ -106,12 +106,12 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
     const [archivePendingVersion, setArchivePendingVersion] = createSignal(0)
 
     const sessionArchiveActions = createSessionArchiveActions({
-      update: async ({ server: key, sessionID, archive }) => {
+      update: async ({ server: key, sessionID, archived }) => {
         // SAFETY: session archive actions are invoked with keys created by ServerConnection.key.
         const ctx = serverCtxs.get(key as ServerConnection.Key)
 
         if (!ctx) throw new Error("Server is unavailable")
-        await ctx.sdk.api.session.update({ sessionID, archive })
+        await ctx.sdk.api.session.update({ sessionID, archived })
       },
       sync: async ({ server: key, sessionID }) => {
         // SAFETY: session archive actions are invoked with keys created by ServerConnection.key.
@@ -129,7 +129,6 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
             kind === "refresh" ? language.t("session.archive.refreshFailed") : formatServerError(error, language.t),
         })
       },
-      now: Date.now,
       onPendingChange: () => setArchivePendingVersion((value) => value + 1),
     })
 

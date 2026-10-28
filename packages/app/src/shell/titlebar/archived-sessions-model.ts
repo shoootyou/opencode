@@ -27,7 +27,7 @@ export type ArchivedSessionsModel = Readonly<{
 }>
 
 type ArchiveList = (
-  input?: { archived?: "only"; parentID?: null; order?: "desc"; limit?: number; cursor?: string },
+  input?: { archived?: boolean; parentID?: null; order?: "desc"; limit?: number; cursor?: string },
   options?: { signal?: AbortSignal },
 ) => Promise<{ data: ArchiveSession[]; cursor: { previous?: string | null; next?: string | null } }>
 
@@ -37,7 +37,7 @@ export async function loadArchivedSessions(
 ): Promise<Readonly<{ sessions: readonly ArchiveSession[]; cursor: Readonly<{ next?: string }> }>> {
   const response = await api.list(
     {
-      archived: "only",
+      archived: true,
       parentID: null,
       order: "desc",
       limit: 50,
@@ -212,7 +212,7 @@ export function createArchivedSessionsModel<Tab>(
       notify()
 
       try {
-        const committed = await deps.setArchive({ server: deps.server, sessionID, archive: null })
+        const committed = await deps.setArchive({ server: deps.server, sessionID, archived: false })
 
         if (!committed) return false
 

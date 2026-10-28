@@ -3,7 +3,7 @@ import path from "path"
 import type { SessionInfo } from "@opencode/client"
 import { Project } from "@opencode/schema/project"
 import { TextAttributes, type RGBA } from "@opentui/core"
-import { useDialog } from "../ui/dialog"
+import { DIALOG_LIST_INSET, useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useRoute } from "../context/route"
 import { useData } from "../context/data"
@@ -44,9 +44,10 @@ type SessionListResult<T extends SessionListItem, Location> = {
 
 export function createSessionListModel<Location>(input: SessionListModelInput<Location>) {
   const identity = { ...input }
-  const request = identity.showArchived ? { archived: "only" as const } : {}
+  const request = { archived: identity.showArchived }
   const matches = <T extends SessionListItem>(session: T) =>
-    !session.parentID && (identity.showArchived ? typeof session.time.archived === "number" : session.time.archived === undefined)
+    !session.parentID &&
+    (identity.showArchived ? typeof session.time.archived === "number" : session.time.archived === undefined)
   const sameIdentity = (result: SessionListResult<SessionListItem, Location> | undefined) =>
     result?.identity !== undefined &&
     result.identity.query === identity.query &&
@@ -122,21 +123,24 @@ export function DialogSessionList() {
         if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         const current = data.location.info(location)
         if (!current) throw new Error("Location unavailable")
-        const response = await client.api.session.list({
-          ...(allProjects
-            ? {}
-            : current.project.id === Project.ID.global
-              ? { directory: current.directory }
-              : {
-                  project: current.project.id,
-                  subpath: path.relative(current.project.directory, current.directory).replaceAll("\\", "/"),
-                }),
-          ...(query ? { search: query } : {}),
-          ...(showArchived ? { archived: "only" as const } : {}),
-          limit: 50,
-          order: "desc",
-          parentID: null,
-        }, { signal: controller.signal })
+        const response = await client.api.session.list(
+          {
+            ...(allProjects
+              ? {}
+              : current.project.id === Project.ID.global
+                ? { directory: current.directory }
+                : {
+                    project: current.project.id,
+                    subpath: path.relative(current.project.directory, current.directory).replaceAll("\\", "/"),
+                  }),
+            ...(query ? { search: query } : {}),
+            archived: showArchived,
+            limit: 50,
+            order: "desc",
+            parentID: null,
+          },
+          { signal: controller.signal },
+        )
         if (disposed) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         const sessions = response.data
         return {
@@ -145,7 +149,8 @@ export function DialogSessionList() {
           error: undefined,
         }
       } catch (error) {
-        if (disposed || controller.signal.aborted) return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
+        if (disposed || controller.signal.aborted)
+          return { identity: { query, allProjects, location, showArchived }, sessions: [] as SessionInfo[] }
         // A transient transport failure must degrade search, not crash the TUI
         // through the root ErrorBoundary when the errored resource is read.
         return {
@@ -296,6 +301,10 @@ export function DialogSessionList() {
           </Show>
         </box>
       }
+      searchInTitle
+      titlePlaceholder={
+        !allProjects() && currentProjectName() ? `Search sessions in ${currentProjectName()}` : "Search sessions"
+      }
       options={options()}
       skipFilter={true}
       current={currentSessionID()}
@@ -316,14 +325,14 @@ export function DialogSessionList() {
         },
       ]}
       emptyView={
-        <box paddingLeft={4} paddingRight={4}>
+        <box paddingLeft={DIALOG_LIST_INSET} paddingRight={DIALOG_LIST_INSET}>
           <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
             {searchState().message}
           </text>
         </box>
       }
       noMatchView={
-        <box paddingLeft={4} paddingRight={4}>
+        <box paddingLeft={DIALOG_LIST_INSET} paddingRight={DIALOG_LIST_INSET}>
           <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
             {searchState().message}
           </text>
@@ -389,10 +398,13 @@ export function DialogSessionList() {
             archiveController = controller
             void (async () => {
               try {
-                await client.api.session.update({
-                  sessionID: session.id,
-                  archive: typeof session.time.archived === "number" ? null : Date.now(),
-                }, { signal: controller.signal })
+                await client.api.session.update(
+                  {
+                    sessionID: session.id,
+                    archived: typeof session.time.archived !== "number",
+                  },
+                  { signal: controller.signal },
+                )
                 if (disposed || controller.signal.aborted) return
                 data.session.invalidate(session.id)
                 await data.session.sync(session.id).catch((error) => {

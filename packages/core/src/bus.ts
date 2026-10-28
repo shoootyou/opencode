@@ -12,6 +12,7 @@ import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { isDeepStrictEqual } from "node:util"
 import { Durable } from "@opencode/schema/durable-event-manifest"
 import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionLegacy } from "@opencode/schema/session-legacy"
 import type { SessionID } from "@opencode/schema/session-id"
 import { AbsolutePath } from "@opencode/schema/schema"
 
@@ -70,23 +71,48 @@ const envelope = (aggregateID: string, seq: number, version: number) => ({
   version: Event.Version.make(version),
 })
 
+// Every stored event decodes through here, so payloads written in older shapes are upgraded in one place.
+const decodeStoredData = (definition: Event.DurableDefinition, data: unknown) =>
+  Schema.decodeUnknownSync(definition.data)(SessionLegacy.event(definition.type, data))
+
+const invalidLegacyArchiveEvent = () =>
+  new InvalidDurableEventError({ type: SessionEvent.ArchiveChanged.type, message: "Invalid legacy archive event" })
+
+const isLegacyArchiveEvent = (event: SerializedEvent) =>
+  event.type === versionedType(SessionEvent.ArchiveChanged.type, SessionEvent.ArchiveChanged.durable.version)
+
 const decodeSerializedEvent = (event: SerializedEvent): Event.Payload => {
   const definition = Durable.get(event.type)
   if (!definition?.durable) {
     throw new InvalidDurableEventError({ type: event.type, message: `Unknown durable event type ${event.type}` })
   }
+  const data = decodeStoredData(definition, event.data)
   return {
     id: event.id,
     created: event.created ?? 0,
     type: definition.type,
     durable: envelope(event.aggregateID, event.seq, definition.durable.version),
-    data: Schema.decodeUnknownSync(definition.data)(event.data),
+    data,
   }
 }
 
 export const versionedType = Event.versionedType
 export const durable = Event.durable
 export const ephemeral = Event.ephemeral
+
+const decodeLegacyArchiveEvent = (event: SerializedEvent) =>
+  Effect.try({
+    try: () => decodeSerializedEvent(event),
+    catch: invalidLegacyArchiveEvent,
+  }).pipe(
+    Effect.filterOrFail(
+      (payload) => (payload.data as Record<string, unknown>).sessionID === event.aggregateID,
+      invalidLegacyArchiveEvent,
+    ),
+  )
+
+const decodeDurableEvent = (event: SerializedEvent) =>
+  isLegacyArchiveEvent(event) ? decodeLegacyArchiveEvent(event) : Effect.sync(() => decodeSerializedEvent(event))
 
 export interface PublishOptions {
   readonly id?: Event.ID
@@ -157,14 +183,14 @@ export interface Interface {
     readonly aggregateID: string
     readonly after?: number
     readonly follow?: boolean
-  }) => Stream.Stream<LogItem>
+  }) => Stream.Stream<LogItem, InvalidDurableEventError>
   /** @deprecated Use `subscribe()` and consume the returned stream. */
   readonly listen: (listener: Subscriber) => Effect.Effect<Unsubscribe>
   readonly project: <D extends Event.Definition>(definition: D, projector: Subscriber<D>) => Effect.Effect<void>
   readonly replay: (
     event: SerializedEvent,
     options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
-  ) => Effect.Effect<void>
+  ) => Effect.Effect<void, InvalidDurableEventError>
   readonly remove: (aggregateID: string) => Effect.Effect<void>
   readonly claim: (aggregateID: string, ownerID: string) => Effect.Effect<void>
 }
@@ -289,6 +315,7 @@ export function configured(options?: Options) {
             readonly aggregateID: string
             readonly ownerID?: string
             readonly strictOwner?: boolean
+            readonly legacy?: boolean
           },
           commit?: (seq: number) => Effect.Effect<void>,
         ) {
@@ -328,6 +355,7 @@ export function configured(options?: Options) {
                         const latest = row?.seq ?? -1
                         const encoded = Schema.encodeUnknownSync(definition.data)(event.data) as Record<string, unknown>
                         if (input?.strictOwner && row?.ownerID && row.ownerID !== input.ownerID) {
+                          if (input.legacy) return yield* Effect.fail(invalidLegacyArchiveEvent())
                           yield* Effect.die(
                             new InvalidDurableEventError({
                               type: event.type,
@@ -336,7 +364,7 @@ export function configured(options?: Options) {
                           )
                         }
                         if (input && input.seq <= latest) {
-                           if (!retained) return
+                          if (!retained) return
                           const stored = yield* db
                             .select()
                             .from(EventTable)
@@ -347,7 +375,8 @@ export function configured(options?: Options) {
                             stored?.id === event.id &&
                             stored.type === versionedType(definition.type, durable.version) &&
                             stored.created === (event.created ?? 0) &&
-                            isDeepStrictEqual(stored.data, encoded)
+                            // Rows written before a payload rename compare in their upgraded shape.
+                            isDeepStrictEqual(SessionLegacy.event(definition.type, stored.data), encoded)
                           ) {
                             if (input.ownerID && row?.ownerID == null) {
                               yield* db
@@ -378,7 +407,7 @@ export function configured(options?: Options) {
                             }),
                           )
                         }
-                         if (retained) {
+                        if (retained) {
                           const stored = yield* db
                             .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
                             .from(EventTable)
@@ -414,7 +443,7 @@ export function configured(options?: Options) {
                           })
                           .run()
                           .pipe(Effect.orDie)
-                         if (retained)
+                        if (retained)
                           yield* db
                             .insert(EventTable)
                             .values([
@@ -433,7 +462,11 @@ export function configured(options?: Options) {
                       }),
                     { behavior: "immediate" },
                   )
-                  .pipe(Effect.orDie)
+                  .pipe(
+                    Effect.catch((error: unknown) =>
+                      error instanceof InvalidDurableEventError ? Effect.fail(error) : Effect.die(error),
+                    ),
+                  )
                 if (committed) {
                   committed.route()
                   yield* Effect.forEach(
@@ -465,11 +498,17 @@ export function configured(options?: Options) {
               const aggregateID = (event.data as Record<string, unknown>)[definition.durable.aggregate]
               if (typeof aggregateID !== "string")
                 return yield* commitDurableEvent(definition, event as Event.Payload, undefined, commit).pipe(
+                  Effect.orDie,
                   Effect.as(event),
                 )
               return yield* durableLocks.withLock(aggregateID)(
                 Effect.gen(function* () {
-                  const committed = yield* commitDurableEvent(definition, event as Event.Payload, undefined, commit)
+                  const committed = yield* commitDurableEvent(
+                    definition,
+                    event as Event.Payload,
+                    undefined,
+                    commit,
+                  ).pipe(Effect.orDie)
                   if (!committed) return event
                   event = committed.event as Event.Payload<D>
                   yield* notify(event as Event.Payload, true)
@@ -648,7 +687,7 @@ export function configured(options?: Options) {
                             .onConflictDoUpdate({ target: EventSequenceTable.aggregate_id, set: { seq: finalSeq } })
                             .run()
                             .pipe(Effect.orDie)
-                           if (rows.length > 0) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
+                          if (rows.length > 0) yield* db.insert(EventTable).values(rows).run().pipe(Effect.orDie)
                           return { events: queued, route }
                         }),
                       { behavior: "immediate" },
@@ -680,19 +719,26 @@ export function configured(options?: Options) {
               return yield* Effect.die(
                 new InvalidDurableEventError({ type: event.type, message: `Unknown durable event type ${event.type}` }),
               )
+            const legacy = isLegacyArchiveEvent(event)
+            const payload = legacy ? yield* decodeLegacyArchiveEvent(event) : decodeSerializedEvent(event)
+            if (legacy) {
+              const row = yield* db
+                .select({ ownerID: EventSequenceTable.owner_id })
+                .from(EventSequenceTable)
+                .where(eq(EventSequenceTable.aggregate_id, event.aggregateID))
+                .get()
+                .pipe(Effect.orDie)
+              if (row?.ownerID && row.ownerID !== options?.ownerID)
+                return yield* Effect.fail(invalidLegacyArchiveEvent())
+            }
             yield* durableLocks.withLock(event.aggregateID)(
               Effect.gen(function* () {
-                const payload = {
-                  id: event.id,
-                  created: event.created ?? 0,
-                  type: definition.type,
-                  data: Schema.decodeUnknownSync(definition.data)(event.data),
-                } as Event.Payload
                 const committed = yield* commitDurableEvent(definition, payload, {
                   seq: event.seq,
                   aggregateID: event.aggregateID,
                   ownerID: options?.ownerID,
-                  strictOwner: options?.strictOwner,
+                  strictOwner: legacy || options?.strictOwner,
+                  legacy,
                 })
                 if (committed && options?.publish) {
                   yield* notify(committed.event, true)
@@ -789,22 +835,25 @@ export function configured(options?: Options) {
             // Skip types missing from the durable manifest instead of failing the
             // read: the aggregate may hold events this process cannot decode. The
             // raw tail seq keeps cursors advancing across the resulting gaps.
-            Effect.map((rows) => ({
-              seq: rows.at(-1)?.seq,
-              events: rows.flatMap((event) => {
-                if (!Durable.get(event.type)?.durable) return []
-                return [
-                  decodeSerializedEvent({
-                    id: event.id,
-                    created: event.created,
-                    aggregateID: event.aggregate_id,
-                    seq: event.seq,
-                    type: event.type,
-                    data: event.data,
-                  }),
-                ]
-              }),
-            })),
+            Effect.flatMap((rows) =>
+              Effect.forEach(
+                rows.flatMap((event) =>
+                  Durable.get(event.type)?.durable
+                    ? [
+                        {
+                          id: event.id,
+                          created: event.created,
+                          aggregateID: event.aggregate_id,
+                          seq: event.seq,
+                          type: event.type,
+                          data: event.data,
+                        },
+                      ]
+                    : [],
+                ),
+                decodeDurableEvent,
+              ).pipe(Effect.map((events) => ({ seq: rows.at(-1)?.seq, events }))),
+            ),
           )
 
         const subscribeDurable = (aggregateID: string) =>
@@ -831,11 +880,11 @@ export function configured(options?: Options) {
           readonly aggregateID: string
           readonly after?: number
           readonly follow?: boolean
-        }): Stream.Stream<LogItem> =>
+        }): Stream.Stream<LogItem, InvalidDurableEventError> =>
           Stream.unwrap(
             Effect.gen(function* () {
               let sequence = input.after ?? -1
-              const readThrough = (through: number): Stream.Stream<Event.Payload> =>
+              const readThrough = (through: number): Stream.Stream<Event.Payload, InvalidDurableEventError> =>
                 Stream.paginate(sequence, (cursor) =>
                   readAfter(input.aggregateID, cursor, { through, limit: logReadPageSize }).pipe(
                     Effect.tap((page) =>
@@ -861,9 +910,11 @@ export function configured(options?: Options) {
                 aggregateID: input.aggregateID,
                 ...(target >= 0 ? { seq: Event.Seq.make(target) } : {}),
               }
-              const replay: Stream.Stream<LogItem> = readThrough(target).pipe(Stream.concat(Stream.make(marker)))
+              const replay: Stream.Stream<LogItem, InvalidDurableEventError> = readThrough(target).pipe(
+                Stream.concat(Stream.make(marker)),
+              )
               if (!wakes) return replay
-              const live: Stream.Stream<LogItem> = Stream.fromSubscription(wakes).pipe(
+              const live: Stream.Stream<LogItem, InvalidDurableEventError> = Stream.fromSubscription(wakes).pipe(
                 Stream.mapEffect(() => latestSequence(db, input.aggregateID)),
                 Stream.filter((target) => target > sequence),
                 Stream.flatMap((target) => readThrough(target)),

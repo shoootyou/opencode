@@ -54,7 +54,6 @@ export async function runTimelineArchive(
   input: Readonly<{ target: ArchiveTarget; session: ArchiveSession; sessions: readonly ArchiveSession[] }>,
   deps: Readonly<{
     setArchive: SetSessionArchive
-    now: () => number
     isActive: () => boolean
     currentRoute: () => Readonly<{ server: string; sessionID: string }> | undefined
     // oxlint-disable-next-line anti-slop/no-unknown-returns -- Navigation completion matters here; router-owned fulfillment values do not.
@@ -65,7 +64,7 @@ export async function runTimelineArchive(
 ): Promise<boolean> {
   if (input.session.id !== input.target.sessionID || input.session.parentID || !deps.isActive()) return false
 
-  if (isArchivedSession(input.session)) return deps.setArchive({ ...input.target, archive: null })
+  if (isArchivedSession(input.session)) return deps.setArchive({ ...input.target, archived: false })
 
   const landing = snapshotArchiveNeighbour({
     target: input.target,
@@ -73,7 +72,7 @@ export async function runTimelineArchive(
     sessions: input.sessions,
   })
 
-  const committed = await deps.setArchive({ ...input.target, archive: deps.now() })
+  const committed = await deps.setArchive({ ...input.target, archived: true })
 
   if (!committed || !deps.isActive()) return committed
   const current = isArchiveRouteCurrent(input.target, deps.currentRoute())

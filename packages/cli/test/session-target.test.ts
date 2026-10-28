@@ -1,3 +1,13 @@
+/**
+ * @spec-handoff
+ * @interface resolveSessionTarget({ continue: true }): Promise<SessionTarget>
+ * @behavior
+ *   - Explicit-ID reads remain unrestricted by archive state.
+ *   - Implicit --continue sends archived:false on every cursor page so an archived root cannot win selection.
+ * @edge-cases
+ *   - Later cursor pages retain the active-only filter.
+ * @see ../src/session-target.ts
+ */
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { OpenCode, type LocationGetOutput, type ModelRef, type SessionInfo } from "@opencode/client/promise"
 import { resolveSessionTarget, SessionTargetMutationError } from "../src/session-target"
@@ -74,6 +84,21 @@ describe("session target resolver", () => {
 
     const target = await resolveSessionTarget({ client, location: { directory: "/project" }, continue: true, prepare })
     expect(list).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenNthCalledWith(1, {
+      directory: "/project",
+      parentID: null,
+      archived: false,
+      limit: 50,
+      order: "desc",
+    })
+    expect(list).toHaveBeenNthCalledWith(2, {
+      directory: "/project",
+      parentID: null,
+      archived: false,
+      limit: 50,
+      order: "desc",
+      cursor: "page_2",
+    })
     expect(target.session.id).toBe("ses_implicit")
   })
 

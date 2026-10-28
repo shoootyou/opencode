@@ -2,8 +2,8 @@
  * @spec-handoff
  * @interface createData(input: CreateDataInput): Data
  * @behavior
- *   - session.archive.changed follows the upstream session.renamed metadata-event pattern.
- *   - It syncs metadata, joins a same-ID pending family read, then patches only time.archived.
+ *   - session.archive.changed, session.archived, and session.unarchived follow the upstream session.renamed metadata-event pattern.
+ *   - Each syncs metadata, joins a same-ID pending family read, then patches only time.archived.
  *   - Connection events do not sweep remembered session metadata.
  * @edge-cases
  *   - Epoch zero remains archived; null removes only time.archived.
@@ -55,6 +55,16 @@ function archiveEvent(sessionID: string, archived: number | null): OpenCodeEvent
   }
 }
 
+function nativeArchiveEvent(sessionID: string): OpenCodeEvent {
+  return {
+    id: `evt_native_${sessionID}`,
+    created: 0,
+    type: "session.archived",
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
+    data: { sessionID },
+  } satisfies OpenCodeEvent
+}
+
 async function wait(check: () => boolean) {
   const started = Date.now()
   while (!check()) {
@@ -84,6 +94,31 @@ test("applies archive zero after ordinary and pending-family hydration without o
     expect(setup.data.session.get("ses_root")?.time).toEqual({ created: 3, updated: 9, archived: 0 })
   } finally {
     familyRead.resolve(Response.json({ data: session("ses_root", 17) }))
+    setup.dispose()
+  }
+})
+
+test("reapplies the native archive event after a same-ID pending family hydration", async () => {
+  const familyRead = Promise.withResolvers<Response>()
+  let reads = 0
+  const setup = fixture(async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    if (!request.url.endsWith("/api/session/ses_native")) return Response.json({ data: [], cursor: {} })
+    reads++
+    if (reads === 1) return familyRead.promise
+    return Response.json({ data: session("ses_native", 17) })
+  })
+  try {
+    setup.data.session.remember(session("ses_native", 4))
+    const pendingFamily = setup.data.session.sync("ses_native", { children: true })
+    await wait(() => reads === 1)
+    setup.emit(nativeArchiveEvent("ses_native"))
+    familyRead.resolve(Response.json({ data: session("ses_native", 17) }))
+    await pendingFamily
+    await wait(() => setup.data.session.get("ses_native")?.time.archived === 0)
+    expect(setup.data.session.get("ses_native")?.time).toEqual({ created: 3, updated: 9, archived: 0 })
+  } finally {
+    familyRead.resolve(Response.json({ data: session("ses_native", 17) }))
     setup.dispose()
   }
 })

@@ -1,8 +1,8 @@
 /**
  * @spec-handoff
- * @interface SessionsQuery({ archived?: boolean | "only", cursor?: SessionsCursor }): SessionsQuery
+ * @interface SessionsQuery({ archived?: boolean, cursor?: SessionsCursor }): SessionsQuery
  * @behavior
- *   - Decodes only the literal query strings "true", "false", and "only" for archived.
+ *   - Decodes only the literal query strings "true" and "false" for archived.
  *   - Carries archived with scope, order, and search in an opaque cursor.
  *   - Uses cursor-carried fields rather than contradictory follow-up query fields.
  * @edge-cases
@@ -18,13 +18,13 @@ describe("session archive cursor contract", () => {
   test("decodes archived from literal boolean query strings rather than truthiness", () => {
     expect(Schema.decodeUnknownSync(SessionsQuery)({ archived: "true" })).toMatchObject({ archived: true })
     expect(Schema.decodeUnknownSync(SessionsQuery)({ archived: "false" })).toMatchObject({ archived: false })
-    expect(Schema.decodeUnknownSync(SessionsQuery)({ archived: "only" })).toMatchObject({ archived: "only" })
+    expect(() => Schema.decodeUnknownSync(SessionsQuery)({ archived: "only" })).toThrow()
     expect(() => Schema.decodeUnknownSync(SessionsQuery)({ archived: "yes" })).toThrow()
   })
 
   test("round trips archived with search, order, and scope", async () => {
     const input = {
-      archived: "only" as const,
+      archived: true,
       search: "protocol",
       order: "desc" as const,
       parentID: null,

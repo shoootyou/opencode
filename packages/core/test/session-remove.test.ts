@@ -64,6 +64,7 @@ describe("Session.remove", () => {
       const session = yield* Session.Service
       const parent = yield* session.create({ location })
       const child = yield* session.create({ parentID: parent.id })
+      yield* session.archive(child.id)
       yield* session.environment({ sessionID: parent.id, variables: { SESSION_ENV: "parent" } })
       yield* session.environment({ sessionID: child.id, variables: { SESSION_ENV: "child" } })
       const locations = yield* LocationServiceMap.Service
@@ -72,6 +73,7 @@ describe("Session.remove", () => {
 
       yield* session.remove(parent.id)
 
+      expect((yield* session.list({ parentID: parent.id })).data).toEqual([])
       expect((yield* session.list()).data).toEqual([])
       expect(closed).toEqual([parent.id, child.id])
       const environments = yield* SessionEnvironment.Service

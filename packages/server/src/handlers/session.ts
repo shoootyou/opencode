@@ -5,9 +5,9 @@ import { SessionTransfer } from "@opencode/core/session/transfer"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Form } from "@opencode/core/form"
 import { DateTime, Effect, Stream } from "effect"
+import { HttpEffect, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
 import { Api } from "../api"
-import { SessionsCursor } from "@opencode/protocol/groups/session"
 import {
   ConflictError,
   CommandExecutionError,
@@ -19,15 +19,14 @@ import {
   InvalidCursorError,
   MessageNotFoundError,
   ServiceUnavailableError,
-  SessionBusyError,
   SessionArchiveLimitError,
+  SessionBusyError,
   SkillNotFoundError,
 } from "@opencode/protocol/errors"
 import { AbsolutePath } from "@opencode/core/schema"
+import { EventLog } from "@opencode/schema/event-log"
 import { locationErrors } from "../location"
 import { failedMessageDecode, failedSnapshot, missingMessage, missingSession } from "./session-error"
-
-const DefaultSessionsLimit = 50
 
 function missingForm(id: Form.ID) {
   return new FormNotFoundError({ id, message: `Form not found: ${id}` })
@@ -62,44 +61,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.list",
         Effect.fn(function* (ctx) {
-          const query =
-            ctx.query.cursor !== undefined
-              ? yield* SessionsCursor.parse(ctx.query.cursor).pipe(
-                  Effect.mapError(() => new InvalidCursorError({ message: "Invalid cursor" })),
-                )
-              : ctx.query
-          const page = yield* session.list({
-            ...query,
-            limit: ctx.query.limit ?? DefaultSessionsLimit,
-          })
-          const sessions = page.data
-          const first = sessions[0]
-          const last = sessions.at(-1)
-          return {
-            data: sessions,
-            cursor: {
-              previous: first
-                ? SessionsCursor.make({
-                    ...query,
-                    anchor: {
-                      id: first.id,
-                      time: DateTime.toEpochMillis(first.time.updated),
-                      direction: "previous",
-                    },
-                  })
-                : undefined,
-              next: last
-                ? SessionsCursor.make({
-                    ...query,
-                    anchor: {
-                      id: last.id,
-                      time: DateTime.toEpochMillis(last.time.updated),
-                      direction: "next",
-                    },
-                  })
-                : undefined,
-            },
-          }
+          return yield* session
+            .list(ctx.query)
+            .pipe(
+              Effect.catchTag(
+                "Session.InvalidListCursorError",
+                (error) => new InvalidCursorError({ message: error.message }),
+              ),
+            )
         }),
       )
       .handle(
@@ -278,25 +247,27 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             yield* session
               .setPermissions({ sessionID: ctx.params.sessionID, permissions: ctx.payload.permissions })
               .pipe(Effect.catchTag("Session.NotFoundError", missingSession))
-          if (ctx.payload.archive !== undefined)
-            yield* session
-              .setArchive({ sessionID: ctx.params.sessionID, archived: ctx.payload.archive })
-              .pipe(
-                Effect.catchTag("Session.NotFoundError", missingSession),
-                Effect.catchTag(
-                  "Session.ArchiveConflictError",
-                  (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
-                ),
-                Effect.catchTag(
-                  "Session.ArchiveLimitError",
-                  (error) => new SessionArchiveLimitError({
+          if (ctx.payload.archived !== undefined)
+            yield* (ctx.payload.archived ? session.archive : session.unarchive)(ctx.params.sessionID).pipe(
+              Effect.catchTag("Session.NotFoundError", missingSession),
+              Effect.catchTag(
+                "Session.ArchiveConflictError",
+                (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
+              ),
+              Effect.catchTag(
+                "Session.ArchiveLimitError",
+                (error) =>
+                  new SessionArchiveLimitError({
                     sessionID: error.sessionID,
                     kind: error.kind,
                     ...(error.retryAfterMillis === undefined ? {} : { retryAfterMillis: error.retryAfterMillis }),
-                    message: error.kind === "rate" ? "Archive transition rate limit exceeded" : "Archive history limit reached; restore remains available.",
+                    message:
+                      error.kind === "rate"
+                        ? "Archive transition rate limit exceeded"
+                        : "Archive history limit reached; restore remains available.",
                   }),
-                ),
-              )
+              ),
+            )
           return HttpApiSchema.NoContent.make()
         }),
       )
@@ -631,9 +602,25 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.log",
         Effect.fn(function* (ctx) {
           yield* session.get(ctx.params.sessionID).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(
+              HttpServerResponse.setHeaders(response, {
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+              }),
+            ),
+          )
           return session
             .log({ sessionID: ctx.params.sessionID, after: ctx.query.after, follow: ctx.query.follow })
-            .pipe(Stream.orDie)
+            .pipe(
+              Stream.catchTags({
+                "Bus.InvalidDurableEvent": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+                "Session.NotFoundError": () =>
+                  Stream.succeed({ type: "log.error" as const, reason: EventLog.UnavailableReason }),
+              }),
+            )
         }),
       )
       .handle(

@@ -1,4 +1,5 @@
 import type { SessionInfo, SessionsResponse } from "@opencode/client/promise"
+import { isArchivedSession } from "@/session/archive"
 import { pathKey } from "@/workspaces/path-key"
 import { SESSION_RECENT_LIMIT, SESSION_RECENT_WINDOW } from "@/runtime/server/global-sync/types"
 
@@ -19,6 +20,7 @@ export async function loadHomeSessionIndex(
       limit: number
       order: "desc"
       parentID: null
+      archived: false
       cursor?: string
     },
     options: { signal?: AbortSignal },
@@ -30,15 +32,15 @@ export async function loadHomeSessionIndex(
   let cursor: string | undefined
 
   for (;;) {
-    const response = await list(
-      {
-        limit: HOME_V2_SESSION_PAGE_LIMIT,
-        order: "desc",
-        parentID: null,
-        ...(cursor ? { cursor } : {}),
-      },
-      { signal },
-    )
+    const input: Parameters<typeof list>[0] = {
+      limit: HOME_V2_SESSION_PAGE_LIMIT,
+      order: "desc",
+      parentID: null,
+      archived: false,
+    }
+
+    if (cursor) input.cursor = cursor
+    const response = await list(input, { signal })
 
     // Fold each page in as it arrives: pages are newest first, so later pages
     // can only fill directories that still have room. Peak allocation is one
@@ -52,7 +54,7 @@ export async function loadHomeSessionIndex(
 
 // Keep this filter for locally known sessions merged into the fetched index.
 export function parseHomeSessionIndex(sessions: SessionInfo[]) {
-  return sessions.filter((session) => !session.parentID && typeof session.time.archived !== "number")
+  return sessions.filter((session) => !session.parentID && !isArchivedSession(session))
 }
 
 export function mergeHomeSessionIndex(fetched: SessionInfo[], known: SessionInfo[]) {

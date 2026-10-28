@@ -1,4 +1,4 @@
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
 import path from "node:path"
 import { Global } from "@opencode/util/global"
@@ -11,32 +11,47 @@ export async function createAppFixture(
   input: {
     width?: number
     height?: number
+    mode?: "dark" | "light"
     state?: string
     config?: Config.Info
     args?: TuiInput["args"]
     fetch?: FetchHandler
+    // A renderer whose owner already set up its terminal, such as the simulation renderer.
+    setup?: TestRendererSetup
   } = {},
 ) {
   const { run } = await import("../../src/app")
   const root = await tmpdir()
-  const setup = await createTestRenderer({
-    width: input.width ?? 100,
-    height: input.height ?? 30,
-    useThread: false,
-    kittyKeyboard: true,
-  })
+  const setup =
+    input.setup ??
+    (await createTestRenderer({
+      width: input.width ?? 100,
+      height: input.height ?? 30,
+      kittyKeyboard: true,
+    }))
+  if (!input.setup) await setup.renderer.setupTerminal()
   setup.renderer.start()
   const ready = Promise.withResolvers<void>()
   const events = createEventStream()
   const calls = createFetch(input.fetch, events)
+  // Updates apply to a copy, as a config file would, so preference writes persist for the rest of the test.
+  let config: Config.Info = structuredClone(input.config ?? { animations: false })
   const server = Bun.serve({ port: 0, fetch: (request) => calls.fetch(request) })
   const task = Effect.runPromise(
     run({
       app: { name: "test", version: "test", channel: "test" },
       server: { endpoint: { url: server.url.toString() } },
-      config: { get: async () => input.config ?? { animations: false }, update: async () => ({}) },
+      config: {
+        get: async () => config,
+        update: async (mutate) => {
+          const next = structuredClone(config)
+          mutate(next)
+          config = next
+          return next
+        },
+      },
       packages: { prepare: async () => ({ directory: "" }) },
-      terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: ready.resolve }),
+      terminalHandoff: async () => ({ renderer: setup.renderer, mode: input.mode ?? "dark", complete: ready.resolve }),
       args: input.args ?? {},
       log: () => {},
     }).pipe(
@@ -59,6 +74,7 @@ export async function createAppFixture(
   return {
     ...setup,
     events,
+    config: () => config,
     ready: ready.promise,
     async [Symbol.asyncDispose]() {
       try {

@@ -33,7 +33,8 @@ export function HomeCommandPalette(props: {
     server: ServerConnection.key(props.server),
     opened: server.projects.list,
     stored: () => server.sync.data.project,
-    load: (search, signal) => server.sdk.api.session.list({ parentID: null, search, limit: 50 }, { signal }),
+    load: (search, signal) =>
+      server.sdk.api.session.list({ parentID: null, search, limit: 50, archived: false }, { signal }),
     get: (sessionID, signal) => server.sdk.api.session.get({ sessionID }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),

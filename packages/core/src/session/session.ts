@@ -1,7 +1,7 @@
 export * as Session from "./session.js"
 
 import { Clock, DateTime, Effect, Fiber, Scope } from "effect"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, inArray } from "drizzle-orm"
 import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { Permission } from "@opencode/schema/permission"
@@ -39,9 +39,14 @@ type PromptRequest = SessionPrompt.Input & {
   resume?: boolean
 }
 
+const ARCHIVE_RATE_WINDOW_MS = 60_000
+const ARCHIVE_FUTURE_SKEW_MS = ARCHIVE_RATE_WINDOW_MS
+
 class StaleArchiveObservation extends Error {}
 class ArchiveAdmissionLimit extends Error {
-  constructor(readonly error: ArchiveLimitError) { super(error._tag) }
+  constructor(readonly error: ArchiveLimitError) {
+    super(error._tag)
+  }
 }
 
 /**
@@ -81,6 +86,81 @@ export const make = Effect.fn("Session.make")(function* () {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.Renamed, { sessionID, title: input.title })
   })
+  const transitionArchive = Effect.fn("Session.transitionArchive")(function* (
+    sessionID: SessionSchema.ID,
+    archived: boolean,
+  ) {
+    const attempt = (
+      remaining: number,
+    ): Effect.Effect<void, NotFoundError | ArchiveConflictError | ArchiveLimitError> =>
+      Effect.gen(function* () {
+        const observed = yield* Bus.latestSequence(database.db, sessionID)
+        const session = yield* get(sessionID)
+        if ((session.time.archived !== undefined) === archived) return
+        const now = yield* Clock.currentTimeMillis
+        const definition = archived ? SessionEvent.Archived : SessionEvent.Unarchived
+        yield* bus.publish(
+          definition,
+          { sessionID },
+          {
+            commit: (seq) =>
+              Effect.gen(function* () {
+                if (seq !== observed + 1) return yield* Effect.die(new StaleArchiveObservation())
+                if (!(yield* store.get(sessionID))) return yield* Effect.die(new StaleArchiveObservation())
+                const records = yield* database.db
+                  .select({ created: EventTable.created })
+                  .from(EventTable)
+                  .where(
+                    and(
+                      eq(EventTable.aggregate_id, sessionID),
+                      inArray(EventTable.type, [
+                        Bus.versionedType(SessionEvent.ArchiveChanged.type, 1),
+                        Bus.versionedType(SessionEvent.Archived.type, 1),
+                        Bus.versionedType(SessionEvent.Unarchived.type, 1),
+                      ]),
+                    ),
+                  )
+                  .orderBy(desc(EventTable.created))
+                  .all()
+                  .pipe(Effect.orDie)
+                const recent = records.filter(
+                  (record) =>
+                    record.created > now - ARCHIVE_RATE_WINDOW_MS && record.created <= now + ARCHIVE_FUTURE_SKEW_MS,
+                )
+                if (recent.length >= 6) {
+                  const cutoff = recent[5]!.created
+                  return yield* Effect.die(
+                    new ArchiveAdmissionLimit(
+                      new ArchiveLimitError({
+                        sessionID,
+                        kind: "rate",
+                        retryAfterMillis: Math.max(1, cutoff + ARCHIVE_RATE_WINDOW_MS - now),
+                      }),
+                    ),
+                  )
+                }
+                if (archived && records.length >= 1023)
+                  return yield* Effect.die(
+                    new ArchiveAdmissionLimit(new ArchiveLimitError({ sessionID, kind: "retention" })),
+                  )
+              }),
+          },
+        )
+      }).pipe(
+        Effect.catchDefect((defect) =>
+          defect instanceof ArchiveAdmissionLimit
+            ? defect.error
+            : defect instanceof StaleArchiveObservation
+              ? remaining === 0
+                ? new ArchiveConflictError({ sessionID })
+                : attempt(remaining - 1)
+              : Effect.die(defect),
+        ),
+      )
+    return yield* attempt(8)
+  })
+  const archive = Effect.fn("Session.archive")((sessionID: SessionSchema.ID) => transitionArchive(sessionID, true))
+  const unarchive = Effect.fn("Session.unarchive")((sessionID: SessionSchema.ID) => transitionArchive(sessionID, false))
   const setMetadata = Effect.fn("Session.setMetadata")(function* (
     sessionID: SessionSchema.ID,
     input: { metadata: SessionSchema.Metadata },
@@ -94,50 +174,6 @@ export const make = Effect.fn("Session.make")(function* () {
   ) {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.Permissions, { sessionID, permissions: input.permissions })
-  })
-  const setArchive = Effect.fn("Session.setArchive")(function* (
-    sessionID: SessionSchema.ID,
-    input: { archived: number | null },
-  ) {
-    const attempt = (remaining: number): Effect.Effect<void, NotFoundError | ArchiveConflictError | ArchiveLimitError> =>
-      Effect.gen(function* () {
-        const observed = yield* Bus.latestSequence(database.db, sessionID)
-        const session = yield* get(sessionID)
-        if ((session.time.archived !== undefined) === (input.archived !== null)) return
-        const now = yield* Clock.currentTimeMillis
-        yield* bus.publish(SessionEvent.ArchiveChanged, { sessionID, archived: input.archived }, {
-          commit: (seq) =>
-            Effect.gen(function* () {
-              if (seq !== observed + 1) return yield* Effect.die(new StaleArchiveObservation())
-              if (!(yield* store.get(sessionID))) return yield* Effect.die(new StaleArchiveObservation())
-              const records = yield* database.db
-                .select({ created: EventTable.created })
-                .from(EventTable)
-                .where(and(eq(EventTable.aggregate_id, sessionID), eq(EventTable.type, Bus.versionedType(SessionEvent.ArchiveChanged.type, 1))))
-                .orderBy(desc(EventTable.created))
-                .all()
-                .pipe(Effect.orDie)
-              const recent = records.filter((record) => record.created > now - 60_000)
-              if (recent.length >= 6) {
-                const cutoff = recent[5]!.created
-                return yield* Effect.die(new ArchiveAdmissionLimit(new ArchiveLimitError({ sessionID, kind: "rate", retryAfterMillis: Math.max(1, cutoff + 60_000 - now) })))
-              }
-              if (input.archived !== null && records.length >= 1023)
-                return yield* Effect.die(new ArchiveAdmissionLimit(new ArchiveLimitError({ sessionID, kind: "retention" })))
-            }),
-        })
-      }).pipe(
-        Effect.catchDefect((defect) =>
-          defect instanceof ArchiveAdmissionLimit
-            ? defect.error
-            : defect instanceof StaleArchiveObservation
-            ? remaining === 0
-              ? new ArchiveConflictError({ sessionID })
-              : attempt(remaining - 1)
-            : Effect.die(defect),
-        ),
-      )
-    return yield* attempt(8)
   })
   const switchAgent = Effect.fn("Session.switchAgent")(function* (
     sessionID: SessionSchema.ID,
@@ -346,7 +382,7 @@ export const make = Effect.fn("Session.make")(function* () {
               description: input.description,
               metadata: input.metadata,
             }),
-            delivery: SessionInbox.Delivery.make(input.delivery ?? "steer"),
+            delivery: input.delivery ?? "steer",
           } satisfies SessionInbox.Item
           const admitted = yield* admission
             .admit({
@@ -401,9 +437,10 @@ export const make = Effect.fn("Session.make")(function* () {
     message,
     view,
     rename,
+    archive,
+    unarchive,
     setMetadata,
     setPermissions,
-    setArchive,
     switchAgent,
     switchModel,
     inbox,
@@ -426,9 +463,10 @@ export const make = Effect.fn("Session.make")(function* () {
     const message = operations.message.bind(undefined, sessionID)
     const view = operations.view.bind(undefined, sessionID)
     const rename = operations.rename.bind(undefined, sessionID)
+    const archive = operations.archive.bind(undefined, sessionID)
+    const unarchive = operations.unarchive.bind(undefined, sessionID)
     const setMetadata = operations.setMetadata.bind(undefined, sessionID)
     const setPermissions = operations.setPermissions.bind(undefined, sessionID)
-    const setArchive = operations.setArchive.bind(undefined, sessionID)
     const switchAgent = operations.switchAgent.bind(undefined, sessionID)
     const switchModel = operations.switchModel.bind(undefined, sessionID)
     const inbox = operations.inbox.bind(undefined, sessionID)
@@ -454,9 +492,10 @@ export const make = Effect.fn("Session.make")(function* () {
       message,
       view,
       rename,
+      archive,
+      unarchive,
       setMetadata,
       setPermissions,
-      setArchive,
       switchAgent,
       switchModel,
       inbox,

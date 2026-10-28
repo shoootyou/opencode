@@ -25,6 +25,7 @@ const handler = Effect.fn("cli.session.list")(function* (
         {
           project: location.project.id,
           parentID: null,
+          archived: false,
           order: "desc",
           limit: Option.getOrElse(input.maxCount, () => 100),
         },
