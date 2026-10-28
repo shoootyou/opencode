@@ -165,6 +165,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
       subagents: { ...detail.subagents },
       notices: { ...detail.notices },
       tools: { ...detail.tools },
+      commentary: { ...detail.commentary },
     }
   })
 
@@ -358,7 +359,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
           />
         </DialogHeader>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => dialog.close()}>
+          <Button variant="ghost" autofocus onClick={() => dialog.close()}>
             {language.t("common.cancel")}
           </Button>
           <Button variant="danger" onClick={confirm}>

@@ -1,5 +1,5 @@
 import { type FilteredListProps, useFilteredList } from "@opencode/ui/hooks"
-import { createEffect, For, type JSX, on, Show, untrack } from "solid-js"
+import { createEffect, For, type JSX, on, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useI18n } from "../context/i18n"
@@ -48,7 +48,6 @@ export interface ListProps<T> extends FilteredListProps<T> {
   divider?: boolean
   add?: ListAddProps
   groupHeader?: (group: { category: string; items: T[] }) => JSX.Element
-  onScroll?: JSX.EventHandlerUnion<HTMLDivElement, Event>
 }
 
 export interface ListRef {
@@ -63,7 +62,6 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
 
   const [store, setStore] = createStore({
     mouseActive: false,
-    // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- SAFETY: the ref callback is the sole writer and clears the value during disposal.
     scrollRef: undefined as HTMLDivElement | undefined,
     internalFilter: "",
   })
@@ -96,7 +94,6 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
 
   const { filter, grouped, flat, active, setActive, onKeyDown, onInput, refetch } = useFilteredList<T>(props)
 
-  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- SAFETY: ListSearchProps is the public discriminated union accepted by this component.
   const searchProps = () => (typeof props.search === "object" ? props.search : {})
   const searchAction = () => searchProps().action
   const addProps = () => props.add
@@ -142,36 +139,20 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
   )
 
   createEffect(() => {
-    const scroll = scrollRef()
-
-    if (!scroll) return
-
-    if (!props.current) return
-    const key = props.key(props.current)
-    requestAnimationFrame(() => {
-      const element = findByKey(scroll, key)
-
-      if (!element) return
-      scrollIntoView(scroll, element, "center")
-    })
-  })
-
-  createEffect(() => {
-    const preserved = props.preserveActiveKey
-    const key = active()
-    filter()
-    const all = preserved ? untrack(flat) : flat()
+    const all = flat()
 
     if (store.mouseActive || all.length === 0) return
     const scroll = scrollRef()
 
     if (!scroll) return
 
-    if (key === props.key(all[0])) {
+    if (active() === props.key(all[0])) {
       scroll.scrollTo(0, 0)
 
       return
     }
+
+    const key = active()
 
     if (!key) return
     const element = findByKey(scroll, key)
@@ -243,7 +224,6 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
   function GroupHeader(groupProps: { group: { category: string; items: T[] } }): JSX.Element {
     const [state, setState] = createStore({
       stuck: false,
-      // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- SAFETY: the header ref callback owns this lifecycle-bound DOM reference.
       header: undefined as HTMLDivElement | undefined,
     })
 
@@ -349,7 +329,7 @@ export function List<T>(props: ListProps<T> & { ref?: (ref: ListRef) => void }) 
           {searchAction()}
         </div>
       </Show>
-      <div ref={setScrollRef} data-slot="list-scroll" onScroll={props.onScroll}>
+      <div ref={setScrollRef} data-slot="list-scroll">
         <Show
           when={flat().length > 0 || showAdd()}
           fallback={
