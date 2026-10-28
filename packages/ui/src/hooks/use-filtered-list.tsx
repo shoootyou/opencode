@@ -123,7 +123,10 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
       return
     }
 
-    if (all.length === 0) return
+    if (all.length === 0) {
+      if (props.preserveActiveKey) list.setActive("")
+      return
+    }
     list.setActive(props.key(all[0]))
   }
 
