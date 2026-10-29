@@ -75,7 +75,7 @@ export function createArchivedSessionsModel<Tab>(
     server: string
     list: ArchiveList
     setArchive: SetSessionArchive
-    openProject: (input: Readonly<{ server: string; directory: string }>) => void
+    openProject: (input: Readonly<{ server: string; directory: string }>) => Promise<unknown>
     touchProject: (input: Readonly<{ server: string; directory: string }>) => void
     addTab: (input: Readonly<{ server: string; sessionId: string }>) => Tab
     selectTab: (tab: Tab) => void
@@ -224,7 +224,8 @@ export function createArchivedSessionsModel<Tab>(
           continuationPending: false,
           continuationError: value.continuationError,
         }
-        deps.openProject({ server: deps.server, directory: session.location.directory })
+        await deps.openProject({ server: deps.server, directory: session.location.directory })
+        if (disposed || version !== generation) return true
         deps.touchProject({ server: deps.server, directory: session.location.directory })
         const tab = deps.addTab({ server: deps.server, sessionId: sessionID })
         deps.selectTab(tab)

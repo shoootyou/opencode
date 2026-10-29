@@ -89,6 +89,11 @@ const VersionedMessage = Bus.durable({
 })
 
 const DurableMessage = SessionEvent.Renamed
+const RetainedMessage = Bus.durable({
+  type: "test.retained",
+  durable: { version: 1, aggregate: "id", retain: true },
+  schema: { id: Schema.String, text: Schema.String },
+})
 const durableData = (sessionID: Session.ID, text: string) => ({
   sessionID,
   title: text,
@@ -296,6 +301,27 @@ describe("Bus", () => {
       expect(
         yield* db.select().from(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).all(),
       ).toEqual([{ aggregate_id: aggregateID, seq: 0, owner_id: null }])
+    }),
+  )
+
+  itWithoutPersistence.effect("retains only retain-marked durable payloads while preserving typed subscriber order", () =>
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const { db } = yield* Database.Service
+      const aggregateID = Event.ID.create()
+      const received = yield* bus
+        .subscribe([RetainedMessage, SyncMessage])
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* bus.publish(RetainedMessage, { id: aggregateID, text: "retained" })
+      yield* bus.publish(SyncMessage, { id: aggregateID, text: "ordinary" })
+
+      expect((yield* Fiber.join(received)).map((event) => event.data.text)).toEqual(["retained", "ordinary"])
+      expect(
+        (yield* db.select({ type: EventTable.type }).from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all()).map(
+          (row) => row.type,
+        ),
+      ).toEqual([Bus.versionedType(RetainedMessage.type, 1)])
     }),
   )
 

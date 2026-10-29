@@ -32,7 +32,7 @@ function model(list: (input: unknown) => Promise<unknown>) {
     server: "captured-server",
     list: async (input: unknown) => list(input) as never,
     setArchive: async () => true,
-    openProject: () => {},
+    openProject: async () => {},
     touchProject: () => {},
     addTab: () => "tab",
     selectTab: () => {},
@@ -254,7 +254,7 @@ test("restore aborts a held continuation, keeps displayed rows, and prevents its
       return continuation.promise as never
     },
     setArchive: async () => restore.promise,
-    openProject: () => calls.push("open"),
+    openProject: async () => void calls.push("open"),
     touchProject: () => calls.push("touch"),
     addTab: () => {
       calls.push("tab")
@@ -286,7 +286,7 @@ test("restores a captured displayed row through the existing success-only tab se
       archiveCalls.push(input)
       return true
     },
-    openProject: () => calls.push("open"),
+    openProject: async () => void calls.push("open"),
     touchProject: () => calls.push("touch"),
     addTab: () => {
       calls.push("tab")
@@ -317,7 +317,7 @@ test("keeps continuation available after a failed restore without replaying the 
       archiveCalls.push(input)
       return false
     },
-    openProject: () => {},
+    openProject: async () => {},
     touchProject: () => {},
     addTab: () => "tab",
     selectTab: () => {},
@@ -344,7 +344,7 @@ for (const lateOutcome of ["resolve", "reject"] as const) {
         return { data: [session("later")], cursor: {} } as never
       },
       setArchive: async () => false,
-      openProject: () => {},
+      openProject: async () => {},
       touchProject: () => {},
       addTab: () => "tab",
       selectTab: () => {},

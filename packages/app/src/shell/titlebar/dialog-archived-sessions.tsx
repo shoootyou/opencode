@@ -48,7 +48,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
     server: props.server,
     list: ctx.sdk.api.session.list,
     setArchive: global.sessionArchive.setSessionArchive,
-    openProject: ({ directory }) => ctx.projects.open(directory),
+    openProject: ({ directory }) => ctx.projects.add(directory),
     touchProject: ({ directory }) => ctx.projects.touch(directory),
     // SAFETY: archived-session rows retain the server key used to resolve the current context.
     addTab: ({ server, sessionId }) => tabs.addSessionTab({ server: server as never, sessionId }),
