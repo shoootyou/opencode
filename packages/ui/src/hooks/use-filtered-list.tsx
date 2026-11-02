@@ -1,5 +1,5 @@
 import fuzzysort from "fuzzysort"
-import { createEffect, createMemo, createResource, on } from "solid-js"
+import { createEffect, createMemo, createResource, on, type Resource } from "solid-js"
 import { createMutable, createStore } from "solid-js/store"
 import { createList } from "solid-list"
 
@@ -104,10 +104,15 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
   })
 
   const flat = createMemo(() => committedGroups().flatMap((x) => x.items))
-  const filteredGroups = committedGroups as typeof committedGroups & { readonly latest: Group[]; readonly loading: boolean }
+  const filteredGroups = committedGroups as typeof committedGroups & {
+    readonly latest: Group[]
+    readonly loading: boolean
+    readonly state: Resource<Group[]>["state"]
+  }
   Object.defineProperties(filteredGroups, {
     latest: { get: committedGroups },
     loading: { get: () => grouped.loading },
+    state: { get: () => grouped.state },
   })
 
   // Lists open on their first row; `current` only marks the selected item.
