@@ -72,18 +72,7 @@ const desktop = [
 ]
 
 export const dict = {
-  "common.unarchive": "Visszaállítás az archívumból",
-  "command.session.archive": "Archiválás munkamenet",
-  "command.session.archive.description": "Archiválás munkamenet",
-  "command.session.unarchive": "Visszaállítás az archívumból munkamenet",
-  "command.session.unarchive.description": "Munkamenet visszaállítása",
-  "command.session.archivedBrowse": "Archivált munkamenetek",
-  "command.session.archivedBrowse.description": "Munkamenet visszaállítása munkamenet",
-  "dialog.archivedSessions.title": "Archivált munkamenetek",
-  "dialog.archivedSessions.error": "Az archivált munkamenetek nem tölthetők be",
-  "dialog.archivedSessions.loading": "Archivált munkamenetek betöltése…",
-  "session.archive.refreshFailed": "A munkamenet frissült, de a részletei nem frissíthetők.",
-  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
+  ...Object.fromEntries(desktop.map((value, index) => [DESKTOP_NATIVE_KEYS[index], value])),
   "command.category.suggested": "Javasolt",
   "command.category.view": "Nézet",
   "command.category.project": "Projekt",
@@ -752,6 +741,7 @@ export const dict = {
   "home.workspaceTip":
     "Indítsa el a következő munkamenetet egy új munkaterületen, hogy a változtatások elszigeteltek maradjanak",
   "session.tab.add": "Tabulátor hozzáadása",
+  "session.tab.closeOthers": "Többi lap bezárása",
   "session.queue.attachments.one": "Plusz {{count}} rögzítés",
   "session.queue.attachments.other": "Plusz {{count}} tartozékok",
   "settings.backToSettings": "Vissza a beállításokhoz",

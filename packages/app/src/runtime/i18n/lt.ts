@@ -72,18 +72,7 @@ const desktop = [
 ]
 
 export const dict = {
-  "common.unarchive": "Atkurti iš archyvo",
-  "command.session.archive": "Archyvuoti seansą",
-  "command.session.archive.description": "Archyvuoti seansą",
-  "command.session.unarchive": "Atkurti iš archyvo seansą",
-  "command.session.unarchive.description": "Atkurti seansą",
-  "command.session.archivedBrowse": "Archyvuoti seansai",
-  "command.session.archivedBrowse.description": "Atkurti seansą seansą",
-  "dialog.archivedSessions.title": "Archyvuoti seansai",
-  "dialog.archivedSessions.error": "Nepavyko įkelti archyvuotų seansų",
-  "dialog.archivedSessions.loading": "Įkeliami archyvuoti seansai…",
-  "session.archive.refreshFailed": "Seansas atnaujintas, bet nepavyko atnaujinti jo informacijos.",
-  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
+  ...Object.fromEntries(desktop.map((value, index) => [DESKTOP_NATIVE_KEYS[index], value])),
   "command.category.suggested": "Siūloma",
   "command.category.view": "Rodinys",
   "command.category.project": "Projektas",
@@ -762,6 +751,7 @@ export const dict = {
   "dialog.server.menu.remove": "Pašalinti",
   "home.workspaceTip": "Pradėkite kitą seansą naujoje darbo srityje, kad pakeitimai būtų atskirti",
   "session.tab.add": "Pridėti skirtuką",
+  "session.tab.closeOthers": "Uždaryti kitus skirtukus",
   "session.queue.attachments.one": "Plus {{count}} tvirtinimas",
   "session.queue.attachments.other": "Plus {{count}} priedai",
   "settings.backToSettings": "Atgal į nustatymus",

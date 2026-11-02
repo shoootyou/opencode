@@ -2,7 +2,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { Button } from "@opencode/ui/button"
 import { useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, on, onCleanup } from "solid-js"
+import { createEffect, createMemo, on, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Option, Predicate, Schema } from "effect"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
@@ -24,9 +24,6 @@ import { createTimelineProjection } from "./projection"
 import { useServer } from "@/runtime/server/current"
 import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui/timeline/projection"
-import { useGlobal } from "@/runtime/server/runtime"
-import { archiveLabelKey, createArchiveLandingEffects, runTimelineArchive } from "./archive-model"
-import { useLayout } from "@/shell/state/layout"
 
 const emptyMessages: SessionMessageInfo[] = []
 
@@ -59,9 +56,7 @@ export type TimelineSessionSource = {
   history: Pick<SessionModel["history"], "messages">
 }
 
-export function createTimelineController(input: { session: TimelineSessionSource }) {
-  let alive = true
-  onCleanup(() => (alive = false))
+export function createTimelineController(input: { session: TimelineSessionSource; active: Accessor<boolean> }) {
   const navigate = useNavigate()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
@@ -72,18 +67,29 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
-  const global = useGlobal()
-  const layout = useLayout()
 
-  const visibleMessages = createMemo(() => {
-    const id = input.session.identity.sessionID()
+  // Pending inputs hold with the history while the view is detached, so a hidden view never shows one against
+  // history it has not caught up with.
+  const pendingItems = createMemo<{ value: ReturnType<typeof data.session.pending.list> } | undefined>(
+    (previous) => {
+      if (previous && !input.active()) return previous
+      const id = input.session.identity.sessionID()
 
-    return visibleTimelineMessages(
+      return { value: id ? data.session.pending.list(id) : [] }
+    },
+    undefined,
+    { equals: (previous, next) => previous?.value === next?.value },
+  )
+
+  const pendingList = () => pendingItems()!.value
+
+  const visibleMessages = createMemo(() =>
+    visibleTimelineMessages(
       input.session.history.messages(),
-      id ? data.session.pending.list(id) : [],
+      pendingList(),
       input.session.data.info()?.revert?.messageID,
-    )
-  })
+    ),
+  )
 
   // A handoff projects after visibility: its prompt commits any staged revert, so the boundary does not hide it.
   const projectedMessages = createMemo(() =>
@@ -102,24 +108,20 @@ export function createTimelineController(input: { session: TimelineSessionSource
     if (!id) return new Set<string>()
 
     return new Set(
-      data.session.pending
-        .list(id)
-        .flatMap((item) =>
-          (item.type === "user" &&
-            item.delivery === "steer" &&
-            data.session.pending.status(id, item.id) !== "starting") ||
-          item.type === "synthetic"
-            ? [item.id]
-            : [],
-        ),
+      pendingList().flatMap((item) =>
+        (item.type === "user" &&
+          item.delivery === "steer" &&
+          data.session.pending.status(id, item.id) !== "starting") ||
+        item.type === "synthetic"
+          ? [item.id]
+          : [],
+      ),
     )
   })
 
-  const queuedCompactionIDs = createMemo(() => {
-    const id = input.session.identity.sessionID()
-
-    return (id ? data.session.pending.list(id) : []).flatMap((item) => (item.type === "compaction" ? [item.id] : []))
-  })
+  const queuedCompactionIDs = createMemo(() =>
+    pendingList().flatMap((item) => (item.type === "compaction" ? [item.id] : [])),
+  )
 
   const titleValue = createMemo(() => input.session.data.info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()) ?? language.t("session.tab.session"))
@@ -191,7 +193,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
     turnDiffs: settings.general.showTurnDiffs,
   })
 
-  const [pending, setPending] = createStore({ rename: false, archive: false })
+  const [pending, setPending] = createStore({ rename: false })
 
   const errorMessage = (cause: unknown) =>
     Option.match(decodeErrorData(cause), {
@@ -257,61 +259,6 @@ export function createTimelineController(input: { session: TimelineSessionSource
         title: language.t("toast.session.export.failed.title"),
         description: error instanceof Error ? error.message : language.t("toast.session.export.failed.description"),
       })
-    }
-  }
-
-  const archive = async () => {
-    const session = input.session.data.info()
-    const sessionID = input.session.identity.sessionID()
-
-    if (!session || !sessionID || pending.archive) return false
-    const ctx = global.serverCtx(server.key)
-
-    if (!ctx || ctx !== server.ctx) return false
-    setPending("archive", true)
-
-    try {
-      return await runTimelineArchive(
-        { target: { server: server.key, sessionID }, session, sessions: data.session.list() },
-        {
-          setArchive: global.sessionArchive.setSessionArchive,
-          isActive: () => alive && global.serverCtx(server.key) === ctx,
-          currentRoute: () => {
-            const route = layout.route()
-
-            return route.type === "session" ? { server: route.server, sessionID: route.sessionId } : undefined
-          },
-          navigate: async (landing) => {
-            if (landing.type === "session")
-              // SAFETY: archive landings retain the current timeline server key.
-              return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
-            // oxlint-disable-next-line anti-slop/require-readable-spacing -- SAFETY: archive landings retain the current timeline server key.
-            await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
-          },
-          removeTabs: createArchiveLandingEffects({
-            removeSessions: (detail, options) =>
-              // SAFETY: archive tab removals are produced for this timeline's current server key.
-              tabs.removeSessions(
-                { ...detail, server: detail.server as typeof server.key, sessionIDs: [...detail.sessionIDs] },
-                options,
-              ),
-            navigate: async (landing) => {
-              if (landing.type === "session")
-                // SAFETY: archive landings retain the current timeline server key.
-                return navigate(sessionHref(landing.server as typeof server.key, landing.sessionID))
-              // oxlint-disable-next-line anti-slop/require-readable-spacing -- SAFETY: archive landings retain the current timeline server key.
-              await tabs.newDraft({ server: landing.server as typeof server.key, directory: landing.directory })
-            },
-          }).removeTabs,
-          toast: ({ kind, error }) =>
-            showToast({
-              title: language.t("common.requestFailed"),
-              description: kind === "refresh" ? language.t("session.archive.refreshFailed") : errorMessage(error),
-            }),
-        },
-      )
-    } finally {
-      setPending("archive", false)
     }
   }
 
@@ -400,13 +347,10 @@ export function createTimelineController(input: { session: TimelineSessionSource
     },
     pending: {
       rename: () => pending.rename,
-      archive: () => pending.archive,
     },
     action: {
       rename,
       export: exportSession,
-      archive,
-      archiveLabel: () => archiveLabelKey(input.session.data.info()),
       showDelete: (id: string) => dialog.show(() => <DeleteDialog sessionID={id} />),
       navigateParent: () => {
         const id = input.session.data.parentID()

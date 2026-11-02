@@ -72,18 +72,7 @@ const desktop = [
 ]
 
 export const dict = {
-  "common.unarchive": "Vrati iz arhive",
-  "command.session.archive": "Arhiviraj sesiju",
-  "command.session.archive.description": "Arhiviraj sesiju",
-  "command.session.unarchive": "Vrati iz arhive sesiju",
-  "command.session.unarchive.description": "Vrati sesiju",
-  "command.session.archivedBrowse": "Arhivirane sesije",
-  "command.session.archivedBrowse.description": "Vrati sesiju sesiju",
-  "dialog.archivedSessions.title": "Arhivirane sesije",
-  "dialog.archivedSessions.error": "Nije moguće učitati arhivirane sesije",
-  "dialog.archivedSessions.loading": "Učitavanje arhiviranih sesija…",
-  "session.archive.refreshFailed": "Sesija je ažurirana, ali detalji se ne mogu osvježiti.",
-  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
+  ...Object.fromEntries(desktop.map((value, index) => [DESKTOP_NATIVE_KEYS[index], value])),
   "command.category.suggested": "Predloženo",
   "command.category.view": "Prikaz",
   "command.category.project": "Projekt",
@@ -768,6 +757,7 @@ export const dict = {
   "toast.migration.progress.working.progress": "Migracija podataka {{current}}/{{total}}",
   "home.workspaceTip": "Pokrenite sljedeću sesiju u novom radnom prostoru kako bi promjene ostale izolovane",
   "session.tab.add": "Dodaj karticu",
+  "session.tab.closeOthers": "Zatvori ostale kartice",
   "session.queue.attachments.one": "Još {{count}} prilog",
   "session.queue.attachments.few": "Još {{count}} priloga",
   "session.queue.attachments.other": "Još {{count}} priloga",

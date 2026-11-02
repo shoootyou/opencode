@@ -96,7 +96,7 @@ export function DialogHeader(
     closeLabel?: string
     onClose?: () => void
     gap?: number
-    /** Faint line below the title. Shown only under the "new-designs" experiment. */
+    /** Muted line below the title. Shown only under the "new-designs" experiment. */
     description?: string
   }>,
 ) {
@@ -112,7 +112,7 @@ export function DialogHeader(
       )}
       {props.children}
       <text
-        fg={newDesigns() ? theme.text.faint : theme.text.muted}
+        fg={theme.text.muted}
         flexShrink={0}
         onMouseUp={() => (props.onClose ?? dialog.clear)()}
       >
@@ -124,7 +124,7 @@ export function DialogHeader(
     <Show when={newDesigns() && props.description} fallback={row()}>
       <box>
         {row()}
-        <text fg={theme.text.faint} wrapMode="word">
+        <text fg={theme.text.muted} wrapMode="word">
           {props.description}
         </text>
       </box>
@@ -189,7 +189,6 @@ export type DialogFooterAction = {
   disabled?: boolean
   /** Overrides the title and key color, e.g. for a "copied ✓" confirmation. */
   color?: RGBA
-  focused?: boolean
 }
 
 /**
@@ -265,8 +264,6 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
   const theme = useTheme().surface("dialog")
   const newDesigns = useNewDesigns()
   const [hovered, setHovered] = createSignal(false)
-  const focused = () => props.action.focused === true && !props.action.disabled
-  const focusedBackground = () => theme.background.action.primary.focused
   const trigger = () => {
     if (props.action.disabled) return
     props.action.onTrigger?.()
@@ -275,57 +272,32 @@ function DialogFooterItem(props: { action: DialogFooterAction; variant: "primary
     <>
       <span
         style={{
-          bg: focused() ? focusedBackground() : undefined,
-          fg: props.action.disabled
-            ? theme.text.action.primary.disabled
-            : focused()
-              ? theme.text.action.primary.focused
-              : (props.action.color ?? theme.text.base),
+          fg: props.action.disabled ? theme.text.action.primary.disabled : (props.action.color ?? theme.text.base),
         }}
       >
         {props.action.title}
       </span>
       <Show when={props.action.key}>
-        <span
-          style={{
-            bg: focused() ? focusedBackground() : undefined,
-            fg: props.action.disabled
-              ? theme.text.action.primary.disabled
-              : focused()
-                ? theme.text.action.primary.focused
-                : (props.action.color ?? key),
-          }}
-        >
+        <span style={{ fg: props.action.disabled ? theme.text.action.primary.disabled : (props.action.color ?? key) }}>
           {" " + props.action.key}
         </span>
       </Show>
     </>
   )
   return (
-    <Show
-      when={newDesigns()}
-      fallback={
-        <box backgroundColor={focused() ? focusedBackground() : undefined} onMouseUp={trigger}>
-          <text attributes={focused() ? TextAttributes.BOLD : undefined}>{label(theme.text.muted)}</text>
-        </box>
-      }
-    >
+    <Show when={newDesigns()} fallback={<text onMouseUp={trigger}>{label(theme.text.muted)}</text>}>
       <box
         paddingLeft={1}
         paddingRight={1}
         flexShrink={0}
         backgroundColor={
-          focused()
-            ? focusedBackground()
-            : hovered() && !props.action.disabled
-              ? theme.background.action[props.variant].hovered
-              : undefined
+          hovered() && !props.action.disabled ? theme.background.action[props.variant].hovered : undefined
         }
         onMouseOver={() => setHovered(true)}
         onMouseOut={() => setHovered(false)}
         onMouseUp={trigger}
       >
-        <text attributes={focused() ? TextAttributes.BOLD : undefined}>{label(theme.text.faint)}</text>
+        <text>{label(theme.text.muted)}</text>
       </box>
     </Show>
   )

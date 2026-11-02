@@ -26,14 +26,8 @@ import type {
   PluginUpdateOutput,
   SessionListInput,
   SessionListOutput,
-  SessionStatsInput,
-  SessionStatsOutput,
   SessionCreateInput,
   SessionCreateOutput,
-  SessionImportInput,
-  SessionImportOutput,
-  SessionExportInput,
-  SessionExportOutput,
   SessionActiveOutput,
   SessionGetInput,
   SessionGetOutput,
@@ -53,16 +47,12 @@ import type {
   SessionPromptOutput,
   SessionCommandInput,
   SessionCommandOutput,
-  SessionSkillInput,
-  SessionSkillOutput,
   SessionSyntheticInput,
   SessionSyntheticOutput,
   SessionShellInput,
   SessionShellOutput,
   SessionCompactInput,
   SessionCompactOutput,
-  SessionWaitInput,
-  SessionWaitOutput,
   SessionRevertStageInput,
   SessionRevertStageOutput,
   SessionRevertClearInput,
@@ -79,16 +69,8 @@ import type {
   SessionInboxCancelOutput,
   SessionInboxUpdateInput,
   SessionInboxUpdateOutput,
-  SessionInstructionsEntryListInput,
-  SessionInstructionsEntryListOutput,
-  SessionInstructionsEntryPutInput,
-  SessionInstructionsEntryPutOutput,
-  SessionInstructionsEntryRemoveInput,
-  SessionInstructionsEntryRemoveOutput,
   SessionGenerateInput,
   SessionGenerateOutput,
-  SessionLogInput,
-  SessionLogOutput,
   SessionInterruptInput,
   SessionInterruptOutput,
   SessionBackgroundInput,
@@ -109,21 +91,39 @@ import type {
   SessionEnvironmentOutput,
   SessionViewInput,
   SessionViewOutput,
+  ExperimentalSessionStatsInput,
+  ExperimentalSessionStatsOutput,
+  ExperimentalSessionImportInput,
+  ExperimentalSessionImportOutput,
+  ExperimentalSessionExportInput,
+  ExperimentalSessionExportOutput,
+  ExperimentalSessionSkillInput,
+  ExperimentalSessionSkillOutput,
+  ExperimentalSessionWaitInput,
+  ExperimentalSessionWaitOutput,
+  ExperimentalSessionInstructionsEntryListInput,
+  ExperimentalSessionInstructionsEntryListOutput,
+  ExperimentalSessionInstructionsEntryPutInput,
+  ExperimentalSessionInstructionsEntryPutOutput,
+  ExperimentalSessionInstructionsEntryRemoveInput,
+  ExperimentalSessionInstructionsEntryRemoveOutput,
+  ExperimentalSessionLogInput,
+  ExperimentalSessionLogOutput,
   MessageListInput,
   MessageListOutput,
   ModelListInput,
   ModelListOutput,
   ModelDefaultInput,
   ModelDefaultOutput,
-  GenerateTextInput,
-  GenerateTextOutput,
-  GenerateImageInput,
-  GenerateImageOutput,
-  GenerateDecisionsInput,
-  GenerateDecisionsOutput,
-  VoiceModelsOutput,
-  VoiceSessionInput,
-  VoiceSessionOutput,
+  ExperimentalGenerateTextInput,
+  ExperimentalGenerateTextOutput,
+  ExperimentalGenerateImageInput,
+  ExperimentalGenerateImageOutput,
+  ExperimentalGenerateDecisionsInput,
+  ExperimentalGenerateDecisionsOutput,
+  ExperimentalVoiceModelsOutput,
+  ExperimentalVoiceSessionInput,
+  ExperimentalVoiceSessionOutput,
   ProviderListInput,
   ProviderListOutput,
   ProviderGetInput,
@@ -132,8 +132,6 @@ import type {
   IntegrationListOutput,
   IntegrationGetInput,
   IntegrationGetOutput,
-  IntegrationWellknownAddInput,
-  IntegrationWellknownAddOutput,
   IntegrationConnectKeyInput,
   IntegrationConnectKeyOutput,
   IntegrationConnectExternalInput,
@@ -152,20 +150,22 @@ import type {
   IntegrationCommandStatusOutput,
   IntegrationCommandCancelInput,
   IntegrationCommandCancelOutput,
+  ExperimentalIntegrationWellknownAddInput,
+  ExperimentalIntegrationWellknownAddOutput,
   McpListInput,
   McpListOutput,
-  McpAddInput,
-  McpAddOutput,
-  McpRemoveInput,
-  McpRemoveOutput,
-  McpConnectInput,
-  McpConnectOutput,
-  McpDisconnectInput,
-  McpDisconnectOutput,
   McpResourceCatalogInput,
   McpResourceCatalogOutput,
-  McpClientTokenInput,
-  McpClientTokenOutput,
+  ExperimentalMcpAddInput,
+  ExperimentalMcpAddOutput,
+  ExperimentalMcpRemoveInput,
+  ExperimentalMcpRemoveOutput,
+  ExperimentalMcpConnectInput,
+  ExperimentalMcpConnectOutput,
+  ExperimentalMcpDisconnectInput,
+  ExperimentalMcpDisconnectOutput,
+  ExperimentalMcpClientTokenInput,
+  ExperimentalMcpClientTokenOutput,
   CredentialListOutput,
   CredentialCreateInput,
   CredentialCreateOutput,
@@ -201,10 +201,10 @@ import type {
   FileListOutput,
   FileFindInput,
   FileFindOutput,
-  FileWatchInput,
-  FileWatchOutput,
-  FileUnwatchInput,
-  FileUnwatchOutput,
+  ExperimentalFileWatchInput,
+  ExperimentalFileWatchOutput,
+  ExperimentalFileUnwatchInput,
+  ExperimentalFileUnwatchOutput,
   CommandListInput,
   CommandListOutput,
   SkillListInput,
@@ -243,6 +243,30 @@ import type {
   ExperimentalPersistentPtyRemoveOutput,
   ExperimentalPersistentPtyConnectTokenInput,
   ExperimentalPersistentPtyConnectTokenOutput,
+  ExperimentalScheduleCreateInput,
+  ExperimentalScheduleCreateOutput,
+  ExperimentalScheduleListInput,
+  ExperimentalScheduleListOutput,
+  ExperimentalScheduleGetInput,
+  ExperimentalScheduleGetOutput,
+  ExperimentalSchedulePauseInput,
+  ExperimentalSchedulePauseOutput,
+  ExperimentalScheduleResumeInput,
+  ExperimentalScheduleResumeOutput,
+  ExperimentalScheduleDeleteInput,
+  ExperimentalScheduleDeleteOutput,
+  ExperimentalArtifactsProvidersInput,
+  ExperimentalArtifactsProvidersOutput,
+  ExperimentalArtifactsListInput,
+  ExperimentalArtifactsListOutput,
+  ExperimentalArtifactsCreateInput,
+  ExperimentalArtifactsCreateOutput,
+  ExperimentalArtifactsGetInput,
+  ExperimentalArtifactsGetOutput,
+  ExperimentalArtifactsUpdateInput,
+  ExperimentalArtifactsUpdateOutput,
+  ExperimentalArtifactsDeleteInput,
+  ExperimentalArtifactsDeleteOutput,
   ShellListInput,
   ShellListOutput,
   ShellCreateInput,
@@ -280,18 +304,18 @@ import type {
   DebugLocationListOutput,
   DebugLocationEvictInput,
   DebugLocationEvictOutput,
-  MigrationV1StatusOutput,
+  ExperimentalMigrationV1StatusOutput,
   WebsearchProvidersInput,
   WebsearchProvidersOutput,
   WebsearchQueryInput,
   WebsearchQueryOutput,
-  UsageLimitsInput,
-  UsageLimitsOutput,
+  ExperimentalUsageLimitsInput,
+  ExperimentalUsageLimitsOutput,
   ConfigGetInput,
   ConfigGetOutput,
   ConfigShellsOutput,
-  ConfigUpdateInput,
-  ConfigUpdateOutput,
+  ExperimentalConfigUpdateInput,
+  ExperimentalConfigUpdateOutput,
 } from "../api/api.js"
 import { ClientError } from "./client-error.js"
 
@@ -340,9 +364,7 @@ const adaptGroupServer = (raw: RawClient["server.server"]) => ({
 
 const EndpointLocationGet = (raw: RawClient["server.location"]) => (input?: LocationGetInput) =>
   preserveEffect<LocationGetOutput>()(
-    raw["location.get"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["location.get"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointLocationReload = (raw: RawClient["server.location"]) => () =>
@@ -355,17 +377,14 @@ const adaptGroupLocation = (raw: RawClient["server.location"]) => ({
 
 const EndpointAgentList = (raw: RawClient["server.agent"]) => (input?: AgentListInput) =>
   preserveEffect<AgentListOutput>()(
-    raw["agent.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["agent.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointAgentGet = (raw: RawClient["server.agent"]) => (input: AgentGetInput) =>
   preserveEffect<AgentGetOutput>()(
-    raw["agent.get"]({
-      params: { agentID: input["agentID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["agent.get"]({ params: { agentID: input["agentID"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const adaptGroupAgent = (raw: RawClient["server.agent"]) => ({
@@ -375,32 +394,28 @@ const adaptGroupAgent = (raw: RawClient["server.agent"]) => ({
 
 const EndpointPluginList = (raw: RawClient["server.plugin"]) => (input?: PluginListInput) =>
   preserveEffect<PluginListOutput>()(
-    raw["plugin.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["plugin.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointPluginGui = (raw: RawClient["server.plugin"]) => (input: PluginGuiInput) =>
   preserveEffect<PluginGuiOutput>()(
-    raw["plugin.gui"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }), id: input["id"] },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["plugin.gui"]({ query: { location: input["location"], id: input["id"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointPluginCheck = (raw: RawClient["server.plugin"]) => (input?: PluginCheckInput) =>
   preserveEffect<PluginCheckOutput>()(
-    raw["plugin.check"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-      payload: { ...(input?.["target"] === undefined ? {} : { target: input?.["target"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["plugin.check"]({ query: { location: input?.["location"] }, payload: { target: input?.["target"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointPluginUpdate = (raw: RawClient["server.plugin"]) => (input: PluginUpdateInput) =>
   preserveEffect<PluginUpdateOutput>()(
-    raw["plugin.update"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: { targets: input["targets"] },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["plugin.update"]({ query: { location: input["location"] }, payload: { targets: input["targets"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const adaptGroupPlugin = (raw: RawClient["server.plugin"]) => ({
@@ -414,73 +429,32 @@ const EndpointSessionList = (raw: RawClient["server.session"]) => (input?: Sessi
   preserveEffect<SessionListOutput>()(
     raw["session.list"]({
       query: {
-        ...(input?.["limit"] === undefined ? {} : { limit: input?.["limit"] }),
-        ...(input?.["order"] === undefined ? {} : { order: input?.["order"] }),
-        ...(input?.["search"] === undefined ? {} : { search: input?.["search"] }),
-        ...(input?.["parentID"] === undefined ? {} : { parentID: input?.["parentID"] }),
-        ...(input?.["archived"] === undefined ? {} : { archived: input?.["archived"] }),
-        ...(input?.["directory"] === undefined ? {} : { directory: input?.["directory"] }),
-        ...(input?.["project"] === undefined ? {} : { project: input?.["project"] }),
-        ...(input?.["subpath"] === undefined ? {} : { subpath: input?.["subpath"] }),
-        ...(input?.["cursor"] === undefined ? {} : { cursor: input?.["cursor"] }),
+        limit: input?.["limit"],
+        order: input?.["order"],
+        search: input?.["search"],
+        parentID: input?.["parentID"],
+        archived: input?.["archived"],
+        directory: input?.["directory"],
+        project: input?.["project"],
+        subpath: input?.["subpath"],
+        cursor: input?.["cursor"],
       },
     }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointSessionStats = (raw: RawClient["server.session"]) => (input?: SessionStatsInput) =>
-  preserveEffect<SessionStatsOutput>()(
-    raw["session.stats"]({
-      query: {
-        ...(input?.["from"] === undefined ? {} : { from: input?.["from"] }),
-        ...(input?.["to"] === undefined ? {} : { to: input?.["to"] }),
-        ...(input?.["project"] === undefined ? {} : { project: input?.["project"] }),
-        ...(input?.["timezone"] === undefined ? {} : { timezone: input?.["timezone"] }),
-        ...(input?.["tools"] === undefined ? {} : { tools: input?.["tools"] }),
-      },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
   )
 
 const EndpointSessionCreate = (raw: RawClient["server.session"]) => (input?: SessionCreateInput) =>
   preserveEffect<SessionCreateOutput>()(
     raw["session.create"]({
       payload: {
-        ...(input?.["id"] === undefined ? {} : { id: input?.["id"] }),
-        ...(input?.["parentID"] === undefined ? {} : { parentID: input?.["parentID"] }),
-        ...(input?.["title"] === undefined ? {} : { title: input?.["title"] }),
-        ...(input?.["agent"] === undefined ? {} : { agent: input?.["agent"] }),
-        ...(input?.["model"] === undefined ? {} : { model: input?.["model"] }),
-        ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }),
-        ...(input?.["metadata"] === undefined ? {} : { metadata: input?.["metadata"] }),
-        ...(input?.["permissions"] === undefined ? {} : { permissions: input?.["permissions"] }),
+        id: input?.["id"],
+        parentID: input?.["parentID"],
+        title: input?.["title"],
+        agent: input?.["agent"],
+        model: input?.["model"],
+        location: input?.["location"],
+        metadata: input?.["metadata"],
+        permissions: input?.["permissions"],
       },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
-  )
-
-const EndpointSessionImport = (raw: RawClient["server.session"]) => (input: SessionImportInput) =>
-  preserveEffect<SessionImportOutput>()(
-    raw["session.import"]({
-      payload: {
-        info: input["info"],
-        messages: input["messages"],
-        ...(input["location"] === undefined ? {} : { location: input["location"] }),
-      },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
-  )
-
-const EndpointSessionExport = (raw: RawClient["server.session"]) => (input: SessionExportInput) =>
-  preserveEffect<SessionExportOutput>()(
-    raw["session.export"]({
-      params: { sessionID: input["sessionID"] },
-      query: { ...(input["sanitize"] === undefined ? {} : { sanitize: input["sanitize"] }) },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -510,10 +484,7 @@ const EndpointSessionRemove = (raw: RawClient["server.session"]) => (input: Sess
 
 const EndpointSessionFork = (raw: RawClient["server.session"]) => (input: SessionForkInput) =>
   preserveEffect<SessionForkOutput>()(
-    raw["session.fork"]({
-      params: { sessionID: input["sessionID"] },
-      payload: { ...(input["before"] === undefined ? {} : { before: input["before"] }) },
-    }).pipe(
+    raw["session.fork"]({ params: { sessionID: input["sessionID"] }, payload: { before: input["before"] } }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
@@ -538,10 +509,10 @@ const EndpointSessionUpdate = (raw: RawClient["server.session"]) => (input: Sess
     raw["session.update"]({
       params: { sessionID: input["sessionID"] },
       payload: {
-        ...(input["title"] === undefined ? {} : { title: input["title"] }),
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-        ...(input["permissions"] === undefined ? {} : { permissions: input["permissions"] }),
-        ...(input["archived"] === undefined ? {} : { archived: input["archived"] }),
+        title: input["title"],
+        metadata: input["metadata"],
+        permissions: input["permissions"],
+        archived: input["archived"],
       },
     }).pipe(Effect.mapError(mapClientError)),
   )
@@ -550,10 +521,7 @@ const EndpointSessionMove = (raw: RawClient["server.session"]) => (input: Sessio
   preserveEffect<SessionMoveOutput>()(
     raw["session.move"]({
       params: { sessionID: input["sessionID"] },
-      payload: {
-        directory: input["directory"],
-        ...(input["delivery"] === undefined ? {} : { delivery: input["delivery"] }),
-      },
+      payload: { directory: input["directory"], delivery: input["delivery"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -562,14 +530,14 @@ const EndpointSessionPrompt = (raw: RawClient["server.session"]) => (input: Sess
     raw["session.prompt"]({
       params: { sessionID: input["sessionID"] },
       payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
+        id: input["id"],
         text: input["text"],
-        ...(input["files"] === undefined ? {} : { files: input["files"] }),
-        ...(input["agents"] === undefined ? {} : { agents: input["agents"] }),
-        ...(input["skills"] === undefined ? {} : { skills: input["skills"] }),
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-        ...(input["delivery"] === undefined ? {} : { delivery: input["delivery"] }),
-        ...(input["resume"] === undefined ? {} : { resume: input["resume"] }),
+        files: input["files"],
+        agents: input["agents"],
+        skills: input["skills"],
+        metadata: input["metadata"],
+        delivery: input["delivery"],
+        resume: input["resume"],
       },
     }).pipe(
       Effect.mapError(mapClientError),
@@ -584,19 +552,11 @@ const EndpointSessionCommand = (raw: RawClient["server.session"]) => (input: Ses
       payload: {
         name: input["name"],
         text: input["text"],
-        ...(input["files"] === undefined ? {} : { files: input["files"] }),
-        ...(input["agents"] === undefined ? {} : { agents: input["agents"] }),
-        ...(input["skills"] === undefined ? {} : { skills: input["skills"] }),
-        ...(input["delivery"] === undefined ? {} : { delivery: input["delivery"] }),
+        files: input["files"],
+        agents: input["agents"],
+        skills: input["skills"],
+        delivery: input["delivery"],
       },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointSessionSkill = (raw: RawClient["server.session"]) => (input: SessionSkillInput) =>
-  preserveEffect<SessionSkillOutput>()(
-    raw["session.skill"]({
-      params: { sessionID: input["sessionID"] },
-      payload: { id: input["id"], ...(input["resume"] === undefined ? {} : { resume: input["resume"] }) },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -605,12 +565,12 @@ const EndpointSessionSynthetic = (raw: RawClient["server.session"]) => (input: S
     raw["session.synthetic"]({
       params: { sessionID: input["sessionID"] },
       payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
+        id: input["id"],
         text: input["text"],
-        ...(input["description"] === undefined ? {} : { description: input["description"] }),
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-        ...(input["delivery"] === undefined ? {} : { delivery: input["delivery"] }),
-        ...(input["resume"] === undefined ? {} : { resume: input["resume"] }),
+        description: input["description"],
+        metadata: input["metadata"],
+        delivery: input["delivery"],
+        resume: input["resume"],
       },
     }).pipe(
       Effect.mapError(mapClientError),
@@ -622,7 +582,7 @@ const EndpointSessionShell = (raw: RawClient["server.session"]) => (input: Sessi
   preserveEffect<SessionShellOutput>()(
     raw["session.shell"]({
       params: { sessionID: input["sessionID"] },
-      payload: { ...(input["id"] === undefined ? {} : { id: input["id"] }), command: input["command"] },
+      payload: { id: input["id"], command: input["command"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -630,26 +590,18 @@ const EndpointSessionCompact = (raw: RawClient["server.session"]) => (input: Ses
   preserveEffect<SessionCompactOutput>()(
     raw["session.compact"]({
       params: { sessionID: input["sessionID"] },
-      payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
-        ...(input["delivery"] === undefined ? {} : { delivery: input["delivery"] }),
-      },
+      payload: { id: input["id"], delivery: input["delivery"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
   )
 
-const EndpointSessionWait = (raw: RawClient["server.session"]) => (input: SessionWaitInput) =>
-  preserveEffect<SessionWaitOutput>()(
-    raw["session.wait"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const EndpointSessionRevertStage = (raw: RawClient["server.session"]) => (input: SessionRevertStageInput) =>
   preserveEffect<SessionRevertStageOutput>()(
     raw["session.revert.stage"]({
       params: { sessionID: input["sessionID"] },
-      payload: { messageID: input["messageID"], ...(input["files"] === undefined ? {} : { files: input["files"] }) },
+      payload: { messageID: input["messageID"], files: input["files"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -678,11 +630,7 @@ const EndpointSessionDiff = (raw: RawClient["server.session"]) => (input: Sessio
   preserveEffect<SessionDiffOutput>()(
     raw["session.diff"]({
       params: { sessionID: input["sessionID"] },
-      query: {
-        ...(input["from"] === undefined ? {} : { from: input["from"] }),
-        ...(input["to"] === undefined ? {} : { to: input["to"] }),
-        ...(input["context"] === undefined ? {} : { context: input["context"] }),
-      },
+      query: { from: input["from"], to: input["to"], context: input["context"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -712,32 +660,6 @@ const EndpointSessionInboxUpdate = (raw: RawClient["server.session"]) => (input:
     }).pipe(Effect.mapError(mapClientError)),
   )
 
-const EndpointSessionInstructionsEntryList =
-  (raw: RawClient["server.session"]) => (input: SessionInstructionsEntryListInput) =>
-    preserveEffect<SessionInstructionsEntryListOutput>()(
-      raw["session.instructions.entry.list"]({ params: { sessionID: input["sessionID"] } }).pipe(
-        Effect.mapError(mapClientError),
-        Effect.map((value) => value.data),
-      ),
-    )
-
-const EndpointSessionInstructionsEntryPut =
-  (raw: RawClient["server.session"]) => (input: SessionInstructionsEntryPutInput) =>
-    preserveEffect<SessionInstructionsEntryPutOutput>()(
-      raw["session.instructions.entry.put"]({
-        params: { sessionID: input["sessionID"], key: input["key"] },
-        payload: { value: input["value"] },
-      }).pipe(Effect.mapError(mapClientError)),
-    )
-
-const EndpointSessionInstructionsEntryRemove =
-  (raw: RawClient["server.session"]) => (input: SessionInstructionsEntryRemoveInput) =>
-    preserveEffect<SessionInstructionsEntryRemoveOutput>()(
-      raw["session.instructions.entry.remove"]({ params: { sessionID: input["sessionID"], key: input["key"] } }).pipe(
-        Effect.mapError(mapClientError),
-      ),
-    )
-
 const EndpointSessionGenerate = (raw: RawClient["server.session"]) => (input: SessionGenerateInput) =>
   preserveEffect<SessionGenerateOutput>()(
     raw["session.generate"]({ params: { sessionID: input["sessionID"] }, payload: { prompt: input["prompt"] } }).pipe(
@@ -746,28 +668,11 @@ const EndpointSessionGenerate = (raw: RawClient["server.session"]) => (input: Se
     ),
   )
 
-const EndpointSessionLog = (raw: RawClient["server.session"]) => (input: SessionLogInput) =>
-  preserveStream<SessionLogOutput>()(
-    Stream.unwrap(
-      raw["session.log"]({
-        params: { sessionID: input["sessionID"] },
-        query: {
-          ...(input["after"] === undefined ? {} : { after: input["after"] }),
-          ...(input["follow"] === undefined ? {} : { follow: input["follow"] }),
-        },
-      }).pipe(
-        Effect.mapError(mapClientError),
-        Effect.map((stream) => stream.pipe(Stream.mapError(mapClientError))),
-      ),
-    ),
-  )
-
 const EndpointSessionInterrupt = (raw: RawClient["server.session"]) => (input: SessionInterruptInput) =>
   preserveEffect<SessionInterruptOutput>()(
-    raw["session.interrupt"]({
-      params: { sessionID: input["sessionID"] },
-      query: { ...(input["resume"] === undefined ? {} : { resume: input["resume"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["session.interrupt"]({ params: { sessionID: input["sessionID"] }, query: { resume: input["resume"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointSessionBackground = (raw: RawClient["server.session"]) => (input: SessionBackgroundInput) =>
@@ -795,12 +700,7 @@ const EndpointSessionFormCreate = (raw: RawClient["server.session"]) => (input: 
   preserveEffect<SessionFormCreateOutput>()(
     raw["session.form.create"]({
       params: { sessionID: input["sessionID"] },
-      payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
-        title: input["title"],
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-        fields: input["fields"],
-      },
+      payload: { id: input["id"], title: input["title"], metadata: input["metadata"], fields: input["fields"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -827,7 +727,7 @@ const EndpointSessionFormCancel = (raw: RawClient["server.session"]) => (input: 
   preserveEffect<SessionFormCancelOutput>()(
     raw["session.form.cancel"]({
       params: { sessionID: input["sessionID"], formID: input["formID"] },
-      query: { ...(input["message"] === undefined ? {} : { message: input["message"] }) },
+      query: { message: input["message"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -848,10 +748,7 @@ const EndpointSessionView = (raw: RawClient["server.session"]) => (input: Sessio
 
 const adaptGroupSession = (raw: RawClient["server.session"]) => ({
   list: EndpointSessionList(raw),
-  stats: EndpointSessionStats(raw),
   create: EndpointSessionCreate(raw),
-  import: EndpointSessionImport(raw),
-  export: EndpointSessionExport(raw),
   active: EndpointSessionActive(raw),
   get: EndpointSessionGet(raw),
   remove: EndpointSessionRemove(raw),
@@ -862,11 +759,9 @@ const adaptGroupSession = (raw: RawClient["server.session"]) => ({
   move: EndpointSessionMove(raw),
   prompt: EndpointSessionPrompt(raw),
   command: EndpointSessionCommand(raw),
-  skill: EndpointSessionSkill(raw),
   synthetic: EndpointSessionSynthetic(raw),
   shell: EndpointSessionShell(raw),
   compact: EndpointSessionCompact(raw),
-  wait: EndpointSessionWait(raw),
   revert: {
     stage: EndpointSessionRevertStage(raw),
     clear: EndpointSessionRevertClear(raw),
@@ -879,15 +774,7 @@ const adaptGroupSession = (raw: RawClient["server.session"]) => ({
     cancel: EndpointSessionInboxCancel(raw),
     update: EndpointSessionInboxUpdate(raw),
   },
-  instructions: {
-    entry: {
-      list: EndpointSessionInstructionsEntryList(raw),
-      put: EndpointSessionInstructionsEntryPut(raw),
-      remove: EndpointSessionInstructionsEntryRemove(raw),
-    },
-  },
   generate: EndpointSessionGenerate(raw),
-  log: EndpointSessionLog(raw),
   interrupt: EndpointSessionInterrupt(raw),
   background: EndpointSessionBackground(raw),
   message: { get: EndpointSessionMessageGet(raw) },
@@ -902,16 +789,116 @@ const adaptGroupSession = (raw: RawClient["server.session"]) => ({
   view: EndpointSessionView(raw),
 })
 
+const EndpointExperimentalSessionStats =
+  (raw: RawClient["server.session"]) => (input?: ExperimentalSessionStatsInput) =>
+    preserveEffect<ExperimentalSessionStatsOutput>()(
+      raw["session.stats"]({
+        query: {
+          from: input?.["from"],
+          to: input?.["to"],
+          project: input?.["project"],
+          timezone: input?.["timezone"],
+          tools: input?.["tools"],
+        },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalSessionImport =
+  (raw: RawClient["server.session"]) => (input: ExperimentalSessionImportInput) =>
+    preserveEffect<ExperimentalSessionImportOutput>()(
+      raw["session.import"]({
+        payload: { info: input["info"], messages: input["messages"], location: input["location"] },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalSessionExport =
+  (raw: RawClient["server.session"]) => (input: ExperimentalSessionExportInput) =>
+    preserveEffect<ExperimentalSessionExportOutput>()(
+      raw["session.export"]({ params: { sessionID: input["sessionID"] }, query: { sanitize: input["sanitize"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalSessionSkill = (raw: RawClient["server.session"]) => (input: ExperimentalSessionSkillInput) =>
+  preserveEffect<ExperimentalSessionSkillOutput>()(
+    raw["session.skill"]({
+      params: { sessionID: input["sessionID"] },
+      payload: { id: input["id"], resume: input["resume"] },
+    }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointExperimentalSessionWait = (raw: RawClient["server.session"]) => (input: ExperimentalSessionWaitInput) =>
+  preserveEffect<ExperimentalSessionWaitOutput>()(
+    raw["session.wait"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointExperimentalSessionInstructionsEntryList =
+  (raw: RawClient["server.session"]) => (input: ExperimentalSessionInstructionsEntryListInput) =>
+    preserveEffect<ExperimentalSessionInstructionsEntryListOutput>()(
+      raw["session.instructions.entry.list"]({ params: { sessionID: input["sessionID"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalSessionInstructionsEntryPut =
+  (raw: RawClient["server.session"]) => (input: ExperimentalSessionInstructionsEntryPutInput) =>
+    preserveEffect<ExperimentalSessionInstructionsEntryPutOutput>()(
+      raw["session.instructions.entry.put"]({
+        params: { sessionID: input["sessionID"], key: input["key"] },
+        payload: { value: input["value"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalSessionInstructionsEntryRemove =
+  (raw: RawClient["server.session"]) => (input: ExperimentalSessionInstructionsEntryRemoveInput) =>
+    preserveEffect<ExperimentalSessionInstructionsEntryRemoveOutput>()(
+      raw["session.instructions.entry.remove"]({ params: { sessionID: input["sessionID"], key: input["key"] } }).pipe(
+        Effect.mapError(mapClientError),
+      ),
+    )
+
+const EndpointExperimentalSessionLog = (raw: RawClient["server.session"]) => (input: ExperimentalSessionLogInput) =>
+  preserveStream<ExperimentalSessionLogOutput>()(
+    Stream.unwrap(
+      raw["session.log"]({
+        params: { sessionID: input["sessionID"] },
+        query: { after: input["after"], follow: input["follow"] },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((stream) => stream.pipe(Stream.mapError(mapClientError))),
+      ),
+    ),
+  )
+
+const adaptGroupExperimentalSession = (raw: RawClient["server.session"]) => ({
+  stats: EndpointExperimentalSessionStats(raw),
+  import: EndpointExperimentalSessionImport(raw),
+  export: EndpointExperimentalSessionExport(raw),
+  skill: EndpointExperimentalSessionSkill(raw),
+  wait: EndpointExperimentalSessionWait(raw),
+  instructions: {
+    entry: {
+      list: EndpointExperimentalSessionInstructionsEntryList(raw),
+      put: EndpointExperimentalSessionInstructionsEntryPut(raw),
+      remove: EndpointExperimentalSessionInstructionsEntryRemove(raw),
+    },
+  },
+  log: EndpointExperimentalSessionLog(raw),
+})
+
 const EndpointMessageList = (raw: RawClient["server.message"]) => (input: MessageListInput) =>
   preserveEffect<MessageListOutput>()(
     raw["session.messages"]({
       params: { sessionID: input["sessionID"] },
-      query: {
-        ...(input["limit"] === undefined ? {} : { limit: input["limit"] }),
-        ...(input["order"] === undefined ? {} : { order: input["order"] }),
-        ...(input["cursor"] === undefined ? {} : { cursor: input["cursor"] }),
-        ...(input["type"] === undefined ? {} : { type: input["type"] }),
-      },
+      query: { limit: input["limit"], order: input["order"], cursor: input["cursor"], type: input["type"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -919,19 +906,14 @@ const adaptGroupMessage = (raw: RawClient["server.message"]) => ({ list: Endpoin
 
 const EndpointModelList = (raw: RawClient["server.model"]) => (input?: ModelListInput) =>
   preserveEffect<ModelListOutput>()(
-    raw["model.list"]({
-      query: {
-        ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }),
-        ...(input?.["types"] === undefined ? {} : { types: input?.["types"] }),
-      },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["model.list"]({ query: { location: input?.["location"], types: input?.["types"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointModelDefault = (raw: RawClient["server.model"]) => (input?: ModelDefaultInput) =>
   preserveEffect<ModelDefaultOutput>()(
-    raw["model.default"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["model.default"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupModel = (raw: RawClient["server.model"]) => ({
@@ -939,89 +921,83 @@ const adaptGroupModel = (raw: RawClient["server.model"]) => ({
   default: EndpointModelDefault(raw),
 })
 
-const EndpointGenerateText = (raw: RawClient["server.generate"]) => (input: GenerateTextInput) =>
-  preserveEffect<GenerateTextOutput>()(
-    raw["generate.text"]({
-      payload: { prompt: input["prompt"], ...(input["model"] === undefined ? {} : { model: input["model"] }) },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
-  )
+const EndpointExperimentalGenerateText =
+  (raw: RawClient["server.generate"]) => (input: ExperimentalGenerateTextInput) =>
+    preserveEffect<ExperimentalGenerateTextOutput>()(
+      raw["generate.text"]({ payload: { prompt: input["prompt"], model: input["model"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
 
-const EndpointGenerateImage = (raw: RawClient["server.generate"]) => (input: GenerateImageInput) =>
-  preserveEffect<GenerateImageOutput>()(
-    raw["generate.image"]({
-      payload: {
-        model: input["model"],
-        prompt: input["prompt"],
-        ...(input["images"] === undefined ? {} : { images: input["images"] }),
-        ...(input["n"] === undefined ? {} : { n: input["n"] }),
-        ...(input["aspect"] === undefined ? {} : { aspect: input["aspect"] }),
-        ...(input["resolution"] === undefined ? {} : { resolution: input["resolution"] }),
-      },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
-  )
+const EndpointExperimentalGenerateImage =
+  (raw: RawClient["server.generate"]) => (input: ExperimentalGenerateImageInput) =>
+    preserveEffect<ExperimentalGenerateImageOutput>()(
+      raw["generate.image"]({
+        payload: {
+          model: input["model"],
+          prompt: input["prompt"],
+          images: input["images"],
+          n: input["n"],
+          aspect: input["aspect"],
+          resolution: input["resolution"],
+        },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
 
-const EndpointGenerateDecisions = (raw: RawClient["server.generate"]) => (input: GenerateDecisionsInput) =>
-  preserveEffect<GenerateDecisionsOutput>()(
-    raw["generate.decisions"]({
-      payload: { model: input["model"], input: input["input"], questions: input["questions"] },
-    }).pipe(
-      Effect.mapError(mapClientError),
-      Effect.map((value) => value.data),
-    ),
-  )
+const EndpointExperimentalGenerateDecisions =
+  (raw: RawClient["server.generate"]) => (input: ExperimentalGenerateDecisionsInput) =>
+    preserveEffect<ExperimentalGenerateDecisionsOutput>()(
+      raw["generate.decisions"]({
+        payload: { model: input["model"], input: input["input"], questions: input["questions"] },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
 
-const adaptGroupGenerate = (raw: RawClient["server.generate"]) => ({
-  text: EndpointGenerateText(raw),
-  image: EndpointGenerateImage(raw),
-  decisions: EndpointGenerateDecisions(raw),
+const adaptGroupExperimentalGenerate = (raw: RawClient["server.generate"]) => ({
+  text: EndpointExperimentalGenerateText(raw),
+  image: EndpointExperimentalGenerateImage(raw),
+  decisions: EndpointExperimentalGenerateDecisions(raw),
 })
 
-const EndpointVoiceModels = (raw: RawClient["server.voice"]) => () =>
-  preserveEffect<VoiceModelsOutput>()(
+const EndpointExperimentalVoiceModels = (raw: RawClient["server.voice"]) => () =>
+  preserveEffect<ExperimentalVoiceModelsOutput>()(
     raw["voice.models"]({}).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
   )
 
-const EndpointVoiceSession = (raw: RawClient["server.voice"]) => (input: VoiceSessionInput) =>
-  preserveEffect<VoiceSessionOutput>()(
+const EndpointExperimentalVoiceSession = (raw: RawClient["server.voice"]) => (input: ExperimentalVoiceSessionInput) =>
+  preserveEffect<ExperimentalVoiceSessionOutput>()(
     raw["voice.session"]({
-      payload: {
-        model: input["model"],
-        ...(input["session"] === undefined ? {} : { session: input["session"] }),
-        transport: input["transport"],
-      },
+      payload: { model: input["model"], session: input["session"], transport: input["transport"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
   )
 
-const adaptGroupVoice = (raw: RawClient["server.voice"]) => ({
-  models: EndpointVoiceModels(raw),
-  session: EndpointVoiceSession(raw),
+const adaptGroupExperimentalVoice = (raw: RawClient["server.voice"]) => ({
+  models: EndpointExperimentalVoiceModels(raw),
+  session: EndpointExperimentalVoiceSession(raw),
 })
 
 const EndpointProviderList = (raw: RawClient["server.provider"]) => (input?: ProviderListInput) =>
   preserveEffect<ProviderListOutput>()(
-    raw["provider.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["provider.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointProviderGet = (raw: RawClient["server.provider"]) => (input: ProviderGetInput) =>
   preserveEffect<ProviderGetOutput>()(
-    raw["provider.get"]({
-      params: { providerID: input["providerID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["provider.get"]({ params: { providerID: input["providerID"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const adaptGroupProvider = (raw: RawClient["server.provider"]) => ({
@@ -1031,38 +1007,23 @@ const adaptGroupProvider = (raw: RawClient["server.provider"]) => ({
 
 const EndpointIntegrationList = (raw: RawClient["server.integration"]) => (input?: IntegrationListInput) =>
   preserveEffect<IntegrationListOutput>()(
-    raw["integration.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["integration.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointIntegrationGet = (raw: RawClient["server.integration"]) => (input: IntegrationGetInput) =>
   preserveEffect<IntegrationGetOutput>()(
     raw["integration.get"]({
       params: { integrationID: input["integrationID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
+      query: { location: input["location"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
-
-const EndpointIntegrationWellknownAdd =
-  (raw: RawClient["server.integration"]) => (input: IntegrationWellknownAddInput) =>
-    preserveEffect<IntegrationWellknownAddOutput>()(
-      raw["integration.wellknown.add"]({
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-        payload: { url: input["url"] },
-      }).pipe(Effect.mapError(mapClientError)),
-    )
 
 const EndpointIntegrationConnectKey = (raw: RawClient["server.integration"]) => (input: IntegrationConnectKeyInput) =>
   preserveEffect<IntegrationConnectKeyOutput>()(
     raw["integration.connect.key"]({
       params: { integrationID: input["integrationID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: {
-        key: input["key"],
-        ...(input["answer"] === undefined ? {} : { answer: input["answer"] }),
-        ...(input["label"] === undefined ? {} : { label: input["label"] }),
-      },
+      query: { location: input["location"] },
+      payload: { key: input["key"], answer: input["answer"], label: input["label"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1071,12 +1032,8 @@ const EndpointIntegrationConnectExternal =
     preserveEffect<IntegrationConnectExternalOutput>()(
       raw["integration.connect.external"]({
         params: { integrationID: input["integrationID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-        payload: {
-          methodID: input["methodID"],
-          ...(input["answer"] === undefined ? {} : { answer: input["answer"] }),
-          ...(input["label"] === undefined ? {} : { label: input["label"] }),
-        },
+        query: { location: input["location"] },
+        payload: { methodID: input["methodID"], answer: input["answer"], label: input["label"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
@@ -1085,12 +1042,8 @@ const EndpointIntegrationOauthConnect =
     preserveEffect<IntegrationOauthConnectOutput>()(
       raw["integration.oauth.connect"]({
         params: { integrationID: input["integrationID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-        payload: {
-          methodID: input["methodID"],
-          ...(input["answer"] === undefined ? {} : { answer: input["answer"] }),
-          ...(input["label"] === undefined ? {} : { label: input["label"] }),
-        },
+        query: { location: input["location"] },
+        payload: { methodID: input["methodID"], answer: input["answer"], label: input["label"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
@@ -1098,7 +1051,7 @@ const EndpointIntegrationOauthStatus = (raw: RawClient["server.integration"]) =>
   preserveEffect<IntegrationOauthStatusOutput>()(
     raw["integration.oauth.status"]({
       params: { integrationID: input["integrationID"], attemptID: input["attemptID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
+      query: { location: input["location"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1107,8 +1060,8 @@ const EndpointIntegrationOauthComplete =
     preserveEffect<IntegrationOauthCompleteOutput>()(
       raw["integration.oauth.complete"]({
         params: { integrationID: input["integrationID"], attemptID: input["attemptID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-        payload: { ...(input["code"] === undefined ? {} : { code: input["code"] }) },
+        query: { location: input["location"] },
+        payload: { code: input["code"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
@@ -1116,7 +1069,7 @@ const EndpointIntegrationOauthCancel = (raw: RawClient["server.integration"]) =>
   preserveEffect<IntegrationOauthCancelOutput>()(
     raw["integration.oauth.cancel"]({
       params: { integrationID: input["integrationID"], attemptID: input["attemptID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
+      query: { location: input["location"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1125,8 +1078,8 @@ const EndpointIntegrationCommandConnect =
     preserveEffect<IntegrationCommandConnectOutput>()(
       raw["integration.command.connect"]({
         params: { integrationID: input["integrationID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-        payload: { methodID: input["methodID"], ...(input["label"] === undefined ? {} : { label: input["label"] }) },
+        query: { location: input["location"] },
+        payload: { methodID: input["methodID"], label: input["label"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
@@ -1135,7 +1088,7 @@ const EndpointIntegrationCommandStatus =
     preserveEffect<IntegrationCommandStatusOutput>()(
       raw["integration.command.status"]({
         params: { integrationID: input["integrationID"], attemptID: input["attemptID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
+        query: { location: input["location"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
@@ -1144,14 +1097,13 @@ const EndpointIntegrationCommandCancel =
     preserveEffect<IntegrationCommandCancelOutput>()(
       raw["integration.command.cancel"]({
         params: { integrationID: input["integrationID"], attemptID: input["attemptID"] },
-        query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
+        query: { location: input["location"] },
       }).pipe(Effect.mapError(mapClientError)),
     )
 
 const adaptGroupIntegration = (raw: RawClient["server.integration"]) => ({
   list: EndpointIntegrationList(raw),
   get: EndpointIntegrationGet(raw),
-  wellknown: { add: EndpointIntegrationWellknownAdd(raw) },
   connect: { key: EndpointIntegrationConnectKey(raw), external: EndpointIntegrationConnectExternal(raw) },
   oauth: {
     connect: EndpointIntegrationOauthConnect(raw),
@@ -1166,71 +1118,77 @@ const adaptGroupIntegration = (raw: RawClient["server.integration"]) => ({
   },
 })
 
+const EndpointExperimentalIntegrationWellknownAdd =
+  (raw: RawClient["server.integration"]) => (input: ExperimentalIntegrationWellknownAddInput) =>
+    preserveEffect<ExperimentalIntegrationWellknownAddOutput>()(
+      raw["integration.wellknown.add"]({ query: { location: input["location"] }, payload: { url: input["url"] } }).pipe(
+        Effect.mapError(mapClientError),
+      ),
+    )
+
+const adaptGroupExperimentalIntegration = (raw: RawClient["server.integration"]) => ({
+  wellknown: { add: EndpointExperimentalIntegrationWellknownAdd(raw) },
+})
+
 const EndpointMcpList = (raw: RawClient["server.mcp"]) => (input?: McpListInput) =>
   preserveEffect<McpListOutput>()(
-    raw["mcp.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointMcpAdd = (raw: RawClient["server.mcp"]) => (input: McpAddInput) =>
-  preserveEffect<McpAddOutput>()(
-    raw["mcp.add"]({
-      params: { server: input["server"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: { config: input["config"] },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointMcpRemove = (raw: RawClient["server.mcp"]) => (input: McpRemoveInput) =>
-  preserveEffect<McpRemoveOutput>()(
-    raw["mcp.remove"]({
-      params: { server: input["server"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointMcpConnect = (raw: RawClient["server.mcp"]) => (input: McpConnectInput) =>
-  preserveEffect<McpConnectOutput>()(
-    raw["mcp.connect"]({
-      params: { server: input["server"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointMcpDisconnect = (raw: RawClient["server.mcp"]) => (input: McpDisconnectInput) =>
-  preserveEffect<McpDisconnectOutput>()(
-    raw["mcp.disconnect"]({
-      params: { server: input["server"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["mcp.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointMcpResourceCatalog = (raw: RawClient["server.mcp"]) => (input?: McpResourceCatalogInput) =>
   preserveEffect<McpResourceCatalogOutput>()(
-    raw["mcp.resource.catalog"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointMcpClientToken = (raw: RawClient["server.mcp"]) => (input: McpClientTokenInput) =>
-  preserveEffect<McpClientTokenOutput>()(
-    raw["mcp.clientToken"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }), name: input["name"] },
-      headers: {
-        ...(input["x-opencode-ticket"] === undefined ? {} : { "x-opencode-ticket": input["x-opencode-ticket"] }),
-      },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["mcp.resource.catalog"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupMcp = (raw: RawClient["server.mcp"]) => ({
   list: EndpointMcpList(raw),
-  add: EndpointMcpAdd(raw),
-  remove: EndpointMcpRemove(raw),
-  connect: EndpointMcpConnect(raw),
-  disconnect: EndpointMcpDisconnect(raw),
   resource: { catalog: EndpointMcpResourceCatalog(raw) },
-  client: { token: EndpointMcpClientToken(raw) },
+})
+
+const EndpointExperimentalMcpAdd = (raw: RawClient["server.mcp"]) => (input: ExperimentalMcpAddInput) =>
+  preserveEffect<ExperimentalMcpAddOutput>()(
+    raw["mcp.add"]({
+      params: { server: input["server"] },
+      query: { location: input["location"] },
+      payload: { config: input["config"] },
+    }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointExperimentalMcpRemove = (raw: RawClient["server.mcp"]) => (input: ExperimentalMcpRemoveInput) =>
+  preserveEffect<ExperimentalMcpRemoveOutput>()(
+    raw["mcp.remove"]({ params: { server: input["server"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointExperimentalMcpConnect = (raw: RawClient["server.mcp"]) => (input: ExperimentalMcpConnectInput) =>
+  preserveEffect<ExperimentalMcpConnectOutput>()(
+    raw["mcp.connect"]({ params: { server: input["server"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointExperimentalMcpDisconnect = (raw: RawClient["server.mcp"]) => (input: ExperimentalMcpDisconnectInput) =>
+  preserveEffect<ExperimentalMcpDisconnectOutput>()(
+    raw["mcp.disconnect"]({ params: { server: input["server"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointExperimentalMcpClientToken = (raw: RawClient["server.mcp"]) => (input: ExperimentalMcpClientTokenInput) =>
+  preserveEffect<ExperimentalMcpClientTokenOutput>()(
+    raw["mcp.clientToken"]({
+      query: { location: input["location"], name: input["name"] },
+      headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
+    }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const adaptGroupExperimentalMcp = (raw: RawClient["server.mcp"]) => ({
+  add: EndpointExperimentalMcpAdd(raw),
+  remove: EndpointExperimentalMcpRemove(raw),
+  connect: EndpointExperimentalMcpConnect(raw),
+  disconnect: EndpointExperimentalMcpDisconnect(raw),
+  client: { token: EndpointExperimentalMcpClientToken(raw) },
 })
 
 const EndpointCredentialList = (raw: RawClient["server.credential"]) => () =>
@@ -1245,11 +1203,11 @@ const EndpointCredentialCreate = (raw: RawClient["server.credential"]) => (input
   preserveEffect<CredentialCreateOutput>()(
     raw["credential.create"]({
       payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
+        id: input["id"],
         integrationID: input["integrationID"],
-        ...(input["label"] === undefined ? {} : { label: input["label"] }),
+        label: input["label"],
         value: input["value"],
-        ...(input["activate"] === undefined ? {} : { activate: input["activate"] }),
+        activate: input["activate"],
       },
     }).pipe(
       Effect.mapError(mapClientError),
@@ -1287,21 +1245,14 @@ const adaptGroupCredential = (raw: RawClient["server.credential"]) => ({
 
 const EndpointProjectList = (raw: RawClient["server.project"]) => (input?: ProjectListInput) =>
   preserveEffect<ProjectListOutput>()(
-    raw["project.list"]({
-      query: { ...(input?.["archived"] === undefined ? {} : { archived: input?.["archived"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["project.list"]({ query: { archived: input?.["archived"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointProjectUpdate = (raw: RawClient["server.project"]) => (input: ProjectUpdateInput) =>
   preserveEffect<ProjectUpdateOutput>()(
     raw["project.update"]({
       params: { projectID: input["projectID"] },
-      payload: {
-        ...(input["canonical"] === undefined ? {} : { canonical: input["canonical"] }),
-        ...(input["name"] === undefined ? {} : { name: input["name"] }),
-        ...(input["icon"] === undefined ? {} : { icon: input["icon"] }),
-        ...(input["commands"] === undefined ? {} : { commands: input["commands"] }),
-      },
+      payload: { canonical: input["canonical"], name: input["name"], icon: input["icon"], commands: input["commands"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1312,25 +1263,19 @@ const adaptGroupProject = (raw: RawClient["server.project"]) => ({
 
 const EndpointFormList = (raw: RawClient["server.form"]) => (input?: FormListInput) =>
   preserveEffect<FormListOutput>()(
-    raw["form.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["form.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupForm = (raw: RawClient["server.form"]) => ({ list: EndpointFormList(raw) })
 
 const EndpointPermissionRequestList = (raw: RawClient["server.permission"]) => (input?: PermissionRequestListInput) =>
   preserveEffect<PermissionRequestListOutput>()(
-    raw["permission.request.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["permission.request.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointPermissionSavedList = (raw: RawClient["server.permission"]) => (input?: PermissionSavedListInput) =>
   preserveEffect<PermissionSavedListOutput>()(
-    raw["permission.saved.list"]({
-      query: { ...(input?.["projectID"] === undefined ? {} : { projectID: input?.["projectID"] }) },
-    }).pipe(
+    raw["permission.saved.list"]({ query: { projectID: input?.["projectID"] } }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
@@ -1340,10 +1285,7 @@ const EndpointPermissionSavedUpdate = (raw: RawClient["server.permission"]) => (
   preserveEffect<PermissionSavedUpdateOutput>()(
     raw["permission.saved.update"]({
       params: { id: input["id"] },
-      payload: {
-        ...(input["action"] === undefined ? {} : { action: input["action"] }),
-        ...(input["resource"] === undefined ? {} : { resource: input["resource"] }),
-      },
+      payload: { action: input["action"], resource: input["resource"] },
     }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -1360,13 +1302,13 @@ const EndpointPermissionCreate = (raw: RawClient["server.permission"]) => (input
     raw["session.permission.create"]({
       params: { sessionID: input["sessionID"] },
       payload: {
-        ...(input["id"] === undefined ? {} : { id: input["id"] }),
+        id: input["id"],
         action: input["action"],
         resources: input["resources"],
-        ...(input["save"] === undefined ? {} : { save: input["save"] }),
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-        ...(input["source"] === undefined ? {} : { source: input["source"] }),
-        ...(input["agent"] === undefined ? {} : { agent: input["agent"] }),
+        save: input["save"],
+        metadata: input["metadata"],
+        source: input["source"],
+        agent: input["agent"],
       },
     }).pipe(
       Effect.mapError(mapClientError),
@@ -1394,10 +1336,7 @@ const EndpointPermissionReply = (raw: RawClient["server.permission"]) => (input:
   preserveEffect<PermissionReplyOutput>()(
     raw["session.permission.reply"]({
       params: { sessionID: input["sessionID"], requestID: input["requestID"] },
-      payload: {
-        decision: input["decision"],
-        ...(input["message"] === undefined ? {} : { message: input["message"] }),
-      },
+      payload: { decision: input["decision"], message: input["message"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1416,63 +1355,49 @@ const adaptGroupPermission = (raw: RawClient["server.permission"]) => ({
 
 const EndpointFileList = (raw: RawClient["server.fs"]) => (input?: FileListInput) =>
   preserveEffect<FileListOutput>()(
-    raw["fs.list"]({
-      query: {
-        ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }),
-        ...(input?.["path"] === undefined ? {} : { path: input?.["path"] }),
-      },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["fs.list"]({ query: { location: input?.["location"], path: input?.["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointFileFind = (raw: RawClient["server.fs"]) => (input: FileFindInput) =>
   preserveEffect<FileFindOutput>()(
     raw["fs.find"]({
-      query: {
-        ...(input["location"] === undefined ? {} : { location: input["location"] }),
-        query: input["query"],
-        ...(input["type"] === undefined ? {} : { type: input["type"] }),
-        ...(input["limit"] === undefined ? {} : { limit: input["limit"] }),
-      },
+      query: { location: input["location"], query: input["query"], type: input["type"], limit: input["limit"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
-const EndpointFileWatch = (raw: RawClient["server.fs"]) => (input: FileWatchInput) =>
-  preserveEffect<FileWatchOutput>()(
-    raw["fs.watch"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: { path: input["path"] },
-    }).pipe(Effect.mapError(mapClientError)),
+const adaptGroupFile = (raw: RawClient["server.fs"]) => ({ list: EndpointFileList(raw), find: EndpointFileFind(raw) })
+
+const EndpointExperimentalFileWatch = (raw: RawClient["server.fs"]) => (input: ExperimentalFileWatchInput) =>
+  preserveEffect<ExperimentalFileWatchOutput>()(
+    raw["fs.watch"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
-const EndpointFileUnwatch = (raw: RawClient["server.fs"]) => (input: FileUnwatchInput) =>
-  preserveEffect<FileUnwatchOutput>()(
-    raw["fs.unwatch"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: { path: input["path"] },
-    }).pipe(Effect.mapError(mapClientError)),
+const EndpointExperimentalFileUnwatch = (raw: RawClient["server.fs"]) => (input: ExperimentalFileUnwatchInput) =>
+  preserveEffect<ExperimentalFileUnwatchOutput>()(
+    raw["fs.unwatch"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
-const adaptGroupFile = (raw: RawClient["server.fs"]) => ({
-  list: EndpointFileList(raw),
-  find: EndpointFileFind(raw),
-  watch: EndpointFileWatch(raw),
-  unwatch: EndpointFileUnwatch(raw),
+const adaptGroupExperimentalFile = (raw: RawClient["server.fs"]) => ({
+  watch: EndpointExperimentalFileWatch(raw),
+  unwatch: EndpointExperimentalFileUnwatch(raw),
 })
 
 const EndpointCommandList = (raw: RawClient["server.command"]) => (input?: CommandListInput) =>
   preserveEffect<CommandListOutput>()(
-    raw["command.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["command.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupCommand = (raw: RawClient["server.command"]) => ({ list: EndpointCommandList(raw) })
 
 const EndpointSkillList = (raw: RawClient["server.skill"]) => (input?: SkillListInput) =>
   preserveEffect<SkillListOutput>()(
-    raw["skill.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["skill.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupSkill = (raw: RawClient["server.skill"]) => ({ list: EndpointSkillList(raw) })
@@ -1481,8 +1406,8 @@ const EndpointRpcCall = (raw: RawClient["server.rpc"]) => (input: RpcCallInput) 
   preserveEffect<RpcCallOutput>()(
     raw["rpc.call"]({
       params: { rpcID: input["rpcID"], method: input["method"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: { ...(input["input"] === undefined ? {} : { input: input["input"] }) },
+      query: { location: input["location"] },
+      payload: { input: input["input"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1491,9 +1416,7 @@ const adaptGroupRpc = (raw: RawClient["server.rpc"]) => ({ call: EndpointRpcCall
 const EndpointEventSubscribe = (raw: RawClient["server.event"]) => (input?: EventSubscribeInput) =>
   preserveStream<EventSubscribeOutput>()(
     Stream.unwrap(
-      raw["event.subscribe"]({
-        query: { ...(input?.["types"] === undefined ? {} : { types: input?.["types"] }) },
-      }).pipe(
+      raw["event.subscribe"]({ query: { types: input?.["types"] } }).pipe(
         Effect.mapError(mapClientError),
         Effect.map((stream) => stream.pipe(Stream.mapError(mapClientError))),
       ),
@@ -1504,61 +1427,52 @@ const adaptGroupEvent = (raw: RawClient["server.event"]) => ({ subscribe: Endpoi
 
 const EndpointPtyList = (raw: RawClient["server.pty"]) => (input?: PtyListInput) =>
   preserveEffect<PtyListOutput>()(
-    raw["pty.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["pty.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointPtyCreate = (raw: RawClient["server.pty"]) => (input?: PtyCreateInput) =>
   preserveEffect<PtyCreateOutput>()(
     raw["pty.create"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
+      query: { location: input?.["location"] },
       payload: {
-        ...(input?.["command"] === undefined ? {} : { command: input?.["command"] }),
-        ...(input?.["args"] === undefined ? {} : { args: input?.["args"] }),
-        ...(input?.["cwd"] === undefined ? {} : { cwd: input?.["cwd"] }),
-        ...(input?.["title"] === undefined ? {} : { title: input?.["title"] }),
-        ...(input?.["env"] === undefined ? {} : { env: input?.["env"] }),
+        command: input?.["command"],
+        args: input?.["args"],
+        cwd: input?.["cwd"],
+        title: input?.["title"],
+        env: input?.["env"],
       },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointPtyGet = (raw: RawClient["server.pty"]) => (input: PtyGetInput) =>
   preserveEffect<PtyGetOutput>()(
-    raw["pty.get"]({
-      params: { ptyID: input["ptyID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["pty.get"]({ params: { ptyID: input["ptyID"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointPtyUpdate = (raw: RawClient["server.pty"]) => (input: PtyUpdateInput) =>
   preserveEffect<PtyUpdateOutput>()(
     raw["pty.update"]({
       params: { ptyID: input["ptyID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: {
-        ...(input["title"] === undefined ? {} : { title: input["title"] }),
-        ...(input["size"] === undefined ? {} : { size: input["size"] }),
-      },
+      query: { location: input["location"] },
+      payload: { title: input["title"], size: input["size"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointPtyRemove = (raw: RawClient["server.pty"]) => (input: PtyRemoveInput) =>
   preserveEffect<PtyRemoveOutput>()(
-    raw["pty.remove"]({
-      params: { ptyID: input["ptyID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["pty.remove"]({ params: { ptyID: input["ptyID"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointPtyConnectToken = (raw: RawClient["server.pty"]) => (input: PtyConnectTokenInput) =>
   preserveEffect<PtyConnectTokenOutput>()(
     raw["pty.connectToken"]({
       params: { ptyID: input["ptyID"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      headers: {
-        ...(input["x-opencode-ticket"] === undefined ? {} : { "x-opencode-ticket": input["x-opencode-ticket"] }),
-      },
+      query: { location: input["location"] },
+      headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1574,10 +1488,7 @@ const adaptGroupPty = (raw: RawClient["server.pty"]) => ({
 const EndpointExperimentalPersistentPtyRead =
   (raw: RawClient["server.experimental"]) => (input: ExperimentalPersistentPtyReadInput) =>
     preserveEffect<ExperimentalPersistentPtyReadOutput>()(
-      raw["persistentPty.read"]({
-        params: { sessionID: input["sessionID"] },
-        query: { ...(input["lines"] === undefined ? {} : { lines: input["lines"] }) },
-      }).pipe(
+      raw["persistentPty.read"]({ params: { sessionID: input["sessionID"] }, query: { lines: input["lines"] } }).pipe(
         Effect.mapError(mapClientError),
         Effect.map((value) => value.data),
       ),
@@ -1598,12 +1509,12 @@ const EndpointExperimentalPersistentPtyCreate =
       raw["persistentPty.create"]({
         params: { sessionID: input["sessionID"] },
         payload: {
-          ...(input["command"] === undefined ? {} : { command: input["command"] }),
+          command: input["command"],
           args: input["args"],
-          ...(input["cwd"] === undefined ? {} : { cwd: input["cwd"] }),
+          cwd: input["cwd"],
           title: input["title"],
           env: input["env"],
-          ...(input["size"] === undefined ? {} : { size: input["size"] }),
+          size: input["size"],
         },
       }).pipe(
         Effect.mapError(mapClientError),
@@ -1635,10 +1546,7 @@ const EndpointExperimentalPersistentPtyUpdate =
     preserveEffect<ExperimentalPersistentPtyUpdateOutput>()(
       raw["persistentPty.update"]({
         params: { ptyID: input["ptyID"] },
-        payload: {
-          ...(input["attachmentID"] === undefined ? {} : { attachmentID: input["attachmentID"] }),
-          size: input["size"],
-        },
+        payload: { attachmentID: input["attachmentID"], size: input["size"], title: input["title"] },
       }).pipe(
         Effect.mapError(mapClientError),
         Effect.map((value) => value.data),
@@ -1665,13 +1573,129 @@ const EndpointExperimentalPersistentPtyConnectToken =
     preserveEffect<ExperimentalPersistentPtyConnectTokenOutput>()(
       raw["persistentPty.connectToken"]({
         params: { ptyID: input["ptyID"] },
-        headers: {
-          ...(input["x-opencode-ticket"] === undefined ? {} : { "x-opencode-ticket": input["x-opencode-ticket"] }),
+        headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
+      }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalScheduleCreate =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalScheduleCreateInput) =>
+    preserveEffect<ExperimentalScheduleCreateOutput>()(
+      raw["schedule.create"]({
+        payload: {
+          sessionID: input["sessionID"],
+          name: input["name"],
+          when: input["when"],
+          if: input["if"],
+          until: input["until"],
+          ends: input["ends"],
+          prompt: input["prompt"],
         },
       }).pipe(
         Effect.mapError(mapClientError),
         Effect.map((value) => value.data),
       ),
+    )
+
+const EndpointExperimentalScheduleList =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalScheduleListInput) =>
+    preserveEffect<ExperimentalScheduleListOutput>()(
+      raw["schedule.list"]({ query: { sessionID: input["sessionID"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalScheduleGet =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalScheduleGetInput) =>
+    preserveEffect<ExperimentalScheduleGetOutput>()(
+      raw["schedule.get"]({ params: { scheduleID: input["scheduleID"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalSchedulePause =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalSchedulePauseInput) =>
+    preserveEffect<ExperimentalSchedulePauseOutput>()(
+      raw["schedule.pause"]({ params: { scheduleID: input["scheduleID"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalScheduleResume =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalScheduleResumeInput) =>
+    preserveEffect<ExperimentalScheduleResumeOutput>()(
+      raw["schedule.resume"]({ params: { scheduleID: input["scheduleID"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
+const EndpointExperimentalScheduleDelete =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalScheduleDeleteInput) =>
+    preserveEffect<ExperimentalScheduleDeleteOutput>()(
+      raw["schedule.delete"]({ params: { scheduleID: input["scheduleID"] } }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsProviders =
+  (raw: RawClient["server.experimental"]) => (input?: ExperimentalArtifactsProvidersInput) =>
+    preserveEffect<ExperimentalArtifactsProvidersOutput>()(
+      raw["artifacts.providers"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsList =
+  (raw: RawClient["server.experimental"]) => (input?: ExperimentalArtifactsListInput) =>
+    preserveEffect<ExperimentalArtifactsListOutput>()(
+      raw["artifacts.list"]({
+        query: { location: input?.["location"], sessionID: input?.["sessionID"], provider: input?.["provider"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsCreate =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalArtifactsCreateInput) =>
+    preserveEffect<ExperimentalArtifactsCreateOutput>()(
+      raw["artifacts.create"]({
+        query: { location: input["location"] },
+        payload: {
+          title: input["title"],
+          files: input["files"],
+          entry: input["entry"],
+          provider: input["provider"],
+          sessionID: input["sessionID"],
+        },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsGet =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalArtifactsGetInput) =>
+    preserveEffect<ExperimentalArtifactsGetOutput>()(
+      raw["artifacts.get"]({
+        params: { artifactID: input["artifactID"] },
+        query: { location: input["location"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsUpdate =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalArtifactsUpdateInput) =>
+    preserveEffect<ExperimentalArtifactsUpdateOutput>()(
+      raw["artifacts.update"]({
+        params: { artifactID: input["artifactID"] },
+        query: { location: input["location"] },
+        payload: { title: input["title"], files: input["files"], entry: input["entry"], sessionID: input["sessionID"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalArtifactsDelete =
+  (raw: RawClient["server.experimental"]) => (input: ExperimentalArtifactsDeleteInput) =>
+    preserveEffect<ExperimentalArtifactsDeleteOutput>()(
+      raw["artifacts.delete"]({
+        params: { artifactID: input["artifactID"] },
+        query: { location: input["location"] },
+      }).pipe(Effect.mapError(mapClientError)),
     )
 
 const adaptGroupExperimental = (raw: RawClient["server.experimental"]) => ({
@@ -1687,54 +1711,57 @@ const adaptGroupExperimental = (raw: RawClient["server.experimental"]) => ({
     remove: EndpointExperimentalPersistentPtyRemove(raw),
     connectToken: EndpointExperimentalPersistentPtyConnectToken(raw),
   },
+  schedule: {
+    create: EndpointExperimentalScheduleCreate(raw),
+    list: EndpointExperimentalScheduleList(raw),
+    get: EndpointExperimentalScheduleGet(raw),
+    pause: EndpointExperimentalSchedulePause(raw),
+    resume: EndpointExperimentalScheduleResume(raw),
+    delete: EndpointExperimentalScheduleDelete(raw),
+  },
+  artifacts: {
+    providers: EndpointExperimentalArtifactsProviders(raw),
+    list: EndpointExperimentalArtifactsList(raw),
+    create: EndpointExperimentalArtifactsCreate(raw),
+    get: EndpointExperimentalArtifactsGet(raw),
+    update: EndpointExperimentalArtifactsUpdate(raw),
+    delete: EndpointExperimentalArtifactsDelete(raw),
+  },
 })
 
 const EndpointShellList = (raw: RawClient["server.shell"]) => (input?: ShellListInput) =>
   preserveEffect<ShellListOutput>()(
-    raw["shell.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["shell.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointShellCreate = (raw: RawClient["server.shell"]) => (input: ShellCreateInput) =>
   preserveEffect<ShellCreateOutput>()(
     raw["shell.create"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: {
-        command: input["command"],
-        ...(input["cwd"] === undefined ? {} : { cwd: input["cwd"] }),
-        ...(input["timeout"] === undefined ? {} : { timeout: input["timeout"] }),
-        ...(input["metadata"] === undefined ? {} : { metadata: input["metadata"] }),
-      },
+      query: { location: input["location"] },
+      payload: { command: input["command"], cwd: input["cwd"], timeout: input["timeout"], metadata: input["metadata"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointShellGet = (raw: RawClient["server.shell"]) => (input: ShellGetInput) =>
   preserveEffect<ShellGetOutput>()(
-    raw["shell.get"]({
-      params: { id: input["id"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["shell.get"]({ params: { id: input["id"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const EndpointShellOutput = (raw: RawClient["server.shell"]) => (input: ShellOutputInput) =>
   preserveEffect<ShellOutputOutput>()(
     raw["shell.output"]({
       params: { id: input["id"] },
-      query: {
-        ...(input["location"] === undefined ? {} : { location: input["location"] }),
-        ...(input["cursor"] === undefined ? {} : { cursor: input["cursor"] }),
-        ...(input["limit"] === undefined ? {} : { limit: input["limit"] }),
-      },
+      query: { location: input["location"], cursor: input["cursor"], limit: input["limit"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointShellRemove = (raw: RawClient["server.shell"]) => (input: ShellRemoveInput) =>
   preserveEffect<ShellRemoveOutput>()(
-    raw["shell.remove"]({
-      params: { id: input["id"] },
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["shell.remove"]({ params: { id: input["id"] }, query: { location: input["location"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const adaptGroupShell = (raw: RawClient["server.shell"]) => ({
@@ -1747,9 +1774,7 @@ const adaptGroupShell = (raw: RawClient["server.shell"]) => ({
 
 const EndpointReferenceList = (raw: RawClient["server.reference"]) => (input?: ReferenceListInput) =>
   preserveEffect<ReferenceListOutput>()(
-    raw["reference.list"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["reference.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupReference = (raw: RawClient["server.reference"]) => ({ list: EndpointReferenceList(raw) })
@@ -1764,10 +1789,10 @@ const EndpointWorktreeCreate = (raw: RawClient["server.worktree"]) => (input: Wo
     raw["worktree.create"]({
       payload: {
         projectID: input["projectID"],
-        ...(input["from"] === undefined ? {} : { from: input["from"] }),
-        ...(input["branch"] === undefined ? {} : { branch: input["branch"] }),
-        ...(input["directory"] === undefined ? {} : { directory: input["directory"] }),
-        ...(input["name"] === undefined ? {} : { name: input["name"] }),
+        from: input["from"],
+        branch: input["branch"],
+        directory: input["directory"],
+        name: input["name"],
       },
     }).pipe(Effect.mapError(mapClientError)),
   )
@@ -1793,43 +1818,30 @@ const adaptGroupWorktree = (raw: RawClient["server.worktree"]) => ({
 
 const EndpointVcsInit = (raw: RawClient["server.vcs"]) => (input?: VcsInitInput) =>
   preserveEffect<VcsInitOutput>()(
-    raw["vcs.init"]({
-      query: {
-        ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }),
-        ...(input?.["provider"] === undefined ? {} : { provider: input?.["provider"] }),
-      },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointVcsGet = (raw: RawClient["server.vcs"]) => (input?: VcsGetInput) =>
-  preserveEffect<VcsGetOutput>()(
-    raw["vcs.get"]({ query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) } }).pipe(
+    raw["vcs.init"]({ query: { location: input?.["location"], provider: input?.["provider"] } }).pipe(
       Effect.mapError(mapClientError),
     ),
   )
 
+const EndpointVcsGet = (raw: RawClient["server.vcs"]) => (input?: VcsGetInput) =>
+  preserveEffect<VcsGetOutput>()(
+    raw["vcs.get"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
 const EndpointVcsBase = (raw: RawClient["server.vcs"]) => (input?: VcsBaseInput) =>
   preserveEffect<VcsBaseOutput>()(
-    raw["vcs.base"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["vcs.base"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointVcsStatus = (raw: RawClient["server.vcs"]) => (input?: VcsStatusInput) =>
   preserveEffect<VcsStatusOutput>()(
-    raw["vcs.status"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["vcs.status"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointVcsBranchList = (raw: RawClient["server.vcs"]) => (input?: VcsBranchListInput) =>
   preserveEffect<VcsBranchListOutput>()(
     raw["vcs.branch.list"]({
-      query: {
-        ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }),
-        ...(input?.["search"] === undefined ? {} : { search: input?.["search"] }),
-        ...(input?.["limit"] === undefined ? {} : { limit: input?.["limit"] }),
-      },
+      query: { location: input?.["location"], search: input?.["search"], limit: input?.["limit"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1837,11 +1849,11 @@ const EndpointVcsDiff = (raw: RawClient["server.vcs"]) => (input: VcsDiffInput) 
   preserveEffect<VcsDiffOutput>()(
     raw["vcs.diff"]({
       query: {
-        ...(input["location"] === undefined ? {} : { location: input["location"] }),
+        location: input["location"],
         mode: input["mode"],
-        ...(input["base"] === undefined ? {} : { base: input["base"] }),
-        ...(input["context"] === undefined ? {} : { context: input["context"] }),
-        ...(input["untracked"] === undefined ? {} : { untracked: input["untracked"] }),
+        base: input["base"],
+        context: input["context"],
+        untracked: input["untracked"],
       },
     }).pipe(Effect.mapError(mapClientError)),
   )
@@ -1857,9 +1869,7 @@ const adaptGroupVcs = (raw: RawClient["server.vcs"]) => ({
 
 const EndpointDebugHeapDump = (raw: RawClient["server.debug"]) => (input?: DebugHeapDumpInput) =>
   preserveEffect<DebugHeapDumpOutput>()(
-    raw["debug.heapDump"]({
-      query: { ...(input?.["directory"] === undefined ? {} : { directory: input?.["directory"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["debug.heapDump"]({ query: { directory: input?.["directory"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointDebugLocationList = (raw: RawClient["server.debug"]) => () =>
@@ -1867,9 +1877,7 @@ const EndpointDebugLocationList = (raw: RawClient["server.debug"]) => () =>
 
 const EndpointDebugLocationEvict = (raw: RawClient["server.debug"]) => (input?: DebugLocationEvictInput) =>
   preserveEffect<DebugLocationEvictOutput>()(
-    raw["debug.location.evict"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["debug.location.evict"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupDebug = (raw: RawClient["server.debug"]) => ({
@@ -1877,26 +1885,25 @@ const adaptGroupDebug = (raw: RawClient["server.debug"]) => ({
   location: { list: EndpointDebugLocationList(raw), evict: EndpointDebugLocationEvict(raw) },
 })
 
-const EndpointMigrationV1Status = (raw: RawClient["server.migration"]) => () =>
-  preserveEffect<MigrationV1StatusOutput>()(raw["migration.v1.status"]({}).pipe(Effect.mapError(mapClientError)))
+const EndpointExperimentalMigrationV1Status = (raw: RawClient["server.migration"]) => () =>
+  preserveEffect<ExperimentalMigrationV1StatusOutput>()(
+    raw["migration.v1.status"]({}).pipe(Effect.mapError(mapClientError)),
+  )
 
-const adaptGroupMigration = (raw: RawClient["server.migration"]) => ({ v1: { status: EndpointMigrationV1Status(raw) } })
+const adaptGroupExperimentalMigration = (raw: RawClient["server.migration"]) => ({
+  v1: { status: EndpointExperimentalMigrationV1Status(raw) },
+})
 
 const EndpointWebsearchProviders = (raw: RawClient["server.websearch"]) => (input?: WebsearchProvidersInput) =>
   preserveEffect<WebsearchProvidersOutput>()(
-    raw["websearch.providers"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["websearch.providers"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointWebsearchQuery = (raw: RawClient["server.websearch"]) => (input: WebsearchQueryInput) =>
   preserveEffect<WebsearchQueryOutput>()(
     raw["websearch.query"]({
-      query: { ...(input["location"] === undefined ? {} : { location: input["location"] }) },
-      payload: {
-        query: input["query"],
-        ...(input["providerID"] === undefined ? {} : { providerID: input["providerID"] }),
-      },
+      query: { location: input["location"] },
+      payload: { query: input["query"], providerID: input["providerID"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1905,70 +1912,175 @@ const adaptGroupWebsearch = (raw: RawClient["server.websearch"]) => ({
   query: EndpointWebsearchQuery(raw),
 })
 
-const EndpointUsageLimits = (raw: RawClient["server.usage"]) => (input?: UsageLimitsInput) =>
-  preserveEffect<UsageLimitsOutput>()(
-    raw["usage.limits"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+const EndpointExperimentalUsageLimits = (raw: RawClient["server.usage"]) => (input?: ExperimentalUsageLimitsInput) =>
+  preserveEffect<ExperimentalUsageLimitsOutput>()(
+    raw["usage.limits"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
-const adaptGroupUsage = (raw: RawClient["server.usage"]) => ({ limits: EndpointUsageLimits(raw) })
+const adaptGroupExperimentalUsage = (raw: RawClient["server.usage"]) => ({
+  limits: EndpointExperimentalUsageLimits(raw),
+})
 
 const EndpointConfigGet = (raw: RawClient["server.config"]) => (input?: ConfigGetInput) =>
   preserveEffect<ConfigGetOutput>()(
-    raw["config.get"]({
-      query: { ...(input?.["location"] === undefined ? {} : { location: input?.["location"] }) },
-    }).pipe(Effect.mapError(mapClientError)),
+    raw["config.get"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const EndpointConfigShells = (raw: RawClient["server.config"]) => () =>
   preserveEffect<ConfigShellsOutput>()(raw["config.shells"]({}).pipe(Effect.mapError(mapClientError)))
 
-const EndpointConfigUpdate = (raw: RawClient["server.config"]) => (input: ConfigUpdateInput) =>
-  preserveEffect<ConfigUpdateOutput>()(
-    raw["config.update"]({ payload: { shell: input["shell"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const adaptGroupConfig = (raw: RawClient["server.config"]) => ({
   get: EndpointConfigGet(raw),
   shells: EndpointConfigShells(raw),
-  update: EndpointConfigUpdate(raw),
 })
 
-const adaptClient = (raw: RawClient) => ({
-  server: adaptGroupServer(raw["server.server"]),
-  location: adaptGroupLocation(raw["server.location"]),
-  agent: adaptGroupAgent(raw["server.agent"]),
-  plugin: adaptGroupPlugin(raw["server.plugin"]),
-  session: adaptGroupSession(raw["server.session"]),
-  message: adaptGroupMessage(raw["server.message"]),
-  model: adaptGroupModel(raw["server.model"]),
-  generate: adaptGroupGenerate(raw["server.generate"]),
-  voice: adaptGroupVoice(raw["server.voice"]),
-  provider: adaptGroupProvider(raw["server.provider"]),
-  integration: adaptGroupIntegration(raw["server.integration"]),
-  mcp: adaptGroupMcp(raw["server.mcp"]),
-  credential: adaptGroupCredential(raw["server.credential"]),
-  project: adaptGroupProject(raw["server.project"]),
-  form: adaptGroupForm(raw["server.form"]),
-  permission: adaptGroupPermission(raw["server.permission"]),
-  file: adaptGroupFile(raw["server.fs"]),
-  command: adaptGroupCommand(raw["server.command"]),
-  skill: adaptGroupSkill(raw["server.skill"]),
-  rpc: adaptGroupRpc(raw["server.rpc"]),
-  event: adaptGroupEvent(raw["server.event"]),
-  pty: adaptGroupPty(raw["server.pty"]),
-  experimental: adaptGroupExperimental(raw["server.experimental"]),
-  shell: adaptGroupShell(raw["server.shell"]),
-  reference: adaptGroupReference(raw["server.reference"]),
-  worktree: adaptGroupWorktree(raw["server.worktree"]),
-  vcs: adaptGroupVcs(raw["server.vcs"]),
-  debug: adaptGroupDebug(raw["server.debug"]),
-  migration: adaptGroupMigration(raw["server.migration"]),
-  websearch: adaptGroupWebsearch(raw["server.websearch"]),
-  usage: adaptGroupUsage(raw["server.usage"]),
-  config: adaptGroupConfig(raw["server.config"]),
+const EndpointExperimentalConfigUpdate = (raw: RawClient["server.config"]) => (input: ExperimentalConfigUpdateInput) =>
+  preserveEffect<ExperimentalConfigUpdateOutput>()(
+    raw["config.update"]({ payload: { shell: input["shell"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const adaptGroupExperimentalConfig = (raw: RawClient["server.config"]) => ({
+  update: EndpointExperimentalConfigUpdate(raw),
 })
+
+const adaptClient = (raw: RawClient) => {
+  const client = {
+    server: adaptGroupServer(raw["server.server"]),
+    location: adaptGroupLocation(raw["server.location"]),
+    agent: adaptGroupAgent(raw["server.agent"]),
+    plugin: adaptGroupPlugin(raw["server.plugin"]),
+    session: adaptGroupSession(raw["server.session"]),
+    experimental: {
+      ...adaptGroupExperimental(raw["server.experimental"]),
+      session: adaptGroupExperimentalSession(raw["server.session"]),
+      generate: adaptGroupExperimentalGenerate(raw["server.generate"]),
+      voice: adaptGroupExperimentalVoice(raw["server.voice"]),
+      integration: adaptGroupExperimentalIntegration(raw["server.integration"]),
+      mcp: adaptGroupExperimentalMcp(raw["server.mcp"]),
+      file: adaptGroupExperimentalFile(raw["server.fs"]),
+      migration: adaptGroupExperimentalMigration(raw["server.migration"]),
+      usage: adaptGroupExperimentalUsage(raw["server.usage"]),
+      config: adaptGroupExperimentalConfig(raw["server.config"]),
+    },
+    message: adaptGroupMessage(raw["server.message"]),
+    model: adaptGroupModel(raw["server.model"]),
+    provider: adaptGroupProvider(raw["server.provider"]),
+    integration: adaptGroupIntegration(raw["server.integration"]),
+    mcp: adaptGroupMcp(raw["server.mcp"]),
+    credential: adaptGroupCredential(raw["server.credential"]),
+    project: adaptGroupProject(raw["server.project"]),
+    form: adaptGroupForm(raw["server.form"]),
+    permission: adaptGroupPermission(raw["server.permission"]),
+    file: adaptGroupFile(raw["server.fs"]),
+    command: adaptGroupCommand(raw["server.command"]),
+    skill: adaptGroupSkill(raw["server.skill"]),
+    rpc: adaptGroupRpc(raw["server.rpc"]),
+    event: adaptGroupEvent(raw["server.event"]),
+    pty: adaptGroupPty(raw["server.pty"]),
+    shell: adaptGroupShell(raw["server.shell"]),
+    reference: adaptGroupReference(raw["server.reference"]),
+    worktree: adaptGroupWorktree(raw["server.worktree"]),
+    vcs: adaptGroupVcs(raw["server.vcs"]),
+    debug: adaptGroupDebug(raw["server.debug"]),
+    websearch: adaptGroupWebsearch(raw["server.websearch"]),
+    config: adaptGroupConfig(raw["server.config"]),
+  }
+  return {
+    ...client,
+    session: {
+      ...client.session,
+      /** @deprecated Use `client.experimental.session.stats`. Removed in the next minor. */
+      stats: client.experimental.session.stats,
+      /** @deprecated Use `client.experimental.session.import`. Removed in the next minor. */
+      import: client.experimental.session.import,
+      /** @deprecated Use `client.experimental.session.export`. Removed in the next minor. */
+      export: client.experimental.session.export,
+      /** @deprecated Use `client.experimental.session.skill`. Removed in the next minor. */
+      skill: client.experimental.session.skill,
+      /** @deprecated Use `client.experimental.session.wait`. Removed in the next minor. */
+      wait: client.experimental.session.wait,
+      /** @deprecated Use `client.experimental.session.instructions`. Removed in the next minor. */
+      instructions: {
+        /** @deprecated Use `client.experimental.session.instructions.entry`. Removed in the next minor. */
+        entry: {
+          /** @deprecated Use `client.experimental.session.instructions.entry.list`. Removed in the next minor. */
+          list: client.experimental.session.instructions.entry.list,
+          /** @deprecated Use `client.experimental.session.instructions.entry.put`. Removed in the next minor. */
+          put: client.experimental.session.instructions.entry.put,
+          /** @deprecated Use `client.experimental.session.instructions.entry.remove`. Removed in the next minor. */
+          remove: client.experimental.session.instructions.entry.remove,
+        },
+      },
+      /** @deprecated Use `client.experimental.session.log`. Removed in the next minor. */
+      log: client.experimental.session.log,
+    },
+    /** @deprecated Use `client.experimental.generate`. Removed in the next minor. */
+    generate: {
+      /** @deprecated Use `client.experimental.generate.text`. Removed in the next minor. */
+      text: client.experimental.generate.text,
+      /** @deprecated Use `client.experimental.generate.image`. Removed in the next minor. */
+      image: client.experimental.generate.image,
+      /** @deprecated Use `client.experimental.generate.decisions`. Removed in the next minor. */
+      decisions: client.experimental.generate.decisions,
+    },
+    /** @deprecated Use `client.experimental.voice`. Removed in the next minor. */
+    voice: {
+      /** @deprecated Use `client.experimental.voice.models`. Removed in the next minor. */
+      models: client.experimental.voice.models,
+      /** @deprecated Use `client.experimental.voice.session`. Removed in the next minor. */
+      session: client.experimental.voice.session,
+    },
+    integration: {
+      ...client.integration,
+      /** @deprecated Use `client.experimental.integration.wellknown`. Removed in the next minor. */
+      wellknown: {
+        /** @deprecated Use `client.experimental.integration.wellknown.add`. Removed in the next minor. */
+        add: client.experimental.integration.wellknown.add,
+      },
+    },
+    mcp: {
+      ...client.mcp,
+      /** @deprecated Use `client.experimental.mcp.add`. Removed in the next minor. */
+      add: client.experimental.mcp.add,
+      /** @deprecated Use `client.experimental.mcp.remove`. Removed in the next minor. */
+      remove: client.experimental.mcp.remove,
+      /** @deprecated Use `client.experimental.mcp.connect`. Removed in the next minor. */
+      connect: client.experimental.mcp.connect,
+      /** @deprecated Use `client.experimental.mcp.disconnect`. Removed in the next minor. */
+      disconnect: client.experimental.mcp.disconnect,
+      /** @deprecated Use `client.experimental.mcp.client`. Removed in the next minor. */
+      client: {
+        /** @deprecated Use `client.experimental.mcp.client.token`. Removed in the next minor. */
+        token: client.experimental.mcp.client.token,
+      },
+    },
+    file: {
+      ...client.file,
+      /** @deprecated Use `client.experimental.file.watch`. Removed in the next minor. */
+      watch: client.experimental.file.watch,
+      /** @deprecated Use `client.experimental.file.unwatch`. Removed in the next minor. */
+      unwatch: client.experimental.file.unwatch,
+    },
+    /** @deprecated Use `client.experimental.migration`. Removed in the next minor. */
+    migration: {
+      /** @deprecated Use `client.experimental.migration.v1`. Removed in the next minor. */
+      v1: {
+        /** @deprecated Use `client.experimental.migration.v1.status`. Removed in the next minor. */
+        status: client.experimental.migration.v1.status,
+      },
+    },
+    /** @deprecated Use `client.experimental.usage`. Removed in the next minor. */
+    usage: {
+      /** @deprecated Use `client.experimental.usage.limits`. Removed in the next minor. */
+      limits: client.experimental.usage.limits,
+    },
+    config: {
+      ...client.config,
+      /** @deprecated Use `client.experimental.config.update`. Removed in the next minor. */
+      update: client.experimental.config.update,
+    },
+  }
+}
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>
   HttpApiClient.make(ClientApi, options).pipe(Effect.map(adaptClient))

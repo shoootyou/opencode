@@ -1,13 +1,3 @@
-/**
- * @spec-handoff
- * @interface DialogSelect<T>({ actions }): dialog selection and footer actions
- * @behavior
- *   - Tab and Shift+Tab preserve row selection when every footer action is key-bound.
- *   - Tab focuses a visible showWhenUnbound action so Enter invokes that action, not the selected row.
- * @edge-cases
- *   - A bound action without showWhenUnbound never captures Tab traversal.
- * @see ../../../src/ui/dialog-select.tsx
- */
 /** @jsxImportSource @opentui/solid */
 import { InputRenderable, type RGBA } from "@opentui/core"
 import { testRender } from "@opentui/solid"
@@ -22,6 +12,8 @@ import {
   type DialogSelectProps,
 } from "../../../src/ui/dialog-select"
 import { truncateFilePath } from "../../../src/ui/file-path"
+import { getOpenCodeTheme } from "../../../src/theme"
+import { resolveThemeDocument } from "@opencode/theme/tui"
 import { stringWidth } from "../../../src/util/string-width"
 import { emptyThemeSource, tmpdir } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
@@ -33,14 +25,11 @@ async function renderSelect(
   onGlobal: () => void,
   onRow: (option: DialogSelectOption<string>) => void,
   current?: string,
-  onSelect?: (option: DialogSelectOption<string>) => void,
-  showGlobalWhenUnbound = false,
-  includeRowAction = true,
-  globalCommand = "dialog.move_session.new",
+  settings: Parameters<typeof createTuiResolvedConfig>[0] = {},
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
-  const config = createTuiResolvedConfig()
+  const config = createTuiResolvedConfig(settings)
   const [{ ConfigProvider }, { ThemeProvider }, { Keymap }, { DialogProvider }, { DialogSelect }, { ToastProvider }] =
     await Promise.all([
       import("../../../src/config"),
@@ -60,24 +49,18 @@ async function renderSelect(
           options={options}
           current={current}
           actions={[
-            ...(includeRowAction
-              ? [
-                  {
-                    command: "dialog.move_session.delete",
-                    title: "delete",
-                    onTrigger: onRow,
-                  },
-                ]
-              : []),
             {
-              command: globalCommand,
+              command: "dialog.move_session.delete",
+              title: "delete",
+              onTrigger: onRow,
+            },
+            {
+              command: "dialog.move_session.new",
               title: "new",
               selection: "none",
               onTrigger: onGlobal,
-              showWhenUnbound: showGlobalWhenUnbound,
             },
           ]}
-          onSelect={onSelect}
         />
       )
     }
@@ -395,6 +378,30 @@ test("dialog actions run without options while row actions still require a selec
   }
 })
 
+test("matches the search cursor to the highlighted row until text is typed under new designs", async () => {
+  await using tmp = await tmpdir()
+  const theme = resolveThemeDocument(getOpenCodeTheme(), "dark")
+  const app = await renderSelect(
+    tmp.path,
+    [{ title: "First", value: "first" }],
+    () => {},
+    () => {},
+    undefined,
+    { experimental: { "new-designs": true } },
+  )
+
+  try {
+    await app.waitFor(() => app.renderer.getCursorState().visible)
+    expect(app.renderer.getCursorState().color.toInts()).toEqual(theme.background.action.primary.focused.toInts())
+
+    await app.mockInput.typeText("f")
+    await app.waitFor(() => app.renderer.getCursorState().color.equals(theme.text.base))
+    expect(app.renderer.getCursorState().color.toInts()).toEqual(theme.text.base.toInts())
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("renders one gap before an empty state", async () => {
   await using tmp = await tmpdir()
   const app = await renderSelect(
@@ -457,65 +464,6 @@ test("row actions receive the selected option", async () => {
     app.mockInput.pressKey("d", { ctrl: true })
 
     expect(rows).toEqual(["alpha"])
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("Tab and Shift+Tab leave a key-bound footer action unfocused and select the row", async () => {
-  for (const reverse of [false, true]) {
-    await using tmp = await tmpdir()
-    const actions: string[] = []
-    const selected: string[] = []
-    const app = await renderSelect(
-      tmp.path,
-      [{ title: "Alpha", value: "alpha" }],
-      () => actions.push("new"),
-      () => actions.push("delete"),
-      undefined,
-      (option) => selected.push(option.value),
-    )
-
-    try {
-      await app.waitForFrame((frame) => frame.includes("delete ctrl+d"))
-      app.mockInput.pressTab({ shift: reverse })
-      app.mockInput.pressEnter()
-      expect(actions, `${reverse ? "Shift+Tab" : "Tab"} must not focus or trigger the key-bound delete action`).toEqual(
-        [],
-      )
-      expect(selected, `${reverse ? "Shift+Tab" : "Tab"} must leave Enter bound to the selected row`).toEqual(["alpha"])
-    } finally {
-      app.renderer.destroy()
-    }
-  }
-})
-
-test("Tab focuses a visible showWhenUnbound footer action instead of selecting the row", async () => {
-  await using tmp = await tmpdir()
-  const actions: string[] = []
-  const selected: string[] = []
-  const app = await renderSelect(
-    tmp.path,
-    [{ title: "Alpha", value: "alpha" }],
-    () => actions.push("new"),
-    () => actions.push("delete"),
-    undefined,
-    (option) => selected.push(option.value),
-    true,
-    false,
-    "test.default-unbound-action",
-  )
-
-  try {
-    try {
-      await app.waitForFrame((frame) => frame.includes("new Tab"))
-    } catch {
-      throw new Error(`showWhenUnbound action did not render with the Tab fallback: ${app.captureCharFrame()}`)
-    }
-    app.mockInput.pressTab()
-    app.mockInput.pressEnter()
-    expect(actions, "Tab must focus and activate the visible default-unbound footer action").toEqual(["new"])
-    expect(selected, "Tab/Enter must not submit the selected row when a default-unbound action is focused").toEqual([])
   } finally {
     app.renderer.destroy()
   }
@@ -717,7 +665,9 @@ test("dialog rows do not add renderer resize listeners", async () => {
     const before = count()
     // Mounting 30 rows must not add one resize listener per row (Node warns
     // past 10 listeners on one emitter).
-    select.replaceOptions(Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })))
+    select.replaceOptions(
+      Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })),
+    )
     await select.app.waitForVisualIdle()
     expect(count()).toBe(before)
   } finally {
@@ -743,102 +693,5 @@ test("keeps the first row selected when current is only a marker", async () => {
     expect(select.selected).toEqual(["recent"])
   } finally {
     select.app.renderer.destroy()
-  }
-})
-
-async function renderTitleViewSelect(root: string, newDesigns: boolean, titleView?: boolean) {
-  const state = path.join(root, "state")
-  await mkdir(state, { recursive: true })
-  const [{ ConfigProvider }, { ThemeProvider }, { Keymap }, { DialogProvider }, { DialogSelect }, { ToastProvider }] =
-    await Promise.all([
-      import("../../../src/config"),
-      import("../../../src/context/theme"),
-      import("../../../src/context/keymap"),
-      import("../../../src/ui/dialog"),
-      import("../../../src/ui/dialog-select"),
-      import("../../../src/ui/toast"),
-    ])
-  const config = { ...createTuiResolvedConfig(), experimental: newDesigns ? { "new-designs": true } : undefined }
-  const app = await testRender(
-    () => (
-      <TestTuiContexts directory={root} paths={{ home: root, state, worktree: root }}>
-        <ConfigProvider config={config}>
-          <ThemeProvider mode="dark" source={emptyThemeSource}>
-            <Keymap.Provider>
-              <ToastProvider>
-                <DialogProvider>
-                  {(() => {
-                    onCleanup(Keymap.use().mode.push("modal"))
-                    return (
-                      <DialogSelect
-                        title="Sessions"
-                        titleView={titleView ? <text>Showing the first 50 results. Refine your search.</text> : undefined}
-                        options={[
-                          { title: "Archived session", value: "archived" },
-                          { title: "Current session", value: "current" },
-                        ]}
-                        searchInTitle
-                      />
-                    )
-                  })()}
-                </DialogProvider>
-              </ToastProvider>
-            </Keymap.Provider>
-          </ThemeProvider>
-        </ConfigProvider>
-      </TestTuiContexts>
-    ),
-    { width: 100, height: 24, kittyKeyboard: true },
-  )
-  app.renderer.start()
-  return app
-}
-
-test("preserves a DialogSelect titleView beside the new-designs search input", async () => {
-  await using tmp = await tmpdir()
-  const message = "Showing the first 50 results. Refine your search."
-  const app = await renderTitleViewSelect(tmp.path, true, true)
-  try {
-    await app.waitForFrame(
-      (frame) =>
-        frame.includes("Search") &&
-        frame.includes("Archived session") &&
-        frame.includes("Current session") &&
-        app.renderer.currentFocusedRenderable instanceof InputRenderable,
-    )
-    expect(app.captureCharFrame(), `new-designs dropped titleView: ${message}`).toContain(message)
-    await app.mockInput.typeText("Archived")
-    await app.waitForFrame(
-      (frame) =>
-        frame.includes("Archived session") &&
-        !frame.includes("Current session") &&
-        frame.includes(message) &&
-        app.renderer.currentFocusedRenderable instanceof InputRenderable,
-    )
-    expect(
-      app.captureCharFrame(),
-      "new-designs search input must receive typed keys, filter visible rows, and retain titleView",
-    ).toContain("Archived session")
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("renders titleView by default and renders no disclosure when it is omitted", async () => {
-  await using tmp = await tmpdir()
-  const message = "Showing the first 50 results. Refine your search."
-  const defaultApp = await renderTitleViewSelect(tmp.path, false, true)
-  try {
-    await defaultApp.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
-    expect(defaultApp.captureCharFrame()).toContain(message)
-  } finally {
-    defaultApp.renderer.destroy()
-  }
-  const emptyApp = await renderTitleViewSelect(tmp.path, false, false)
-  try {
-    await emptyApp.waitForFrame((frame) => frame.includes("Search") && frame.includes("Archived session"))
-    expect(emptyApp.captureCharFrame()).not.toContain(message)
-  } finally {
-    emptyApp.renderer.destroy()
   }
 })
