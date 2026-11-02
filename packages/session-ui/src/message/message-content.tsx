@@ -52,6 +52,7 @@ import type {
 import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
 import { agentLabel } from "./agent-label"
 import { attached, imageAttachmentPlaceholderStyle, typeLabel } from "../components/message-file"
+import { assistantModelLabel } from "./model-label"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const written = await navigator.clipboard?.writeText(text).then(
@@ -80,7 +81,7 @@ export async function writeClipboard(text: string): Promise<boolean> {
   return copied
 }
 
-type MetaItem = { label: string; variant?: boolean }
+type MetaItem = { label: string; variant?: boolean; ltr?: boolean }
 
 // The variant follows the model name without a separator, so the model leads.
 function modelItems(data: ReturnType<typeof useData>, model: SessionMessageAssistant["model"]): MetaItem[] {
@@ -110,7 +111,7 @@ function MetaItems(props: { items: MetaItem[]; slot: "user-message" | "text-part
           <span
             data-slot={`${props.slot}-meta-item`}
             data-variant={item.variant ? "" : undefined}
-            dir={props.slot === "text-part" ? "auto" : undefined}
+            dir={item.ltr ? "ltr" : props.slot === "text-part" ? "auto" : undefined}
           >
             {item.label}
           </span>
@@ -1159,8 +1160,11 @@ export function AssistantTextContent(props: {
 
   const labels = createMemo<MetaItem[]>(() => {
     const agent = agentLabel(props.message.agent, data.agents)
+    const model = assistantModelLabel(props.message.model, data.store.provider?.all, (model, variant) =>
+      i18n.t("ui.message.modelVariant", { model, variant }),
+    )
 
-    return [...(agent ? [{ label: agent }] : []), ...modelItems(data, props.message.model)]
+    return [...(agent ? [{ label: agent }] : []), ...(model ? [{ label: model, ltr: true }] : [])]
   })
 
   const duration = createMemo(() => {
