@@ -213,13 +213,17 @@ function PaletteSessionRow(props: {
           <span
             class="command-palette-title palette-menu-title"
             dir="auto"
-            classList={{ "opacity-70": !!props.item.archived }}
+            classList={{ "opacity-70": props.item.archived !== undefined }}
           >
             <SearchHighlight text={props.item.title} />
           </span>
           <Show when={props.item.description}>
             {(description) => (
-              <span class="command-palette-description" dir="auto" classList={{ "opacity-70": !!props.item.archived }}>
+              <span
+                class="command-palette-description"
+                dir="auto"
+                classList={{ "opacity-70": props.item.archived !== undefined }}
+              >
                 <SearchHighlight text={description()} />
               </span>
             )}
