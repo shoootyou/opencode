@@ -670,7 +670,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
         error: SessionNotFoundError,
       }).annotateMerge(
         OpenApi.annotations({
-          identifier: "session.log",
+          identifier: "experimental.session.log",
           summary: "Read the session log",
           description:
             'Experimental durable session event log. Reads events after an exclusive aggregate sequence and continues with live events when follow=true. A terminal {"type":"log.error","reason":"Session log unavailable"} item closes the stream without a later log.synced marker.',

@@ -22,6 +22,8 @@ import {
   type DialogSelectProps,
 } from "../../../src/ui/dialog-select"
 import { truncateFilePath } from "../../../src/ui/file-path"
+import { getOpenCodeTheme } from "../../../src/theme"
+import { resolveThemeDocument } from "@opencode/theme/tui"
 import { stringWidth } from "../../../src/util/string-width"
 import { emptyThemeSource, tmpdir } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
@@ -33,6 +35,7 @@ async function renderSelect(
   onGlobal: () => void,
   onRow: (option: DialogSelectOption<string>) => void,
   current?: string,
+  settings: Parameters<typeof createTuiResolvedConfig>[0] = {},
   onSelect?: (option: DialogSelectOption<string>) => void,
   showGlobalWhenUnbound = false,
   includeRowAction = true,
@@ -40,7 +43,7 @@ async function renderSelect(
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
-  const config = createTuiResolvedConfig()
+  const config = createTuiResolvedConfig(settings)
   const [{ ConfigProvider }, { ThemeProvider }, { Keymap }, { DialogProvider }, { DialogSelect }, { ToastProvider }] =
     await Promise.all([
       import("../../../src/config"),
@@ -395,6 +398,30 @@ test("dialog actions run without options while row actions still require a selec
   }
 })
 
+test("matches the search cursor to the highlighted row until text is typed under new designs", async () => {
+  await using tmp = await tmpdir()
+  const theme = resolveThemeDocument(getOpenCodeTheme(), "dark")
+  const app = await renderSelect(
+    tmp.path,
+    [{ title: "First", value: "first" }],
+    () => {},
+    () => {},
+    undefined,
+    { experimental: { "new-designs": true } },
+  )
+
+  try {
+    await app.waitFor(() => app.renderer.getCursorState().visible)
+    expect(app.renderer.getCursorState().color.toInts()).toEqual(theme.background.action.primary.focused.toInts())
+
+    await app.mockInput.typeText("f")
+    await app.waitFor(() => app.renderer.getCursorState().color.equals(theme.text.base))
+    expect(app.renderer.getCursorState().color.toInts()).toEqual(theme.text.base.toInts())
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("renders one gap before an empty state", async () => {
   await using tmp = await tmpdir()
   const app = await renderSelect(
@@ -473,6 +500,7 @@ test("Tab and Shift+Tab leave a key-bound footer action unfocused and select the
       () => actions.push("new"),
       () => actions.push("delete"),
       undefined,
+      {},
       (option) => selected.push(option.value),
     )
 
@@ -500,6 +528,7 @@ test("Tab focuses a visible showWhenUnbound footer action instead of selecting t
     () => actions.push("new"),
     () => actions.push("delete"),
     undefined,
+    {},
     (option) => selected.push(option.value),
     true,
     false,
@@ -717,7 +746,9 @@ test("dialog rows do not add renderer resize listeners", async () => {
     const before = count()
     // Mounting 30 rows must not add one resize listener per row (Node warns
     // past 10 listeners on one emitter).
-    select.replaceOptions(Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })))
+    select.replaceOptions(
+      Array.from({ length: 30 }, (_, index) => ({ title: `Item ${index}`, value: `item-${index}` })),
+    )
     await select.app.waitForVisualIdle()
     expect(count()).toBe(before)
   } finally {

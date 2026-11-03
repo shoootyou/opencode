@@ -27,6 +27,7 @@ import { pathToFileURL } from "node:url"
 const cliRoot = process.env.CLI_ROOT
 if (!cliRoot) throw new Error("CLI_ROOT is required for the isolated session archive harness")
 const { Config } = await import(pathToFileURL(path.join(cliRoot, "src/config/index.ts")).href)
+const { Server } = await import(pathToFileURL(path.join(cliRoot, "src/commands/commands.ts")).href)
 
 const prompts = []
 mock.module("@clack/prompts", () => ({
@@ -38,12 +39,12 @@ mock.module("@clack/prompts", () => ({
 }))
 
 const session = (id) => ({ id, projectID: "project_fixture", title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 2 }, location: { directory: "/fixture" } })
-async function runHandler(effect) {
+async function runHandler(effect, serverUrl) {
   const root = path.join(import.meta.dirname, ".tmp-session-archive-child-" + process.pid + "-" + crypto.randomUUID())
   const config = path.join(root, "config")
   const state = path.join(root, "state")
   await Promise.all([mkdir(config, { recursive: true }), mkdir(state, { recursive: true })])
-  try { await Effect.runPromise(effect.pipe(Effect.provide(Config.layer), Effect.provide(Global.layerWith({ config, state })), Effect.provide(NodeFileSystem.layer), Effect.scoped)) }
+  try { await Effect.runPromise(effect.pipe(Effect.provideService(Server, Option.some(serverUrl)), Effect.provide(Config.layer), Effect.provide(Global.layerWith({ config, state })), Effect.provide(NodeFileSystem.layer), Effect.scoped)) }
   finally { await rm(root, { force: true, recursive: true }) }
 }
 
@@ -62,12 +63,12 @@ test("isolated session archive caller", async () => {
   try {
     const { default: listHandler } = await import(pathToFileURL(path.join(cliRoot, "src/commands/handlers/session/list.ts")).href)
     const { default: exportHandler } = await import(pathToFileURL(path.join(cliRoot, "src/commands/handlers/session/export.ts")).href)
-    if (process.env.SCENARIO === "list") await runHandler(listHandler({ server: Option.some(server.url.toString()), standalone: false, maxCount: Option.some(1), format: "json" }))
+    if (process.env.SCENARIO === "list") await runHandler(listHandler({ server: Option.some(server.url.toString()), standalone: false, maxCount: Option.some(1), format: "json" }), server.url.toString())
     if (process.env.SCENARIO === "interactive") {
       Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true })
-      await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.none(), sanitize: false }))
+      await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.none(), sanitize: false }), server.url.toString())
     }
-    if (process.env.SCENARIO === "explicit") await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.some("ses_archived"), sanitize: false }))
+    if (process.env.SCENARIO === "explicit") await runHandler(exportHandler({ server: Option.some(server.url.toString()), standalone: false, session: Option.some("ses_archived"), sanitize: false }), server.url.toString())
     await Bun.write(process.env.RESULT_PATH, JSON.stringify({ requests, prompts }))
   } finally {
     if (descriptor) Object.defineProperty(process.stdin, "isTTY", descriptor)

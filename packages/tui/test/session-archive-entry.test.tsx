@@ -78,6 +78,7 @@ test("toggles scope with Ctrl+A and archives through the default-none Tab fallba
     },
     fetch: async (url, request) => {
       if (!url.pathname.startsWith("/api/session")) return
+      if (url.pathname === "/api/session/active") return json({ data: {} })
       if (request.method === "PATCH") {
         patches.push(await request.json())
         return new Response(null, { status: 204 })
@@ -115,6 +116,7 @@ test("Shift+Tab activates the default-unbound archived-visibility action without
     },
     fetch: async (url, request) => {
       if (!url.pathname.startsWith("/api/session")) return
+      if (url.pathname === "/api/session/active") return json({ data: {} })
       if (request.method === "PATCH") {
         patches.push(await request.json())
         return new Response(null, { status: 204 })
@@ -165,6 +167,7 @@ test.each(["dark", "light"] as const)("renders an AA focused footer action in %s
     },
     fetch: async (url, request) => {
       if (!url.pathname.startsWith("/api/session")) return
+      if (url.pathname === "/api/session/active") return json({ data: {} })
       if (request.method === "PATCH") {
         patches.push(await request.json())
         return new Response(null, { status: 204 })
