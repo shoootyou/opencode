@@ -25,6 +25,7 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useParams } from "@solidjs/router"
+import { isDuplicateAccountName } from "./account-label"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useServerSDK } from "@/runtime/server/client"
@@ -1277,14 +1278,15 @@ function ProviderConnection(props: {
 
   function ApiAuthView() {
     let apiKey: HTMLInputElement | undefined
+    let accountName: HTMLInputElement | undefined
     const errorID = createUniqueId()
+    // The view can unmount while connectKey is pending (finish() completes the dialog).
+    let alive = true
+    onCleanup(() => (alive = false))
 
     const [formStore, setFormStore] = createStore<{
-      value: string
       error?: string
-    }>({
-      value: "",
-    })
+    }>({})
 
     onMount(() => {
       apiKey?.focus({ preventScroll: true })
@@ -1293,9 +1295,8 @@ function ProviderConnection(props: {
     async function handleSubmit(e: SubmitEvent) {
       e.preventDefault()
 
-      if (!(e.currentTarget instanceof HTMLFormElement)) return
-      const value = new FormData(e.currentTarget).get("apiKey")
-      const key = value instanceof File || value === null ? "" : value
+      const key = apiKey?.value ?? ""
+      const label = accountName?.value ?? ""
 
       if (!key.trim()) {
         setFormStore("error", language.t("provider.connect.apiKey.required"))
@@ -1303,8 +1304,27 @@ function ProviderConnection(props: {
         return
       }
 
+      // accounts() can grow while the view is mounted, so compare at submit time.
+      if (
+        isDuplicateAccountName(
+          label,
+          accounts().map((account) => account.label),
+        )
+      ) {
+        setFormStore("error", language.t("provider.connect.accountName.duplicate"))
+
+        return
+      }
+
       setFormStore("error", undefined)
-      await controller.auth.connectKey(key)
+      // The key lives only in this local from here on; the generic message below must never carry server text.
+      apiKey!.value = ""
+
+      try {
+        await controller.auth.connectKey(key, label)
+      } catch {
+        if (alive) setFormStore("error", language.t("provider.connect.apiKey.failed"))
+      }
     }
 
     return (
@@ -1318,20 +1338,34 @@ function ProviderConnection(props: {
             : language.t("provider.connect.apiKey.description", { provider: provider().name })}
         </p>
         <form onSubmit={handleSubmit} class="flex flex-col items-start gap-5 self-stretch">
+          <Show when={accounts().length > 0}>
+            <label class="flex w-full flex-col gap-2 font-[530] leading-4 text-v2-text-text-base">
+              {language.t("provider.connect.accountName.label")}
+              <TextInput
+                ref={accountName}
+                class="!w-full"
+                data-input="provider-account-name"
+                placeholder={language.t("provider.connect.accountName.placeholder")}
+                autocomplete="off"
+                spellcheck={false}
+              />
+              <span class="text-xs font-[440] text-v2-text-text-muted">
+                {language.t("provider.connect.apiKey.activeNote")}
+              </span>
+            </label>
+          </Show>
           <label class="flex w-full flex-col gap-2 font-[530] leading-4 text-v2-text-text-base">
             {language.t("provider.connect.apiKey.label", { provider: provider().name })}
             <TextInput
               ref={apiKey}
               class="!w-full"
-              name="apiKey"
+              type="password"
               data-input="provider-api-key"
               placeholder={language.t("provider.connect.apiKey.placeholder")}
-              value={formStore.value}
               invalid={formStore.error !== undefined}
               aria-describedby={formStore.error ? errorID : undefined}
-              autocomplete="off"
+              autocomplete="new-password"
               spellcheck={false}
-              onInput={(event) => setFormStore("value", event.currentTarget.value)}
             />
           </label>
           <Show when={formStore.error}>
