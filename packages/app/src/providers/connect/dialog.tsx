@@ -1286,6 +1286,7 @@ function ProviderConnection(props: {
 
     const [formStore, setFormStore] = createStore<{
       error?: string
+      nameError?: string
     }>({})
 
     onMount(() => {
@@ -1294,6 +1295,7 @@ function ProviderConnection(props: {
 
     async function handleSubmit(e: SubmitEvent) {
       e.preventDefault()
+      setFormStore("nameError", undefined)
 
       const key = apiKey?.value ?? ""
       const label = accountName?.value ?? ""
@@ -1311,7 +1313,8 @@ function ProviderConnection(props: {
           accounts().map((account) => account.label),
         )
       ) {
-        setFormStore("error", language.t("provider.connect.accountName.duplicate"))
+        setFormStore("nameError", language.t("provider.connect.accountName.duplicate"))
+        accountName?.focus()
 
         return
       }
@@ -1346,13 +1349,26 @@ function ProviderConnection(props: {
                 class="!w-full"
                 data-input="provider-account-name"
                 placeholder={language.t("provider.connect.accountName.placeholder")}
+                invalid={!!formStore.nameError}
+                aria-describedby={formStore.nameError ? "provider-account-name-error" : undefined}
+                onInput={() => setFormStore("nameError", undefined)}
                 autocomplete="off"
                 spellcheck={false}
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
               />
               <span class="text-xs font-[440] text-v2-text-text-muted">
                 {language.t("provider.connect.apiKey.activeNote")}
               </span>
             </label>
+            <Show when={formStore.nameError}>
+              {(error) => (
+                <div id="provider-account-name-error" role="alert" class="-mt-4 text-xs text-v2-state-fg-danger">
+                  {error()}
+                </div>
+              )}
+            </Show>
           </Show>
           <label class="flex w-full flex-col gap-2 font-[530] leading-4 text-v2-text-text-base">
             {language.t("provider.connect.apiKey.label", { provider: provider().name })}
@@ -1366,6 +1382,9 @@ function ProviderConnection(props: {
               aria-describedby={formStore.error ? errorID : undefined}
               autocomplete="new-password"
               spellcheck={false}
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
             />
           </label>
           <Show when={formStore.error}>
