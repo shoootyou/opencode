@@ -1485,11 +1485,23 @@ test("providers: a second API key can be named when it is added", async ({ page 
   await expect(field).toHaveAttribute("type", "password")
   await expect(field).toHaveAttribute("autocomplete", "new-password")
 
-  // A name that matches an existing account, ignoring case and spaces, is rejected before any request.
+  // A blank key shows the key error first, so the duplicate attempt below starts from a stale key alert.
   await name.fill("  work ")
+  await dialog.locator('[data-action="provider-connect-submit"]').click()
+  await expect(dialog.getByRole("alert")).toHaveText("API key is required")
+  await expect(field).toHaveAttribute("aria-invalid", "true")
+
+  // A name that matches an existing account, ignoring case and spaces, is rejected before any request.
   await field.fill(key)
   await dialog.locator('[data-action="provider-connect-submit"]').click()
+  // Only the name alert is left: the stale key alert is gone and the key input is valid again.
+  await expect(dialog.getByRole("alert")).toHaveCount(1)
   await expect(dialog.getByRole("alert")).toHaveText("An account with this name already exists for this provider")
+  await expect(name).toHaveAttribute("aria-invalid", "true")
+  await expect(name).toHaveAttribute("aria-describedby", "provider-account-name-error")
+  await expect(name).toBeFocused()
+  await expect(field).not.toHaveAttribute("aria-invalid", "true")
+  await expect(field).toHaveValue(key)
   expect(sent).toEqual([])
 
   await name.fill("  Home  ")

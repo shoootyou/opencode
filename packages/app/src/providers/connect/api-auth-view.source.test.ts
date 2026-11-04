@@ -13,7 +13,7 @@
  *   - formatServerError and error.message never reach the key-submit UI: the gateway can echo a fragment of the pasted key.
  * @see ./account-label.ts
  * @see ./controller.ts
- * @testability ApiAuthView is a closure inside ProviderConnection, which needs the whole server, data and dialog provider graph, and the bun Solid shim evaluates JSX children eagerly and ignores classList. A DOM mount is not feasible, so these assertions read dialog.tsx as text, scoped to the ApiAuthView body and to each TextInput element. They are brittle by nature; the e2e scenario in e2e/regression/settings.spec.ts covers the rendered behavior.
+ * @testability ApiAuthView is a closure inside ProviderConnection, which needs the whole server, data and dialog provider graph, and the bun Solid shim evaluates JSX children eagerly and ignores classList. A DOM mount is not feasible, so these assertions read dialog.tsx as text, scoped to the ApiAuthView body and to each TextInput element. The stale key alert next to the name error cannot be proven by a mount here, so the start-of-submit reset is pinned as text. They are brittle by nature; the e2e scenario in e2e/regression/settings.spec.ts covers the rendered behavior.
  */
 import { describe, expect, test } from "bun:test"
 
@@ -202,6 +202,36 @@ describe("submit", () => {
     expect(at).toBeGreaterThanOrEqual(0)
     expect(tag).toContain('role="alert"')
     expect(view).toMatch(/<Show\s+when=\{formStore\.nameError\}>[^]*?id="provider-account-name-error"/)
+  })
+
+  test("clears both the key error and the name error at the start of each submit, before any validation", () => {
+    // A duplicate returns before the later request-time reset, so a stale key alert would stay next to the name error.
+    const trim = submit.indexOf("key.trim()")
+    const duplicate = submit.indexOf("isDuplicateAccountName(")
+
+    for (const slot of ["error", "nameError"]) {
+      const clear = submit.search(new RegExp(`setFormStore\\(\\s*"${slot}",\\s*undefined\\s*\\)`))
+
+      expect(clear).toBeGreaterThanOrEqual(0)
+      expect(clear).toBeLessThan(trim)
+      expect(clear).toBeLessThan(duplicate)
+    }
+  })
+
+  test("uses the key local only to read it, check it and send it", () => {
+    // Comments and string literals are dropped so only code mentioning the identifier counts.
+    const code = submit.replace(/\/\/.*$/gm, "").replace(/"[^"\n]*"/g, '""')
+
+    const uses = code
+      .split("\n")
+      .filter((line) => /\bkey\b/.test(line))
+      .map((line) => line.trim())
+
+    expect(uses).toEqual([
+      'const key = apiKey?.value ?? ""',
+      "if (!key.trim()) {",
+      "await controller.auth.connectKey(key, label)",
+    ])
   })
 
   test("clears the name error at the start of each submit, before any validation", () => {
