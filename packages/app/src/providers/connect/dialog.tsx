@@ -1295,6 +1295,7 @@ function ProviderConnection(props: {
 
     async function handleSubmit(e: SubmitEvent) {
       e.preventDefault()
+      setFormStore("error", undefined)
       setFormStore("nameError", undefined)
 
       const key = apiKey?.value ?? ""
