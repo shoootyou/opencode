@@ -125,6 +125,19 @@ describe("submit", () => {
     expect(view).toMatch(/setFormStore\(\s*"error",\s*language\.t\("provider\.connect\.accountName\.duplicate"\)/)
   })
 
+  test("returns before connecting when the name is a duplicate", () => {
+    const check = view.indexOf("isDuplicateAccountName(")
+    const message = view.indexOf('language.t("provider.connect.accountName.duplicate")', check)
+    const exit = view.indexOf("return", message)
+    const call = view.indexOf("controller.auth.connectKey(")
+
+    expect(check).toBeGreaterThanOrEqual(0)
+    expect(message).toBeGreaterThan(check)
+    expect(exit).toBeGreaterThan(message)
+    expect(exit).toBeLessThan(call)
+    expect(view).toMatch(/if\s*\(\s*isDuplicateAccountName\(/)
+  })
+
   test("passes the key and the name to the controller", () => {
     expect(view).toMatch(/controller\.auth\.connectKey\(\s*\w+,\s*\w+/)
   })
@@ -150,6 +163,7 @@ describe("failure path", () => {
     expect(view).toContain("provider.connect.apiKey.failed")
     expect(view).not.toContain("formatServerError")
     expect(view).not.toMatch(/\.message\b/)
-    expect(view).not.toContain("console.")
+    // The shared Console flow legitimately uses the provider.connect.console.* keys.
+    expect(view).not.toMatch(/(?<![\w.])console\./)
   })
 })
