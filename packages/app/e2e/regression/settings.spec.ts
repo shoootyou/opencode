@@ -1457,6 +1457,79 @@ test("providers: the connect dialog lists connected providers and manages their 
   await expect(list).toBeVisible()
 })
 
+test("providers: a second API key can be named when it is added", async ({ page }) => {
+  const accounts = [{ type: "credential", id: "cred_work", label: "Work", method: "key" }]
+  const sent: { integrationID: string; body: unknown }[] = []
+  const key = "test-key-REDACTED-e2e"
+
+  const { settings } = await open(page, {
+    integrations: () => [
+      { id: "openai", name: "OpenAI", methods: [{ type: "key", label: "API key" }], connections: accounts },
+    ],
+    onConnectKey: (input) => {
+      sent.push(input)
+      const label = Object.entries(input.body ?? {}).find(([name]) => name === "label")?.[1]
+      accounts.push({ type: "credential", id: "cred_home", label: label ?? "OpenAI 2", method: "key" })
+    },
+  })
+
+  await settings.getByRole("tab", { name: "Providers", exact: true }).click()
+  await settings.getByRole("button", { name: "Show more providers", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.locator('[data-provider-id="openai"]').click()
+  await dialog.getByRole("button", { name: "Add account", exact: true }).click()
+
+  const name = dialog.locator('[data-input="provider-account-name"]')
+  const field = dialog.getByPlaceholder("API key")
+  await expect(name).toBeVisible()
+  await expect(field).toHaveAttribute("type", "password")
+  await expect(field).toHaveAttribute("autocomplete", "new-password")
+
+  // A name that matches an existing account, ignoring case and spaces, is rejected before any request.
+  await name.fill("  work ")
+  await field.fill(key)
+  await dialog.locator('[data-action="provider-connect-submit"]').click()
+  await expect(dialog.getByRole("alert")).toHaveText("An account with this name already exists for this provider")
+  expect(sent).toEqual([])
+
+  await name.fill("  Home  ")
+  await dialog.locator('[data-action="provider-connect-submit"]').click()
+  await expect.poll(() => sent.length).toBe(1)
+  expect(sent[0]).toEqual({ integrationID: "openai", body: { key, label: "Home" } })
+
+  // The dialog closes once connected; the new name is in the provider's account list.
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await settings.getByRole("button", { name: "Show more providers", exact: true }).click()
+  await dialog.locator('[data-provider-id="openai"]').click()
+  const list = dialog.getByRole("radiogroup", { name: "Connected accounts", exact: true })
+  await expect(list.getByRole("radio")).toHaveText(["Home", "Work"])
+})
+
+test("providers: the first API key of a provider has no account name field", async ({ page }) => {
+  const sent: { integrationID: string; body: unknown }[] = []
+
+  const { settings } = await open(page, {
+    integrations: [
+      { id: "anthropic", name: "Anthropic", methods: [{ type: "key", label: "API key" }], connections: [] },
+    ],
+    onConnectKey: (input) => sent.push(input),
+  })
+
+  await settings.getByRole("tab", { name: "Providers", exact: true }).click()
+  await settings.getByRole("button", { name: "Show more providers", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.locator('[data-provider-id="anthropic"]').click()
+
+  const field = dialog.getByPlaceholder("API key")
+  await expect(field).toHaveAttribute("type", "password")
+  await expect(dialog.locator('[data-input="provider-account-name"]')).toHaveCount(0)
+
+  await field.fill("test-key-REDACTED-e2e")
+  await dialog.locator('[data-action="provider-connect-submit"]').click()
+  await expect.poll(() => sent.length).toBe(1)
+  expect(Object.keys(sent[0]!.body ?? {})).toEqual(["key"])
+})
+
 test("providers: adding an account starts a lone method once", async ({ page, context }) => {
   await context.route("https://auth.example.test/**", (route) => route.fulfill({ body: "Sign in" }))
   const attempts: string[] = []
