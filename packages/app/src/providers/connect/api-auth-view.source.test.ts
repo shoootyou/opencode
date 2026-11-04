@@ -3,9 +3,11 @@
  * @interface ApiAuthView() in ./dialog.tsx (closure inside ProviderConnection)
  * @behavior
  *   - Shows an optional account-name TextInput (data-input="provider-account-name", autocomplete="off", spellcheck off) above the key field only when accounts().length > 0.
- *   - The key TextInput is type="password", autocomplete="new-password", spellcheck off, has no name attribute, no value= and no onInput; submit reads it from the input ref and clears it.
- *   - On submit, isDuplicateAccountName(name, accounts().map((a) => a.label)) runs before connectKey; a duplicate shows provider.connect.accountName.duplicate in formStore.error and does not call connectKey.
- *   - controller.auth.connectKey(key, label) runs inside try/catch; a failure shows only provider.connect.apiKey.failed.
+ *   - The key TextInput is type="password", autocomplete="new-password", spellcheck off; its attributes are exactly the allowlist asserted below (no name, value, defaultValue or on* handler); submit reads it from the input ref and clears it after the duplicate check and before the request.
+ *   - Both inputs carry data-1p-ignore, data-lpignore="true" and data-bwignore="true" so password managers do not offer to save "name + key" as a login.
+ *   - On submit, isDuplicateAccountName(label, accounts().map((a) => a.label)) runs before connectKey; a duplicate sets formStore.nameError (never formStore.error) to provider.connect.accountName.duplicate, focuses the name input, keeps the key and does not call connectKey.
+ *   - formStore.nameError is cleared at the start of each submit and when the name input changes; the name input has invalid={!!formStore.nameError} and aria-describedby="provider-account-name-error" while set, and <... id="provider-account-name-error" role="alert"> shows the message. The key input's invalid and aria-describedby depend only on formStore.error.
+ *   - controller.auth.connectKey(key, label) runs inside try/catch; key comes from the key ref, label from the name ref; a failure shows only provider.connect.apiKey.failed through a bare catch with no bound error.
  *   - The helper text provider.connect.apiKey.activeNote is shown with the name field.
  * @edge-cases
  *   - formatServerError and error.message never reach the key-submit UI: the gateway can echo a fragment of the pasted key.
@@ -37,6 +39,31 @@ const inputs = view
 const keyInput = inputs.find((chunk) => chunk.includes('data-input="provider-api-key"')) ?? ""
 
 const nameInput = inputs.find((chunk) => chunk.includes('data-input="provider-account-name"')) ?? ""
+
+// Attribute names of one element chunk: string values and brace expressions are collapsed first, so spreads show up as "{}".
+function attributeNames(chunk: string) {
+  let flat = chunk.replace(/"[^"]*"/g, '""')
+
+  for (let before = ""; before !== flat; ) {
+    before = flat
+    flat = flat.replace(/\{[^{}]*\}/g, "{}")
+  }
+
+  return flat
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.split("=")[0]!)
+    .sort()
+}
+
+const ignoreHints = ["data-1p-ignore", 'data-lpignore="true"', 'data-bwignore="true"']
+
+const duplicateMessage = 'language.t("provider.connect.accountName.duplicate")'
+
+// The submit handler body: from its declaration to the component's JSX return.
+const submitStart = view.indexOf("async function handleSubmit")
+
+const submit = view.slice(submitStart, view.indexOf("\n    return (", submitStart))
 
 describe("ApiAuthView scope", () => {
   test("is found between its start and end markers", () => {
@@ -72,6 +99,33 @@ describe("key input", () => {
     expect(view).not.toMatch(/setFormStore\(\s*"value"/)
   })
 
+  test("carries exactly the agreed attributes: no handler, value, defaultValue, name or spread", () => {
+    // The three password-manager hints are pinned by their own test below, so this one holds on any dialog state.
+    const hints = ["data-1p-ignore", "data-bwignore", "data-lpignore"]
+
+    expect(attributeNames(keyInput).filter((name) => !hints.includes(name))).toEqual([
+      "aria-describedby",
+      "autocomplete",
+      "class",
+      "data-input",
+      "invalid",
+      "placeholder",
+      "ref",
+      "spellcheck",
+      "type",
+    ])
+  })
+
+  test("tells password managers not to offer saving it", () => {
+    for (const hint of ignoreHints) expect(keyInput).toContain(hint)
+  })
+
+  test("marks itself invalid and described only by the key error, never the name error", () => {
+    expect(keyInput).toMatch(/invalid=\{[^}]*formStore\.error\b[^}]*\}/)
+    expect(keyInput).toMatch(/aria-describedby=\{[^}]*formStore\.error\b[^}]*errorID[^}]*\}/)
+    expect(keyInput).not.toContain("nameError")
+  })
+
   test("is read from the input ref on submit and cleared afterwards", () => {
     expect(keyInput).toContain("ref={apiKey}")
     expect(view).toMatch(/apiKey[!?]?\.value/)
@@ -84,6 +138,21 @@ describe("account name input", () => {
     expect(nameInput).toContain('data-input="provider-account-name"')
     expect(nameInput).toContain('autocomplete="off"')
     expect(nameInput).toContain("spellcheck={false}")
+  })
+
+  test("tells password managers not to offer saving it", () => {
+    for (const hint of ignoreHints) expect(nameInput).toContain(hint)
+  })
+
+  test("is invalid and described by its own error while the duplicate error is set", () => {
+    expect(nameInput).toMatch(/invalid=\{!!formStore\.nameError\}/)
+    expect(nameInput).toMatch(/aria-describedby=\{[^}]*formStore\.nameError\b[^}]*"provider-account-name-error"[^}]*\}/)
+  })
+
+  test("clears its error when the name changes", () => {
+    expect(nameInput).toMatch(/\son(?:Input|Change)=\{/)
+    // The reset lives outside handleSubmit (the handler), and the submit clears it too (asserted below).
+    expect(view.replace(submit, "")).toMatch(/setFormStore\(\s*"nameError",\s*undefined\s*\)/)
   })
 
   test("is plain text, not masked", () => {
@@ -121,8 +190,51 @@ describe("submit", () => {
     expect(view.indexOf("isDuplicateAccountName(")).toBeLessThan(view.indexOf("controller.auth.connectKey("))
   })
 
-  test("shows the duplicate-name error in the inline error slot", () => {
-    expect(view).toMatch(/setFormStore\(\s*"error",\s*language\.t\("provider\.connect\.accountName\.duplicate"\)/)
+  test("shows the duplicate-name error in the name field's own slot, not the key's", () => {
+    expect(view).toMatch(/setFormStore\(\s*"nameError",\s*language\.t\("provider\.connect\.accountName\.duplicate"\)/)
+    expect(view).not.toMatch(/setFormStore\(\s*"error",\s*language\.t\("provider\.connect\.accountName\.duplicate"\)/)
+  })
+
+  test("renders the name error as an alert element with the id the name input points to", () => {
+    const at = view.indexOf('id="provider-account-name-error"')
+    const tag = view.slice(view.lastIndexOf("<", at), view.indexOf(">", at))
+
+    expect(at).toBeGreaterThanOrEqual(0)
+    expect(tag).toContain('role="alert"')
+    expect(view).toMatch(/<Show\s+when=\{formStore\.nameError\}>[^]*?id="provider-account-name-error"/)
+  })
+
+  test("clears the name error at the start of each submit, before any validation", () => {
+    const clear = submit.search(/setFormStore\(\s*"nameError",\s*undefined\s*\)/)
+
+    expect(submitStart).toBeGreaterThan(0)
+    expect(clear).toBeGreaterThanOrEqual(0)
+    expect(clear).toBeLessThan(submit.indexOf("key.trim()"))
+    expect(clear).toBeLessThan(submit.indexOf("isDuplicateAccountName("))
+  })
+
+  test("clears the key after the duplicate check returns and before the request, never after it", () => {
+    const check = submit.indexOf("isDuplicateAccountName(")
+    const exit = submit.indexOf("return", check)
+    const clear = submit.search(/apiKey[!?]?\.value\s*=\s*""/)
+    const call = submit.indexOf("controller.auth.connectKey(")
+
+    expect(check).toBeGreaterThan(0)
+    expect(exit).toBeGreaterThan(check)
+    expect(clear).toBeGreaterThan(exit)
+    expect(clear).toBeLessThan(call)
+    expect(submit.match(/apiKey[!?]?\.value\s*=\s*""/g)).toHaveLength(1)
+  })
+
+  test("on a duplicate: sets the name error, then focuses the name input, then returns", () => {
+    const check = submit.indexOf("isDuplicateAccountName(")
+    const message = submit.indexOf(duplicateMessage, check)
+    const focus = submit.search(/accountName[!?]?\.focus\(/)
+    const exit = submit.indexOf("return", message)
+
+    expect(message).toBeGreaterThan(check)
+    expect(focus).toBeGreaterThan(message)
+    expect(exit).toBeGreaterThan(focus)
   })
 
   test("returns before connecting when the name is a duplicate", () => {
@@ -138,12 +250,41 @@ describe("submit", () => {
     expect(view).toMatch(/if\s*\(\s*isDuplicateAccountName\(/)
   })
 
-  test("passes the key and the name to the controller", () => {
-    expect(view).toMatch(/controller\.auth\.connectKey\(\s*\w+,\s*\w+/)
+  test("reads key and label from their own refs and forwards them in that order", () => {
+    expect(view).toMatch(/const key = apiKey\?\.value \?\? ""/)
+    expect(view).toMatch(/const label = accountName\?\.value \?\? ""/)
+    expect(view.match(/connectKey\(/g)).toHaveLength(1)
+    expect(view).toContain("await controller.auth.connectKey(key, label)")
+    expect(keyInput).toContain("ref={apiKey}")
+    expect(nameInput).toContain("ref={accountName}")
+  })
+
+  test("checks the typed label, not the key, for a duplicate", () => {
+    expect(view).toMatch(/isDuplicateAccountName\(\s*label,/)
+  })
+})
+
+describe("key retention", () => {
+  test("the form store has no field that could mirror the key", () => {
+    const declared = view.match(/createStore<\{([^}]*)\}>/)?.[1] ?? ""
+    const names = [...declared.matchAll(/(\w+)\??\s*:/g)].map((match) => match[1]).sort()
+
+    expect(names.length).toBeGreaterThan(0)
+    expect(names.filter((name) => !["error", "nameError"].includes(name!))).toEqual([])
   })
 })
 
 describe("failure path", () => {
+  test("catches without binding the error and only sets the generic message", () => {
+    const handler = view.match(/\}\s*catch\b([^{]*)\{([^}]*)\}/)
+
+    expect(view.match(/\bcatch\b/g)).toHaveLength(1)
+    expect(handler?.[1]?.trim()).toBe("")
+    expect(handler?.[2]?.replace(/\s+/g, " ").trim()).toBe(
+      'if (alive) setFormStore("error", language.t("provider.connect.apiKey.failed"))',
+    )
+  })
+
   test("wraps connectKey in try/catch", () => {
     const attempt = view.indexOf("try {")
     const call = view.indexOf("controller.auth.connectKey(")

@@ -1505,6 +1505,42 @@ test("providers: a second API key can be named when it is added", async ({ page 
   await expect(list.getByRole("radio")).toHaveText(["Home", "Work"])
 })
 
+test("providers: a failed key save shows only the generic message and never the key", async ({ page }) => {
+  const accounts = [{ type: "credential", id: "cred_work", label: "Work", method: "key" }]
+  const key = "test-key-REDACTED-e2e"
+
+  const { settings } = await open(page, {
+    integrations: () => [
+      { id: "openai", name: "OpenAI", methods: [{ type: "key", label: "API key" }], connections: accounts },
+    ],
+    // A thrown hook becomes a server defect: a 500 the client rejects on, as a gateway that echoes the key would.
+    onConnectKey: (input) => {
+      throw new Error(
+        `gateway echoed ${String(Object.entries(input.body ?? {}).find(([name]) => name === "key")?.[1])}`,
+      )
+    },
+  })
+
+  await settings.getByRole("tab", { name: "Providers", exact: true }).click()
+  await settings.getByRole("button", { name: "Show more providers", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.locator('[data-provider-id="openai"]').click()
+  await dialog.getByRole("button", { name: "Add account", exact: true }).click()
+
+  const field = dialog.getByPlaceholder("API key")
+  await field.fill(key)
+  await dialog.locator('[data-action="provider-connect-submit"]').click()
+
+  await expect(dialog.getByRole("alert")).toHaveText("Could not save the key. Check it and try again.")
+  await expect(dialog).not.toContainText(key)
+  await expect(field).toHaveValue("")
+
+  await dialog.getByRole("button", { name: "Navigate back", exact: true }).click()
+  const list = dialog.getByRole("radiogroup", { name: "Connected accounts", exact: true })
+  await expect(list.getByRole("radio")).toHaveText(["Work"])
+  expect(accounts).toHaveLength(1)
+})
+
 test("providers: the first API key of a provider has no account name field", async ({ page }) => {
   const sent: { integrationID: string; body: unknown }[] = []
 
