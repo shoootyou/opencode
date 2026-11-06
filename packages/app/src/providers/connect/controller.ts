@@ -2,10 +2,12 @@ import type {
   FormAnswer,
   FormField,
   IntegrationCommandConnectOutput,
+  IntegrationConnectKeyInput,
   IntegrationInfo,
   IntegrationMethod,
   IntegrationOauthConnectOutput,
 } from "@opencode/client/promise"
+import { normalizeAccountName } from "./account-label"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useServerSDK } from "@/runtime/server/client"
@@ -553,13 +555,18 @@ export function createProviderConnectionController(options: {
     dispatch({ type: "method.reset" })
   }
 
-  const connectKey = async (key: string) => {
-    await serverSDK.api.integration.connect.key({
+  const connectKey = async (key: string, label?: string) => {
+    const name = label === undefined ? undefined : normalizeAccountName(label)
+
+    const input: IntegrationConnectKeyInput = {
       integrationID: options.provider(),
       location: location(),
       key,
       answer: store.formAnswer,
-    })
+    }
+
+    // An absent label lets the server auto-name the account.
+    await serverSDK.api.integration.connect.key(name === undefined ? input : { ...input, label: name })
     await finish()
   }
 
