@@ -513,7 +513,9 @@ test("the Select button beside New session enters selection mode with nothing se
 })
 
 test("in selection mode a click toggles the row instead of opening the session", async ({ page }) => {
-  await openBulkHome(page)
+  // No seeded tabs, so any tab slot after the modifier click was opened by that click.
+  await openBulkHome(page, { seed: { tabs: [] } })
+  await expect(page.locator("[data-titlebar-tab-slot]")).toHaveCount(0)
   await startSelecting(page)
 
   await row(page, "Charlie").click()
@@ -529,8 +531,9 @@ test("in selection mode a click toggles the row instead of opening the session",
   await page.keyboard.press("Enter")
   await expect(row(page, "Alpha")).toHaveAttribute("aria-checked", "true")
   await row(page, "Bravo").click({ modifiers: ["ControlOrMeta"] })
+  await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
   await expect(page).toHaveURL("/")
-  await expect(page.locator('[data-slot="titlebar-tabs"] a').filter({ hasText: "Bravo" })).toHaveCount(0)
+  await expect(page.locator("[data-titlebar-tab-slot]")).toHaveCount(0)
 })
 
 test("Shift-click selects the range between two rows in the visible order", async ({ page }) => {
