@@ -3,7 +3,18 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { Button } from "@opencode/ui/button"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { useQuery, useQueryClient } from "@tanstack/solid-query"
-import { type Accessor, createEffect, createMemo, createSignal, type JSX, on, startTransition, untrack } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createSignal,
+  type JSX,
+  on,
+  onCleanup,
+  Show,
+  startTransition,
+  untrack,
+} from "solid-js"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { useCommand } from "@/shell/commands/command"
 import { HOME_SESSION_LIMIT, mergeHomeSessionIndex, retainHomeSessions } from "@/home/sessions/index"
@@ -269,6 +280,13 @@ export function createHomeSessionsController(home: HomeController) {
 
   const selection = createSelection()
   const [bulkProgress, setBulkProgress] = createSignal<{ done: number; total: number }>()
+  // A batch the user confirmed still runs after Home unmounts, but it must not write to the disposed view.
+  let alive = true
+  onCleanup(() => (alive = false))
+
+  // Busy state is local; on a stale connection a session started elsewhere reads idle, so bulk ops need a live one.
+  const connected = (ctx: { sdk: { connection: { status: () => string } } }) =>
+    ctx.sdk.connection.status() === "connected"
 
   const isBusy = (id: string) => {
     const ctx = home.server.focusedContext()
@@ -313,12 +331,14 @@ export function createHomeSessionsController(home: HomeController) {
     showToast({ variant: summary.variant, title: summary.title })
   }
 
+  const showBulkOffline = (kind: "archive" | "delete", ids: string[]) =>
+    showBulkSummary(kind, { ok: [], missing: [], failed: ids })
+
   const finishBulk = (result: BulkResult) => {
     // Failures stay selected so a retry is one click away; the bar closes only when everything worked.
     if (result.failed.length === 0) selection.exit()
 
     if (result.failed.length > 0) selection.selectAll(result.failed)
-    setBulkProgress(undefined)
   }
 
   const bulkArchive = async (ids: string[]) => {
@@ -328,70 +348,96 @@ export function createHomeSessionsController(home: HomeController) {
     if (!conn || !ctx || ids.length === 0 || bulkProgress()) return
     const server = ServerConnection.key(conn)
     const directory = records().find((record) => record.session.id === ids[0])?.session.location.directory ?? ""
+
+    if (!connected(ctx)) return showBulkOffline("archive", ids)
     setBulkProgress({ done: 0, total: ids.length })
 
-    const result = await runBulk(
-      ids,
-      async (id) => {
-        const attempt = await global.sessionArchive.archiveSessionQuiet({ server, sessionID: id })
+    try {
+      const result = await runBulk(
+        ids,
+        async (id) => {
+          const attempt = await global.sessionArchive.archiveSessionQuiet({ server, sessionID: id })
 
-        if (attempt.status === "failed") throw attempt.error
+          if (attempt.status === "failed") throw attempt.error
 
-        if (attempt.status === "pending") throw new Error("Archive already in progress")
-        ctx.data.session.evict(id)
-      },
-      {
-        isBusy,
-        proceed: () => home.server.focusedContext() === ctx,
-        onProgress: (done, total) => setBulkProgress({ done, total }),
-      },
-    )
+          if (attempt.status === "pending") throw new Error("Archive already in progress")
+          ctx.data.session.evict(id)
+        },
+        {
+          isBusy: (id) => !connected(ctx) || isBusy(id),
+          proceed: () => home.server.focusedContext() === ctx,
+          onProgress: (done, total) => setBulkProgress({ done, total }),
+        },
+      )
 
-    void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
-    notifySessionTabsRemoved({ server, directory, sessionIDs: [...result.ok, ...result.missing] })
-    showBulkSummary("archive", result)
-    finishBulk(result)
+      if (!alive) return
+      void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
+      notifySessionTabsRemoved({ server, directory, sessionIDs: [...result.ok, ...result.missing] })
+      showBulkSummary("archive", result)
+      finishBulk(result)
+    } finally {
+      setBulkProgress(undefined)
+    }
   }
 
-  const bulkDelete = async (ids: string[]) => {
+  const bulkDelete = async (ids: string[], expected: ReturnType<typeof home.server.focusedContext>) => {
     const conn = home.server.focused()
     const ctx = home.server.focusedContext()
 
-    if (!conn || !ctx || ids.length === 0 || bulkProgress()) return
+    // The dialog was opened for another server; confirming must not aim its ids at this one.
+    if (!conn || !ctx || ctx !== expected || ids.length === 0 || bulkProgress()) return
     const server = ServerConnection.key(conn)
     const directory = records().find((record) => record.session.id === ids[0])?.session.location.directory ?? ""
     // The list hides a session once it is removed, so the trees are read before the first remove.
     const trees = new Map(ids.map((id) => [id, sessionTreeIDs(ctx.data.session.list(), id)]))
+
     // Re-checked per id right before its remove: a session that started working after it was selected is never deleted.
-    const busy = (id: string) => [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item))
+    const busy = (id: string) =>
+      !connected(ctx) || [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item))
+
+    if (!connected(ctx)) return showBulkOffline("delete", ids)
     setBulkProgress({ done: 0, total: ids.length })
 
-    const result = await runBulk(
-      ids,
-      async (id) => {
-        await ctx.data.session.remove(id)
-      },
-      {
-        isBusy: busy,
-        proceed: () => home.server.focusedContext() === ctx,
-        onProgress: (done, total) => setBulkProgress({ done, total }),
-      },
-    )
+    try {
+      const result = await runBulk(
+        ids,
+        async (id) => {
+          await ctx.data.session.remove(id)
+        },
+        {
+          isBusy: busy,
+          proceed: () => home.server.focusedContext() === ctx,
+          onProgress: (done, total) => setBulkProgress({ done, total }),
+        },
+      )
 
-    const gone = new Set([...result.ok, ...result.missing])
-    queryClient.setQueryData<SessionInfo[]>(["home-sessions", conn], (current) =>
-      current?.filter((item) => !gone.has(item.id)),
-    )
-    void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
-    notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
-    showBulkSummary("delete", result)
-    finishBulk(result)
+      if (!alive) return
+      const gone = new Set([...result.ok, ...result.missing])
+      queryClient.setQueryData<SessionInfo[]>(["home-sessions", conn], (current) =>
+        current?.filter((item) => !gone.has(item.id)),
+      )
+      void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
+      notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
+      showBulkSummary("delete", result)
+      finishBulk(result)
+    } finally {
+      setBulkProgress(undefined)
+    }
   }
 
-  function BulkDeleteDialog(props: { ids: string[]; tabs: number }) {
+  function BulkDeleteDialog(props: {
+    ids: string[]
+    tabs: number
+    ctx: ReturnType<typeof home.server.focusedContext>
+  }) {
+    // The dialog stays mounted through its exit animation, so a second activation must not rerun the batch.
+    const [confirmed, setConfirmed] = createSignal(false)
+
     const confirm = async () => {
+      if (confirmed()) return
+      setConfirmed(true)
       dialog.close()
-      await bulkDelete(props.ids)
+      await bulkDelete(props.ids, props.ctx)
     }
 
     return (
@@ -401,8 +447,10 @@ export function createHomeSessionsController(home: HomeController) {
             title={language.plural("home.sessions.bulk.delete.title", props.ids.length)}
             description={
               <>
-                {language.plural("home.sessions.bulk.delete.description", props.ids.length)}
-                {props.tabs > 0 ? ` ${language.plural("home.sessions.bulk.delete.tabs", props.tabs)}` : ""}
+                <span class="block">{language.plural("home.sessions.bulk.delete.description", props.ids.length)}</span>
+                <Show when={props.tabs > 0}>
+                  <span class="block">{language.plural("home.sessions.bulk.delete.tabs", props.tabs)}</span>
+                </Show>
               </>
             }
           />
@@ -411,7 +459,7 @@ export function createHomeSessionsController(home: HomeController) {
           <Button variant="ghost" autofocus onClick={() => dialog.close()}>
             {language.t("common.cancel")}
           </Button>
-          <Button variant="danger" onClick={confirm}>
+          <Button variant="danger" disabled={confirmed()} onClick={confirm}>
             {language.plural("home.sessions.bulk.delete.button", props.ids.length)}
           </Button>
         </DialogFooter>
@@ -432,7 +480,7 @@ export function createHomeSessionsController(home: HomeController) {
       sessionTreeIDs(sessions, id).some((item) => sessionIDHasOpenTab(tabs.store, server, item)),
     ).length
 
-    return dialog.show(() => <BulkDeleteDialog ids={ids} tabs={open} />)
+    return dialog.show(() => <BulkDeleteDialog ids={ids} tabs={open} ctx={ctx} />)
   }
 
   function DeleteDialog(props: { server: ServerConnection.Key; session: SessionInfo }) {
