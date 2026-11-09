@@ -21,6 +21,7 @@
  * @testability No production seam: waits are real 5-20 ms with generous lower bounds; the 60 s cap is observed through a setTimeout spy.
  */
 import { describe, expect, spyOn, test } from "bun:test"
+import { Data } from "effect"
 import en from "@/runtime/i18n/en"
 import type { useLanguage } from "@/runtime/i18n/language"
 import { bulkSummary, isSelectable, nextSelection, pruneSelection, rangeSelect, runBulk, type BulkResult } from "./bulk"
@@ -33,30 +34,33 @@ const fill = (text: string, params: Record<string, string | number | boolean> = 
   text.replace(/{{\s*(\w+)\s*}}/g, (_, key: string) => String(params[key] ?? ""))
 
 // Renders from the real English dictionary so the test reads the shipped strings.
-const language = {
-  t: (key: string, params?: Record<string, string | number | boolean>) =>
-    fill(dictionary[key] ?? `MISSING:${key}`, params),
-  plural: (key: string, count: number, params?: Record<string, string | number | boolean>) =>
+const language: Language = {
+  t: (key, params) => fill(dictionary[key] ?? `MISSING:${key}`, params),
+  plural: (key, count, params) =>
     fill(dictionary[`${key}.${count === 1 ? "one" : "other"}`] ?? `MISSING:${key}`, { ...params, count }),
-  // SAFETY: the real `t`/`plural` are generic over typed dictionary keys; this fake only needs the string behaviour.
-} as unknown as Language
+}
 
-const notFound = (sessionID: string) =>
-  Object.assign(new Error("Session not found"), {
-    name: "SessionNotFoundError",
-    _tag: "SessionNotFoundError",
-    sessionID,
-  })
+// Tagged error classes carry the `_tag` the client guards read, like the errors the client throws.
+class SessionNotFoundError extends Data.TaggedError("SessionNotFoundError")<{
+  readonly sessionID: string
+  readonly message: string
+}> {}
+
+class SessionArchiveLimitError extends Data.TaggedError("SessionArchiveLimitError")<{
+  readonly sessionID: string
+  readonly kind: "rate" | "retention"
+  readonly retryAfterMillis?: number
+  readonly message: string
+}> {}
+
+class ConflictError extends Data.TaggedError("ConflictError")<{ readonly message: string }> {}
+
+const notFound = (sessionID: string) => new SessionNotFoundError({ sessionID, message: "Session not found" })
 
 const limit = (sessionID: string, input: { kind: "rate" | "retention"; retryAfterMillis?: number; message?: string }) =>
-  Object.assign(new Error(input.message ?? "Archive limit"), {
-    name: "SessionArchiveLimitError",
-    _tag: "SessionArchiveLimitError",
-    sessionID,
-    ...input,
-  })
+  new SessionArchiveLimitError({ sessionID, ...input, message: input.message ?? "Archive limit" })
 
-const conflict = () => Object.assign(new Error("Conflict"), { name: "ConflictError", _tag: "ConflictError" })
+const conflict = () => new ConflictError({ message: "Conflict" })
 
 const deferred = () => {
   let resolve!: () => void
@@ -103,19 +107,19 @@ describe("runBulk ordering and concurrency", () => {
   })
 
   test("keeps input order inside ok, missing and failed", async () => {
-    const outcomes: Record<string, "ok" | "missing" | "failed"> = {
-      ses_1: "failed",
-      ses_2: "ok",
-      ses_3: "missing",
-      ses_4: "failed",
-      ses_5: "ok",
-      ses_6: "missing",
-    }
+    const outcomes = new Map<string, "ok" | "missing" | "failed">([
+      ["ses_1", "failed"],
+      ["ses_2", "ok"],
+      ["ses_3", "missing"],
+      ["ses_4", "failed"],
+      ["ses_5", "ok"],
+      ["ses_6", "missing"],
+    ])
 
-    const final = await runBulk(Object.keys(outcomes), async (id) => {
-      if (outcomes[id] === "missing") throw notFound(id)
+    const final = await runBulk([...outcomes.keys()], async (id) => {
+      if (outcomes.get(id) === "missing") throw notFound(id)
 
-      if (outcomes[id] === "failed") throw new Error("boom")
+      if (outcomes.get(id) === "failed") throw new Error("boom")
     })
 
     expect(final).toEqual({
@@ -266,15 +270,17 @@ describe("runBulk rate limit retry", () => {
     const delays: number[] = []
 
     // Long waits run immediately so the test stays fast; shorter timers keep their delay.
-    const spy = spyOn(globalThis, "setTimeout").mockImplementation(((handler: () => void, ms?: number) => {
-      if (ms !== undefined && ms >= 1000) {
-        delays.push(ms)
+    const spy = spyOn(globalThis, "setTimeout").mockImplementation(
+      Object.assign((handler: () => void, ms?: number) => {
+        if (ms !== undefined && ms >= 1000) {
+          delays.push(ms)
 
-        return realSetTimeout(handler, 0)
-      }
+          return realSetTimeout(handler, 0)
+        }
 
-      return realSetTimeout(handler, ms)
-    }) as unknown as typeof setTimeout)
+        return realSetTimeout(handler, ms)
+      }, realSetTimeout),
+    )
 
     let attempts = 0
 
