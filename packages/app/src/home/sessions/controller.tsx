@@ -369,11 +369,12 @@ export function createHomeSessionsController(home: HomeController) {
         },
       )
 
-      if (!alive) return
       void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
       notifySessionTabsRemoved({ server, directory, sessionIDs: [...result.ok, ...result.missing] })
       showBulkSummary("archive", result)
-      finishBulk(result)
+
+      // Only the selection belongs to the view; the toast and tab cleanup report a batch that already ran.
+      if (alive) finishBulk(result)
     } finally {
       setBulkProgress(undefined)
     }
@@ -413,7 +414,6 @@ export function createHomeSessionsController(home: HomeController) {
         },
       )
 
-      if (!alive) return
       const gone = new Set([...result.ok, ...result.missing])
       queryClient.setQueryData<SessionInfo[]>(["home-sessions", conn], (current) =>
         current?.filter((item) => !gone.has(item.id)),
@@ -421,7 +421,8 @@ export function createHomeSessionsController(home: HomeController) {
       void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
       notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
       showBulkSummary("delete", result)
-      finishBulk(result)
+
+      if (alive) finishBulk(result)
     } finally {
       setBulkProgress(undefined)
     }
