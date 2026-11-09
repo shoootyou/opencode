@@ -14,11 +14,17 @@ export type ArchiveTabsRemoved = Readonly<{ server: string; directory: string; s
 
 export type ArchiveNotice = Readonly<{ kind: "update" | "refresh" | "navigation"; error: unknown }>
 
+export type ArchiveAttempt =
+  | Readonly<{ status: "archived" }>
+  | Readonly<{ status: "pending" }>
+  | Readonly<{ status: "failed"; error: unknown }>
+
 export type SetSessionArchive = (input: ArchiveRequest) => Promise<boolean>
 
 export type ArchiveActions = Readonly<{
   setSessionArchive: SetSessionArchive
   archiveSession: (target: ArchiveTarget) => Promise<boolean>
+  archiveSessionQuiet: (target: ArchiveTarget) => Promise<ArchiveAttempt>
   isPending: (target: ArchiveTarget) => boolean
 }>
 
@@ -52,36 +58,43 @@ export function createSessionArchiveActions(
     deps.onPendingChange?.()
   }
 
-  const setSessionArchive: SetSessionArchive = async (input) => {
+  const run = async (input: ArchiveRequest, notifyRefresh = false): Promise<ArchiveAttempt> => {
     const target = { server: input.server, sessionID: input.sessionID }
 
-    if (isPending(target)) return false
+    if (isPending(target)) return { status: "pending" }
     setPending(target, true)
 
     try {
       try {
         await deps.update(input)
       } catch (error) {
-        deps.toast({ kind: "update", error })
-
-        return false
+        return { status: "failed", error }
       }
 
       try {
         await deps.sync(target)
       } catch (error) {
-        deps.toast({ kind: "refresh", error })
+        if (notifyRefresh) deps.toast({ kind: "refresh", error })
       }
 
-      return true
+      return { status: "archived" }
     } finally {
       setPending(target, false)
     }
   }
 
+  const setSessionArchive: SetSessionArchive = async (input) => {
+    const attempt = await run(input, true)
+
+    if (attempt.status === "failed") deps.toast({ kind: "update", error: attempt.error })
+
+    return attempt.status === "archived"
+  }
+
   return {
     setSessionArchive,
     archiveSession: (target) => setSessionArchive({ ...target, archived: true }),
+    archiveSessionQuiet: (target) => run({ ...target, archived: true }),
     isPending,
   }
 }
