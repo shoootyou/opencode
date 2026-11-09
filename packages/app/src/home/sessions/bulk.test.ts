@@ -4,6 +4,7 @@
  * @interface rangeSelect(order, anchor, target, selectable): string[]
  * @interface isSelectable(session, busy): boolean
  * @interface bulkSummary(kind: "archive" | "delete", result, language): { variant: "success" | "error"; title: string }
+ * @interface skipId(connected: boolean, busy: boolean): boolean; offlineResult(ids: readonly string[]): BulkResult
  * @interface nextSelection(state, input): { ids: string[]; anchor?: string }; pruneSelection(ids, valid): string[]
  * @behavior
  *   - runBulk is sequential (concurrency 1), never throws, keeps input order, and never stores error text.
@@ -13,6 +14,8 @@
  *   - rangeSelect is inclusive in `order` (either direction), filtered by `selectable`; no usable anchor -> [target] when target is selectable, else [].
  *   - isSelectable = !busy && !parentID && not archived (epoch zero counts as archived).
  *   - bulkSummary: ok+missing only -> success + plural title; any failed -> error + "<Verb> {{done}} of {{total}}, {{failed}} failed".
+ *   - skipId(connected, busy) = !connected || busy: the per-id skip used as runBulk's isBusy; a skipped id is failed without op.
+ *   - offlineResult(ids) = the all-failed result of a batch that never started: ok [], missing [], failed = fresh copy of ids in order.
  * @edge-cases
  *   - 429 with kind "retention" or without retryAfterMillis -> failed, no retry; a second 429 -> failed.
  *   - A synchronous throw or a non-Error rejection from op is a failure, not an exception.
@@ -24,7 +27,17 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { Data } from "effect"
 import en from "@/runtime/i18n/en"
 import type { useLanguage } from "@/runtime/i18n/language"
-import { bulkSummary, isSelectable, nextSelection, pruneSelection, rangeSelect, runBulk, type BulkResult } from "./bulk"
+import {
+  bulkSummary,
+  isSelectable,
+  nextSelection,
+  offlineResult,
+  pruneSelection,
+  rangeSelect,
+  runBulk,
+  skipId,
+  type BulkResult,
+} from "./bulk"
 
 type Language = Pick<ReturnType<typeof useLanguage>, "plural" | "t">
 
@@ -657,5 +670,123 @@ describe("pruneSelection", () => {
 
   test("returns nothing when no id is valid", () => {
     expect(pruneSelection(["ses_a", "ses_b"], new Set<string>())).toEqual([])
+  })
+})
+
+describe("skipId", () => {
+  test("skips when the connection is down and the id is idle", () => {
+    expect(skipId(false, false)).toBe(true)
+  })
+
+  test("skips when the connection is up and the id is busy", () => {
+    expect(skipId(true, true)).toBe(true)
+  })
+
+  test("skips when the connection is down and the id is busy", () => {
+    expect(skipId(false, true)).toBe(true)
+  })
+
+  test("does not skip a connected idle id", () => {
+    expect(skipId(true, false)).toBe(false)
+  })
+
+  test("runBulk never calls op and fails every id while disconnected", async () => {
+    const ids = ["ses_a", "ses_b", "ses_c"]
+    const calls: string[] = []
+
+    expect(ids.length).toBeGreaterThan(0)
+
+    const final = await runBulk(
+      ids,
+      async (id) => {
+        calls.push(id)
+      },
+      { isBusy: () => skipId(false, false) },
+    )
+
+    expect(calls).toEqual([])
+    expect(final).toEqual(result({ failed: ids }))
+  })
+
+  test("runBulk fails only the busy id when connected and still runs the others", async () => {
+    const calls: string[] = []
+
+    const final = await runBulk(
+      ["ses_a", "ses_busy", "ses_z"],
+      async (id) => {
+        calls.push(id)
+      },
+      { isBusy: (id) => skipId(true, id === "ses_busy") },
+    )
+
+    expect(calls).toEqual(["ses_a", "ses_z"])
+    expect(final).toEqual(result({ ok: ["ses_a", "ses_z"], failed: ["ses_busy"] }))
+  })
+
+  test("runBulk stops running ops once the connection drops mid-batch", async () => {
+    let connected = true
+    const calls: string[] = []
+
+    const final = await runBulk(
+      ["ses_a", "ses_b", "ses_c"],
+      async (id) => {
+        calls.push(id)
+        connected = false
+      },
+      { isBusy: () => skipId(connected, false) },
+    )
+
+    expect(calls).toEqual(["ses_a"])
+    expect(final).toEqual(result({ ok: ["ses_a"], failed: ["ses_b", "ses_c"] }))
+  })
+})
+
+describe("offlineResult", () => {
+  test("fails every id in order and reports nothing ok or missing", () => {
+    const ids = ["ses_c", "ses_a", "ses_b"]
+
+    expect(ids.length).toBeGreaterThan(0)
+    expect(offlineResult(ids)).toEqual({ ok: [], missing: [], failed: ["ses_c", "ses_a", "ses_b"] })
+  })
+
+  test("returns a fresh failed array that does not alias the input", () => {
+    const ids = ["ses_a", "ses_b"]
+
+    const offline = offlineResult(ids)
+
+    expect(offline.failed).not.toBe(ids)
+    ids.push("ses_late")
+    expect(offline.failed).toEqual(["ses_a", "ses_b"])
+  })
+
+  test("returns empty arrays for no ids", () => {
+    expect(offlineResult([])).toEqual({ ok: [], missing: [], failed: [] })
+  })
+
+  test("matches what runBulk returns when every id is skipped", async () => {
+    const ids = ["ses_a", "ses_b"]
+
+    expect(ids.length).toBeGreaterThan(0)
+    expect(offlineResult(ids)).toEqual(await runBulk(ids, async () => {}, { isBusy: () => true }))
+  })
+
+  test("summarizes an offline archive as an error with zero done", () => {
+    const ids = ["ses_a", "ses_b", "ses_c"]
+
+    expect(ids.length).toBeGreaterThan(0)
+    expect(bulkSummary("archive", offlineResult(ids), language)).toEqual({
+      variant: "error",
+      title: "Archived 0 of 3, 3 failed",
+    })
+  })
+
+  test("summarizes an offline delete as an error with zero done", () => {
+    const ids = ["ses_a", "ses_b"]
+
+    expect(ids.length).toBeGreaterThan(0)
+    expect(bulkSummary("delete", offlineResult(ids), language)).toEqual({
+      variant: "error",
+      title: "Deleted 0 of 2, 2 failed",
+    })
   })
 })

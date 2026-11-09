@@ -111,8 +111,18 @@ for (const name of ["bulkArchive", "bulkDelete"]) {
   test(`${name} writes after the runBulk await only while the view is alive`, () => {
     const text = body(name)
 
-    expect(text).toMatch(/\b(alive|mounted|disposed)\b/)
-    expect(text.slice(text.indexOf("await runBulk"))).toMatch(/\b(alive|mounted|disposed)\b/)
+    expect(reach(text)).toMatch(/\b(alive|mounted|disposed)\b/)
+    expect(reach(text.slice(text.indexOf("await runBulk")))).toMatch(/\b(alive|mounted|disposed)\b/)
+  })
+
+  test(`${name} does not return early after the runBulk await, so the toast, tab notice and cache update still run`, () => {
+    const text = body(name)
+    const run = text.indexOf("await runBulk")
+    const finish = text.indexOf("finishBulk(", run)
+
+    expect(run).toBeGreaterThan(0)
+    expect(finish).toBeGreaterThan(run)
+    expect(text.slice(run, finish)).not.toMatch(/!\s*(alive|mounted|disposed)\s*\)\s*(\{\s*)?return\b/)
   })
 
   test(`${name} finishes inside try/finally and resets progress there`, () => {

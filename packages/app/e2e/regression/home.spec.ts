@@ -533,6 +533,10 @@ test("in selection mode a click toggles the row instead of opening the session",
   await row(page, "Bravo").click({ modifiers: ["ControlOrMeta"] })
   await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
   await expect(page).toHaveURL("/")
+  // Two frames so a tab opened by the click would have rendered before the negative count is read.
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  )
   await expect(page.locator("[data-titlebar-tab-slot]")).toHaveCount(0)
 })
 
