@@ -111,6 +111,16 @@ export function nextSelection(
   return { ids, anchor: input.id }
 }
 
+/** The per-id skip for runBulk: nothing is attempted on a dead connection or a busy session. */
+export function skipId(connected: boolean, busy: boolean): boolean {
+  return !connected || busy
+}
+
+/** What runBulk returns when every id is skipped, for a batch that never started. */
+export function offlineResult(ids: readonly string[]): BulkResult {
+  return { ok: [], missing: [], failed: [...ids] }
+}
+
 export function pruneSelection(ids: readonly string[], valid: ReadonlySet<string>): string[] {
   return ids.filter((id) => valid.has(id))
 }

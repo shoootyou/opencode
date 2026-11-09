@@ -31,7 +31,7 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { sessionLabel, sessionTitle } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import { archiveHomeSession } from "./archive"
-import { bulkSummary, isSelectable, runBulk, type BulkResult } from "./bulk"
+import { bulkSummary, isSelectable, offlineResult, runBulk, skipId, type BulkResult } from "./bulk"
 import { createSelection } from "./selection"
 import { homeSessionsQuery } from "./queries"
 import { useGlobal } from "@/runtime/server/runtime"
@@ -331,8 +331,7 @@ export function createHomeSessionsController(home: HomeController) {
     showToast({ variant: summary.variant, title: summary.title })
   }
 
-  const showBulkOffline = (kind: "archive" | "delete", ids: string[]) =>
-    showBulkSummary(kind, { ok: [], missing: [], failed: ids })
+  const showBulkOffline = (kind: "archive" | "delete", ids: string[]) => showBulkSummary(kind, offlineResult(ids))
 
   const finishBulk = (result: BulkResult) => {
     // Failures stay selected so a retry is one click away; the bar closes only when everything worked.
@@ -364,7 +363,7 @@ export function createHomeSessionsController(home: HomeController) {
           ctx.data.session.evict(id)
         },
         {
-          isBusy: (id) => !connected(ctx) || isBusy(id),
+          isBusy: (id) => skipId(connected(ctx), isBusy(id)),
           proceed: () => home.server.focusedContext() === ctx,
           onProgress: (done, total) => setBulkProgress({ done, total }),
         },
@@ -393,7 +392,10 @@ export function createHomeSessionsController(home: HomeController) {
 
     // Re-checked per id right before its remove: a session that started working after it was selected is never deleted.
     const busy = (id: string) =>
-      !connected(ctx) || [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item))
+      skipId(
+        connected(ctx),
+        [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item)),
+      )
 
     if (!connected(ctx)) return showBulkOffline("delete", ids)
     setBulkProgress({ done: 0, total: ids.length })
