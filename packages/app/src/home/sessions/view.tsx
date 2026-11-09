@@ -719,6 +719,7 @@ function HomeSessionRow(
           data-component="home-session-row"
           role={props.bulk.on() ? "checkbox" : undefined}
           aria-checked={props.bulk.on() ? props.bulk.isSelected(sessionID()) : undefined}
+          aria-disabled={props.bulk.on() && !props.bulk.isSelectable(sessionID()) ? true : undefined}
           title={props.bulk.on() && !props.bulk.isSelectable(sessionID()) ? busyTitle() : undefined}
           aria-haspopup={props.bulk.on() ? undefined : "menu"}
           aria-expanded={props.bulk.on() ? undefined : !!menu()}
