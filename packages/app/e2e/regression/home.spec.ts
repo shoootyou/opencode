@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { expectPath, holdRoute, NO_PROVIDER, project, REMOTE_SERVER, seed, sessionHref, T0 } from "../utils/app"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { fixture, mockStressTimeline } from "../utils/session-fixture"
-import { mockRemoteServer, mockWorkspace, newSessionLocation } from "../utils/workspace"
+import { mockRemoteServer, mockWorkspace, newSessionLocation, type WorkspaceInput } from "../utils/workspace"
 import { APP_READY_TIMEOUT, expectAppVisible } from "../utils/waits"
 
 test.use({ serviceWorkers: "block" })
@@ -89,7 +89,7 @@ test("the session context menu renames, exports, and deletes a Home session", as
   const box = await target.boundingBox()
   await target.click({ button: "right", position: { x: 48, y: 12 } })
   await expect(page).toHaveURL("/")
-  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Export…", "Delete…"])
+  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Export…", "Select", "Delete…"])
   const menu = await page.locator('[data-component="menu-v2-content"]').boundingBox()
   expect(Math.abs((menu?.x ?? 0) - (box?.x ?? 0) - 48)).toBeLessThan(4)
 
@@ -435,3 +435,254 @@ for (const state of [
     ).toBeVisible()
   })
 }
+
+const bulkTitles = ["Alpha", "Bravo", "Charlie", "Delta"]
+
+const bulkID = (title: string) => `ses_bulk_${title.toLowerCase()}`
+
+const bulkBar = (page: Page) => page.getByText(/\d+ selected/)
+
+const toasts = (page: Page) => page.locator('[data-testid^="toast-v2-"]')
+
+const SERVER_DETAIL = "upstream-detail-must-stay-hidden"
+
+// Newest first, so the Home list reads Delta, Charlie, Bravo, Alpha.
+async function openBulkHome(page: Page, input: Omit<WorkspaceInput, "name" | "sessions"> = {}) {
+  await mockWorkspace(page, {
+    name: "Bulk",
+    sessions: bulkTitles.map((title, index) => ({ id: bulkID(title), title, created: T0 + index * 1000 })),
+    ...input,
+  })
+
+  await page.goto("/")
+  await expect(page.locator('[data-component="home-session-row"]')).toContainText(bulkTitles.toReversed())
+}
+
+async function startSelecting(page: Page) {
+  await page.getByRole("button", { name: /^Select$/ }).click()
+  await expect(bulkBar(page)).toBeVisible()
+}
+
+// Session PATCH or DELETE requests the app sends, with the archive flag for PATCH.
+function recordSessionRequests(page: Page, method: "PATCH" | "DELETE") {
+  const seen: { id: string; archived?: boolean }[] = []
+
+  page.on("request", (request) => {
+    const id = /\/api\/session\/(ses_bulk_\w+)$/.exec(new URL(request.url()).pathname)?.[1]
+
+    if (request.method() === method && id) seen.push({ id, archived: request.postDataJSON()?.archived })
+  })
+
+  return seen
+}
+
+// The server rejects one session's PATCH or DELETE with an error message the UI must not show.
+const failSession = (page: Page, method: "PATCH" | "DELETE", id: string) =>
+  page.route(new RegExp(`/api/session/${id}(\\?|$)`), (route) =>
+    route.request().method() === method
+      ? route.fulfill({
+          status: 500,
+          json: { message: SERVER_DETAIL },
+          headers: { "access-control-allow-origin": "*" },
+        })
+      : route.fallback(),
+  )
+
+test("the row menu's Select item enters selection mode with that row selected", async ({ page }) => {
+  await openBulkHome(page)
+  await row(page, "Bravo").click({ button: "right" })
+  await page.getByRole("menuitem", { name: /^Select$/ }).click()
+
+  await expect(bulkBar(page)).toHaveText(/1 selected/)
+  await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
+  await expect(row(page, "Alpha")).toHaveAttribute("aria-checked", "false")
+  await expect(page).toHaveURL("/")
+
+  // The entry point is hidden once selection is on.
+  await row(page, "Alpha").click({ button: "right" })
+  await expect(page.getByRole("menuitem", { name: /^Select$/ })).toHaveCount(0)
+})
+
+test("the Select button beside New session enters selection mode with nothing selected", async ({ page }) => {
+  await openBulkHome(page)
+  await startSelecting(page)
+
+  await expect(bulkBar(page)).toHaveText(/0 selected/)
+  await expect(page.getByRole("checkbox")).toHaveCount(bulkTitles.length)
+  await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(0)
+})
+
+test("in selection mode a click toggles the row instead of opening the session", async ({ page }) => {
+  // No seeded tabs, so any tab slot after the modifier click was opened by that click.
+  await openBulkHome(page, { seed: { tabs: [] } })
+  await expect(page.locator("[data-titlebar-tab-slot]")).toHaveCount(0)
+  await startSelecting(page)
+
+  await row(page, "Charlie").click()
+  await expect(row(page, "Charlie")).toHaveAttribute("aria-checked", "true")
+  await expect(bulkBar(page)).toHaveText(/1 selected/)
+
+  await row(page, "Charlie").click()
+  await expect(row(page, "Charlie")).toHaveAttribute("aria-checked", "false")
+  await expect(page).toHaveURL("/")
+
+  // Enter toggles too, and the modifier click that opens a background tab outside selection does not open here.
+  await row(page, "Alpha").focus()
+  await page.keyboard.press("Enter")
+  await expect(row(page, "Alpha")).toHaveAttribute("aria-checked", "true")
+  await row(page, "Bravo").click({ modifiers: ["ControlOrMeta"] })
+  await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
+  await expect(page).toHaveURL("/")
+  // Two frames so a tab opened by the click would have rendered before the negative count is read.
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  )
+  await expect(page.locator("[data-titlebar-tab-slot]")).toHaveCount(0)
+})
+
+test("Shift-click selects the range between two rows in the visible order", async ({ page }) => {
+  await openBulkHome(page)
+  await startSelecting(page)
+
+  await row(page, "Delta").click()
+  await row(page, "Bravo").click({ modifiers: ["Shift"] })
+
+  await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(3)
+  await expect(row(page, "Alpha")).toHaveAttribute("aria-checked", "false")
+  await expect(bulkBar(page)).toHaveText(/3 selected/)
+})
+
+test("Select all selects every visible row and Escape leaves selection mode", async ({ page }) => {
+  await openBulkHome(page)
+  await startSelecting(page)
+
+  await page.getByRole("button", { name: /^Select all$/ }).click()
+  await expect(bulkBar(page)).toHaveText(/4 selected/)
+  await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(4)
+
+  await row(page, "Alpha").focus()
+  await page.keyboard.press("Escape")
+  await expect(bulkBar(page)).toBeHidden()
+  await expect(page.getByRole("checkbox")).toHaveCount(0)
+
+  // Rows open again, and the Done button is the other way out.
+  await startSelecting(page)
+  await page.getByRole("button", { name: /^Done$/ }).click()
+  await expect(bulkBar(page)).toBeHidden()
+})
+
+test("bulk archive archives each selected session and reports once", async ({ page }) => {
+  await openBulkHome(page)
+  const patched = recordSessionRequests(page, "PATCH")
+  await startSelecting(page)
+  await row(page, "Alpha").click()
+  await row(page, "Charlie").click()
+
+  await page.getByRole("button", { name: /^Archive$/ }).click()
+
+  await expect(row(page, "Alpha")).toBeHidden()
+  await expect(row(page, "Charlie")).toBeHidden()
+  await expect(row(page, "Bravo")).toBeVisible()
+  await expect(row(page, "Delta")).toBeVisible()
+  expect(patched.toSorted((a, b) => a.id.localeCompare(b.id))).toEqual([
+    { id: bulkID("Alpha"), archived: true },
+    { id: bulkID("Charlie"), archived: true },
+  ])
+  await expect(toasts(page)).toHaveCount(1)
+  await expect(toasts(page)).toContainText(/Archived 2 sessions/)
+  // Everything succeeded, so selection mode is over.
+  await expect(bulkBar(page)).toBeHidden()
+})
+
+test("bulk delete asks first with the count and Cancel focused, then removes the rows", async ({ page }) => {
+  await openBulkHome(page)
+  const deleted = recordSessionRequests(page, "DELETE")
+  await startSelecting(page)
+  await row(page, "Bravo").click()
+  await row(page, "Delta").click()
+
+  await page.getByRole("button", { name: /^Delete$/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText(/Delete 2 sessions\?/)
+  await expect(dialog).toContainText(/2 open tabs/)
+  await expect(dialog).toContainText(/sub-sessions/i)
+  await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused()
+  expect(deleted).toEqual([])
+
+  await dialog.getByRole("button", { name: /^Delete 2 sessions$/ }).click()
+
+  await expect(row(page, "Bravo")).toBeHidden()
+  await expect(row(page, "Delta")).toBeHidden()
+  await expect(row(page, "Alpha")).toBeVisible()
+  expect(deleted.map((item) => item.id).toSorted()).toEqual([bulkID("Bravo"), bulkID("Delta")])
+  await expect(toasts(page)).toHaveCount(1)
+  await expect(toasts(page)).toContainText(/Deleted 2 sessions/)
+})
+
+test("cancelling the bulk delete dialog keeps the sessions and the selection", async ({ page }) => {
+  await openBulkHome(page)
+  const deleted = recordSessionRequests(page, "DELETE")
+  await startSelecting(page)
+  await row(page, "Bravo").click()
+  await page.getByRole("button", { name: /^Delete$/ }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
+
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
+  expect(deleted).toEqual([])
+})
+
+test("a failed archive stays selected with the bar open and a summary that hides the server error", async ({
+  page,
+}) => {
+  await openBulkHome(page)
+  await failSession(page, "PATCH", bulkID("Charlie"))
+  await startSelecting(page)
+  await row(page, "Alpha").click()
+  await row(page, "Charlie").click()
+  await row(page, "Delta").click()
+
+  await page.getByRole("button", { name: /^Archive$/ }).click()
+
+  await expect(row(page, "Alpha")).toBeHidden()
+  await expect(row(page, "Delta")).toBeHidden()
+  await expect(row(page, "Charlie")).toHaveAttribute("aria-checked", "true")
+  await expect(bulkBar(page)).toHaveText(/1 selected/)
+  await expect(toasts(page)).toHaveCount(1)
+  await expect(toasts(page)).toContainText(/2 of 3.*1 failed/)
+  await expect(page.getByText(SERVER_DETAIL)).toHaveCount(0)
+})
+
+test("a failed delete leaves its row selected and the bar open", async ({ page }) => {
+  await openBulkHome(page)
+  await failSession(page, "DELETE", bulkID("Bravo"))
+  await startSelecting(page)
+  await row(page, "Alpha").click()
+  await row(page, "Bravo").click()
+
+  await page.getByRole("button", { name: /^Delete$/ }).click()
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /^Delete 2 sessions$/ })
+    .click()
+
+  await expect(row(page, "Alpha")).toBeHidden()
+  await expect(row(page, "Bravo")).toHaveAttribute("aria-checked", "true")
+  await expect(bulkBar(page)).toHaveText(/1 selected/)
+  await expect(toasts(page)).toHaveCount(1)
+  await expect(toasts(page)).toContainText(/1 of 2.*1 failed/)
+  await expect(page.getByText(SERVER_DETAIL)).toHaveCount(0)
+})
+
+test("a working session cannot be selected", async ({ page }) => {
+  await openBulkHome(page, { sessionStatus: { [bulkID("Bravo")]: { type: "running" } } })
+  await startSelecting(page)
+
+  await row(page, "Bravo").click({ force: true })
+  await expect(row(page, "Bravo")).not.toHaveAttribute("aria-checked", "true")
+  await expect(bulkBar(page)).toHaveText(/0 selected/)
+
+  await page.getByRole("button", { name: /^Select all$/ }).click()
+  await expect(bulkBar(page)).toHaveText(/3 selected/)
+  await expect(row(page, "Bravo")).not.toHaveAttribute("aria-checked", "true")
+})

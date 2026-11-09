@@ -3,16 +3,27 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { Button } from "@opencode/ui/button"
 import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { useQuery, useQueryClient } from "@tanstack/solid-query"
-import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createSignal,
+  type JSX,
+  on,
+  onCleanup,
+  Show,
+  startTransition,
+  untrack,
+} from "solid-js"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { useCommand } from "@/shell/commands/command"
 import { HOME_SESSION_LIMIT, mergeHomeSessionIndex, retainHomeSessions } from "@/home/sessions/index"
 import type { LocalProject } from "@/shell/state/layout"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection } from "@/runtime/server/registry"
-import { sessionHasOpenTab, useTabs } from "@/shell/tabs/tabs"
+import { sessionHasOpenTab, sessionIDHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { errorMessage } from "@/shell/layout/helpers"
-import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
+import { sessionBusy, useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { pathKey } from "@/workspaces/path-key"
 import { fetchSessionExport, saveSessionExport, sessionExportFilename } from "@/session/commands/export"
@@ -20,6 +31,8 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { sessionLabel, sessionTitle } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import { archiveHomeSession } from "./archive"
+import { bulkSummary, isSelectable, offlineResult, runBulk, skipId, type BulkResult } from "./bulk"
+import { createSelection } from "./selection"
 import { homeSessionsQuery } from "./queries"
 import { useGlobal } from "@/runtime/server/runtime"
 import type { HomeController } from "../model"
@@ -265,6 +278,214 @@ export function createHomeSessionsController(home: HomeController) {
       })
   }
 
+  const selection = createSelection()
+  const [bulkProgress, setBulkProgress] = createSignal<{ done: number; total: number }>()
+  // A batch the user confirmed still runs after Home unmounts, but it must not write to the disposed view.
+  let alive = true
+  onCleanup(() => (alive = false))
+
+  // Busy state is local; on a stale connection a session started elsewhere reads idle, so bulk ops need a live one.
+  const connected = (ctx: { sdk: { connection: { status: () => string } } }) =>
+    ctx.sdk.connection.status() === "connected"
+
+  const isBusy = (id: string) => {
+    const ctx = home.server.focusedContext()
+
+    return !!ctx && [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item))
+  }
+
+  const selectable = createMemo(
+    () =>
+      new Set(
+        records()
+          .filter((record) => isSelectable(record.session, isBusy(record.session.id)))
+          .map((record) => record.session.id),
+      ),
+  )
+
+  const order = () => records().map((record) => record.session.id)
+
+  // Rows that vanish or start working leave the selection; a running batch owns it until it ends.
+  createEffect(() => {
+    const valid = selectable()
+
+    if (bulkProgress()) return
+
+    untrack(() => {
+      if (selection.store.ids.some((id) => !valid.has(id))) selection.prune(valid)
+    })
+  })
+
+  createEffect(
+    on(
+      () => home.server.focused(),
+      () => selection.exit(),
+      { defer: true },
+    ),
+  )
+
+  // Exactly one toast per batch; server error text never reaches it.
+  const showBulkSummary = (kind: "archive" | "delete", result: BulkResult) => {
+    const summary = bulkSummary(kind, result, language)
+
+    showToast({ variant: summary.variant, title: summary.title })
+  }
+
+  const showBulkOffline = (kind: "archive" | "delete", ids: string[]) => showBulkSummary(kind, offlineResult(ids))
+
+  const finishBulk = (result: BulkResult) => {
+    // Failures stay selected so a retry is one click away; the bar closes only when everything worked.
+    if (result.failed.length === 0) selection.exit()
+
+    if (result.failed.length > 0) selection.selectAll(result.failed)
+  }
+
+  const bulkArchive = async (ids: string[]) => {
+    const conn = home.server.focused()
+    const ctx = home.server.focusedContext()
+
+    if (!conn || !ctx || ids.length === 0 || bulkProgress()) return
+    const server = ServerConnection.key(conn)
+    const directory = records().find((record) => record.session.id === ids[0])?.session.location.directory ?? ""
+
+    if (!connected(ctx)) return showBulkOffline("archive", ids)
+    setBulkProgress({ done: 0, total: ids.length })
+
+    try {
+      const result = await runBulk(
+        ids,
+        async (id) => {
+          const attempt = await global.sessionArchive.archiveSessionQuiet({ server, sessionID: id })
+
+          if (attempt.status === "failed") throw attempt.error
+
+          if (attempt.status === "pending") throw new Error("Archive already in progress")
+          ctx.data.session.evict(id)
+        },
+        {
+          isBusy: (id) => skipId(connected(ctx), isBusy(id)),
+          proceed: () => home.server.focusedContext() === ctx,
+          onProgress: (done, total) => setBulkProgress({ done, total }),
+        },
+      )
+
+      void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
+      notifySessionTabsRemoved({ server, directory, sessionIDs: [...result.ok, ...result.missing] })
+      showBulkSummary("archive", result)
+
+      // Only the selection belongs to the view; the toast and tab cleanup report a batch that already ran.
+      if (alive) finishBulk(result)
+    } finally {
+      setBulkProgress(undefined)
+    }
+  }
+
+  const bulkDelete = async (ids: string[], expected: ReturnType<typeof home.server.focusedContext>) => {
+    const conn = home.server.focused()
+    const ctx = home.server.focusedContext()
+
+    // The dialog was opened for another server; confirming must not aim its ids at this one.
+    if (!conn || !ctx || ctx !== expected || ids.length === 0 || bulkProgress()) return
+    const server = ServerConnection.key(conn)
+    const directory = records().find((record) => record.session.id === ids[0])?.session.location.directory ?? ""
+    // The list hides a session once it is removed, so the trees are read before the first remove.
+    const trees = new Map(ids.map((id) => [id, sessionTreeIDs(ctx.data.session.list(), id)]))
+
+    // Re-checked per id right before its remove: a session that started working after it was selected is never deleted.
+    const busy = (id: string) =>
+      skipId(
+        connected(ctx),
+        [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item)),
+      )
+
+    if (!connected(ctx)) return showBulkOffline("delete", ids)
+    setBulkProgress({ done: 0, total: ids.length })
+
+    try {
+      const result = await runBulk(
+        ids,
+        async (id) => {
+          await ctx.data.session.remove(id)
+        },
+        {
+          isBusy: busy,
+          proceed: () => home.server.focusedContext() === ctx,
+          onProgress: (done, total) => setBulkProgress({ done, total }),
+        },
+      )
+
+      const gone = new Set([...result.ok, ...result.missing])
+      queryClient.setQueryData<SessionInfo[]>(["home-sessions", conn], (current) =>
+        current?.filter((item) => !gone.has(item.id)),
+      )
+      void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
+      notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
+      showBulkSummary("delete", result)
+
+      if (alive) finishBulk(result)
+    } finally {
+      setBulkProgress(undefined)
+    }
+  }
+
+  function BulkDeleteDialog(props: {
+    ids: string[]
+    tabs: number
+    ctx: ReturnType<typeof home.server.focusedContext>
+  }) {
+    // The dialog stays mounted through its exit animation, so a second activation must not rerun the batch.
+    const [confirmed, setConfirmed] = createSignal(false)
+
+    const confirm = async () => {
+      if (confirmed()) return
+      setConfirmed(true)
+      dialog.close()
+      await bulkDelete(props.ids, props.ctx)
+    }
+
+    return (
+      <Dialog fit>
+        <DialogHeader hideClose>
+          <DialogTitleGroup
+            title={language.plural("home.sessions.bulk.delete.title", props.ids.length)}
+            description={
+              <>
+                <span class="block">{language.plural("home.sessions.bulk.delete.description", props.ids.length)}</span>
+                <Show when={props.tabs > 0}>
+                  <span class="block">{language.plural("home.sessions.bulk.delete.tabs", props.tabs)}</span>
+                </Show>
+              </>
+            }
+          />
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" autofocus onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </Button>
+          <Button variant="danger" disabled={confirmed()} onClick={confirm}>
+            {language.plural("home.sessions.bulk.delete.button", props.ids.length)}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    )
+  }
+
+  const showBulkDelete = (ids: string[]) => {
+    const conn = home.server.focused()
+    const ctx = home.server.focusedContext()
+
+    if (!conn || !ctx || ids.length === 0) return
+    const server = ServerConnection.key(conn)
+    const sessions = ctx.data.session.list()
+
+    // Snapshot at open: the count describes the selection the user is confirming.
+    const open = ids.filter((id) =>
+      sessionTreeIDs(sessions, id).some((item) => sessionIDHasOpenTab(tabs.store, server, item)),
+    ).length
+
+    return dialog.show(() => <BulkDeleteDialog ids={ids} tabs={open} ctx={ctx} />)
+  }
+
   function DeleteDialog(props: { server: ServerConnection.Key; session: SessionInfo }) {
     const name = () => sessionTitle(props.session.title) ?? language.t("command.session.new")
 
@@ -377,6 +598,20 @@ export function createHomeSessionsController(home: HomeController) {
       export: exportSession,
       showDelete: (server: ServerConnection.Key, session: SessionInfo) =>
         dialog.show(() => <DeleteDialog server={server} session={session} />),
+    },
+    bulk: {
+      on: () => selection.store.on,
+      count: () => selection.store.ids.length,
+      total: () => selectable().size,
+      progress: bulkProgress,
+      isSelected: (id: string) => selection.store.ids.includes(id),
+      isSelectable: (id: string) => selectable().has(id),
+      enter: selection.enter,
+      exit: selection.exit,
+      toggle: (id: string, shift: boolean) => selection.toggle(id, shift, order(), (item) => selectable().has(item)),
+      selectAll: () => selection.selectAll([...selectable()]),
+      archive: () => bulkArchive([...selection.store.ids]),
+      showDelete: () => showBulkDelete([...selection.store.ids]),
     },
     tab: {
       isOpen: (record: HomeSessionRecord) => {

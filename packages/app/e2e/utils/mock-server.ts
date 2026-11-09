@@ -1106,6 +1106,8 @@ function mockHandlers(
                 (Predicate.isObject(session.location) && session.location.directory === ctx.query.directory) ||
                 session.directory === ctx.query.directory,
             )
+            // The Home list asks for `archived: false`; an archived session leaves every list.
+            .filter((session) => decodeSession(session).time?.archived === undefined)
             .filter((session) => {
               if (ctx.query.parentID === undefined) return true
 
@@ -1170,7 +1172,12 @@ function mockHandlers(
               ? Effect.succeed({ data: currentSession(session, config.directory) })
               : Effect.fail(new MockNotFound({ message: "Session not found" }))
           }),
-        sessionRemove: () => noContent,
+        sessionRemove: (ctx) =>
+          Effect.sync(() => {
+            const index = config.sessions.findIndex((item) => item.id === ctx.params.sessionID)
+
+            if (index >= 0) config.sessions.splice(index, 1)
+          }).pipe(Effect.andThen(noContent)),
         sessionShell: () => noContent,
         sessionView: () => noContent,
         sessionForm: (ctx) =>
@@ -1286,10 +1293,16 @@ function mockHandlers(
         },
         sessionRename: (ctx) =>
           Effect.sync(() => {
-            const title = Option.getOrUndefined(decodeSessionRename(ctx.payload))?.title
+            const patch = Option.getOrUndefined(decodeSessionRename(ctx.payload))
             const session = config.sessions.find((item) => item.id === ctx.params.sessionID)
 
-            if (session && title !== undefined) session.title = title
+            if (session && patch?.title !== undefined) session.title = patch.title
+
+            if (session && patch?.archived !== undefined) {
+              const time = { ...decodeSession(session).time }
+              delete time.archived
+              session.time = patch.archived ? { ...time, archived: Date.now() } : time
+            }
           }).pipe(Effect.andThen(noContent)),
         sessionCommand: (ctx) => {
           const recordCommand = config.onCommand
@@ -1512,7 +1525,9 @@ const decodeSessionCreate = Schema.decodeUnknownOption(
   Schema.Struct({ id: lenient(Schema.String), title: lenient(Schema.String), parentID: lenient(Schema.String) }),
 )
 
-const decodeSessionRename = Schema.decodeUnknownOption(Schema.Struct({ title: Schema.String }))
+const decodeSessionRename = Schema.decodeUnknownOption(
+  Schema.Struct({ title: Schema.optionalKey(Schema.String), archived: Schema.optionalKey(Schema.Boolean) }),
+)
 
 const decodeRevertStage = Schema.decodeUnknownOption(Schema.Struct({ messageID: Schema.String }))
 
