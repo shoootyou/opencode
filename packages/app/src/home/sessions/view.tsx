@@ -1,4 +1,5 @@
 import type { SessionInfo } from "@opencode/client/promise"
+import { makeEventListener } from "@solid-primitives/event-listener"
 import { Key } from "@solid-primitives/keyed"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { createStore, type SetStoreFunction } from "solid-js/store"
@@ -17,12 +18,14 @@ import { SessionTabAvatarView } from "@/shell/layout/session-tab-avatar"
 import { sessionLabel } from "@/session/title"
 import { shouldOpenSessionInBackground } from "./open"
 import { createAltHold } from "./alt-hold"
+import { SelectionBar, SelectionBox } from "./selection"
 import "./view.css"
 import {
   HomeSessionStatusController,
   homeSessionSearchKey,
   type HomeSessionGroup,
   type HomeSessionRecord,
+  type HomeSessionsController,
   type OpenSessionOptions,
 } from "./controller"
 
@@ -74,6 +77,7 @@ export type HomeSessionsViewProps = {
   searchNoResultsLabel: string
   titleOpacity: (id: HomeSessionGroup["id"]) => number
   isOpenTab: (record: HomeSessionRecord) => boolean
+  bulk: HomeSessionsController["bulk"]
   onCreateSession: () => void
   onOpenSession: (session: SessionInfo, options?: OpenSessionOptions) => void
   onArchiveSession: (session: SessionInfo) => Promise<void>
@@ -121,6 +125,16 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
     onCleanup(() => clearTimeout(timer))
   })
 
+  createEffect(() => {
+    if (!props.bulk.on()) return
+    makeEventListener(window, "keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+
+      if (rowUI.menu || rowUI.editor || props.searchOpen || props.bulk.progress()) return
+      props.bulk.exit()
+    })
+  })
+
   return (
     <section
       ref={props.onSetHoverTarget}
@@ -137,18 +151,31 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
           hoveredSession={hover.sessionID}
           onHoverSession={(sessionID) => setHover("sessionID", sessionID)}
         />
-        <Show when={props.groups.length > 0 && props.canCreateSession}>
+        <Show when={props.groups.length > 0}>
           <div class="pointer-events-none absolute right-0 top-[68px] z-20 flex md:top-[84px] lg:top-[108px]">
-            <Button
-              data-action="home-new-session"
-              variant="ghost-muted"
-              size="normal"
-              icon="edit"
-              class="pointer-events-auto h-7 px-2 [font-weight:530]"
-              onClick={props.onCreateSession}
-            >
-              {props.language.t("command.session.new")}
-            </Button>
+            <Show when={!props.bulk.on()}>
+              <Button
+                data-action="home-select"
+                variant="ghost-muted"
+                size="normal"
+                class="pointer-events-auto h-7 px-2 [font-weight:530]"
+                onClick={() => props.bulk.enter()}
+              >
+                {props.language.t("home.sessions.select")}
+              </Button>
+            </Show>
+            <Show when={props.canCreateSession}>
+              <Button
+                data-action="home-new-session"
+                variant="ghost-muted"
+                size="normal"
+                icon="edit"
+                class="pointer-events-auto h-7 px-2 [font-weight:530]"
+                onClick={props.onCreateSession}
+              >
+                {props.language.t("command.session.new")}
+              </Button>
+            </Show>
           </div>
         </Show>
       </div>
@@ -222,6 +249,18 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
           </Show>
         </Show>
       </div>
+      <Show when={props.bulk.on()}>
+        <SelectionBar
+          language={props.language}
+          selected={props.bulk.count()}
+          total={props.bulk.total()}
+          progress={props.bulk.progress()}
+          onSelectAll={props.bulk.selectAll}
+          onArchive={props.bulk.archive}
+          onDelete={props.bulk.showDelete}
+          onDone={props.bulk.exit}
+        />
+      </Show>
     </section>
   )
 }
@@ -533,6 +572,7 @@ function HomeSessionRow(
   const location = createMemo(() => props.location(props.record))
   const showProjectName = () => props.showProjectName && props.record.projectName
   const sessionID = () => props.record.session.id
+  const busyTitle = () => props.language.t("home.sessions.bulk.busy")
   const menu = () => (props.rowUI.menu?.id === sessionID() ? props.rowUI.menu : undefined)
   const editor = () => (props.rowUI.editor?.id === sessionID() ? props.rowUI.editor : undefined)
   let longPressTimer: ReturnType<typeof setTimeout> | undefined
@@ -677,15 +717,23 @@ function HomeSessionRow(
         <button
           type="button"
           data-component="home-session-row"
-          aria-haspopup="menu"
-          aria-expanded={!!menu()}
+          role={props.bulk.on() ? "checkbox" : undefined}
+          aria-checked={props.bulk.on() ? props.bulk.isSelected(sessionID()) : undefined}
+          title={props.bulk.on() && !props.bulk.isSelectable(sessionID()) ? busyTitle() : undefined}
+          aria-haspopup={props.bulk.on() ? undefined : "menu"}
+          aria-expanded={props.bulk.on() ? undefined : !!menu()}
           class={`
             flex h-10 min-w-0 w-full flex-1 shrink-0 cursor-default items-center rounded-[6px] border-0
             bg-transparent py-3 ps-1.5 pe-3 md:ps-3 text-start text-v2-text-text-muted [font-weight:530]
             transition-[background-color,color,box-shadow] duration-[120ms] ease-in-out
             hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none
           `}
-          classList={{ "gap-1.5": props.desktop, "gap-2": !props.desktop, "md:pe-10": SHOW_HOME_SESSION_ARCHIVE }}
+          classList={{
+            "gap-1.5": props.desktop,
+            "gap-2": !props.desktop,
+            "md:pe-10": SHOW_HOME_SESSION_ARCHIVE,
+            "opacity-50": props.bulk.on() && !props.bulk.isSelectable(sessionID()),
+          }}
           onMouseDown={(event) => {
             if (event.button === 1) event.preventDefault()
           }}
@@ -741,14 +789,24 @@ function HomeSessionRow(
               }
             }
 
+            if (props.bulk.on()) {
+              event.preventDefault()
+              props.bulk.toggle(sessionID(), event.shiftKey)
+
+              return
+            }
+
             props.onOpenSession(props.record.session, { background: isBackgroundOpen(event) })
           }}
           onAuxClick={(event) => {
-            if (!isBackgroundOpen(event)) return
+            if (props.bulk.on() || !isBackgroundOpen(event)) return
             event.preventDefault()
             props.onOpenSession(props.record.session, { background: true })
           }}
         >
+          <Show when={props.bulk.on()}>
+            <SelectionBox checked={props.bulk.isSelected(sessionID())} />
+          </Show>
           <HomeSessionIndicators server={props.server} isOpenTab={props.isOpenTab} record={props.record} />
           <div
             data-slot="home-session-labels"
@@ -811,6 +869,14 @@ function HomeSessionRow(
             <Menu.Item onSelect={() => void props.onExportSession(props.server, props.record.session)}>
               {props.language.t("common.export")}…
             </Menu.Item>
+            <Show when={!props.bulk.on()}>
+              <Menu.Item
+                disabled={!props.bulk.isSelectable(sessionID())}
+                onSelect={() => props.bulk.enter(sessionID())}
+              >
+                {props.language.t("home.sessions.select")}
+              </Menu.Item>
+            </Show>
             <Menu.Separator />
             <Menu.Item onSelect={() => props.onDeleteSession(props.server, props.record.session)}>
               {props.language.t("common.delete")}…
