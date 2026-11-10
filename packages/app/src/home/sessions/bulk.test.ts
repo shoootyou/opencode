@@ -3,7 +3,9 @@
  * @interface runBulk(ids, op, options?: { isBusy?, proceed?, onProgress? }): Promise<BulkResult>
  * @interface rangeSelect(order, anchor, target, selectable): string[]
  * @interface isSelectable(session, busy): boolean
- * @interface bulkSummary(kind: "archive" | "delete", result, language): { variant: "success" | "error"; title: string }
+ * @interface isArchivedSelectable(session: ArchiveSession, busy: boolean): boolean
+ * @interface openTabCount(ids: readonly string[], tree: (id: string) => readonly string[], hasTab: (id: string) => boolean): number
+ * @interface bulkSummary(kind: "archive" | "delete" | "unarchive", result, language): { variant: "success" | "error"; title: string }
  * @interface skipId(connected: boolean, busy: boolean): boolean; offlineResult(ids: readonly string[]): BulkResult
  * @interface nextSelection(state, input): { ids: string[]; anchor?: string }; pruneSelection(ids, valid): string[]
  * @behavior
@@ -13,6 +15,9 @@
  *   - onProgress(done, total) fires once per processed id (a retry does not add a call).
  *   - rangeSelect is inclusive in `order` (either direction), filtered by `selectable`; no usable anchor -> [target] when target is selectable, else [].
  *   - isSelectable = !busy && !parentID && not archived (epoch zero counts as archived).
+ *   - isArchivedSelectable = !busy && !parentID && archived (epoch zero counts as archived); isSelectable is unchanged.
+ *   - openTabCount = ids.filter(id => tree(id).some(hasTab)).length; tree(id) is expected to include id itself.
+ *   - bulkSummary("unarchive") uses "Unarchived ..." copy (home.sessions.bulk.unarchive.*) with the same done/partial rules.
  *   - bulkSummary: ok+missing only -> success + plural title; any failed -> error + "<Verb> {{done}} of {{total}}, {{failed}} failed".
  *   - skipId(connected, busy) = !connected || busy: the per-id skip used as runBulk's isBusy; a skipped id is failed without op.
  *   - offlineResult(ids) = the all-failed result of a batch that never started: ok [], missing [], failed = fresh copy of ids in order.
@@ -29,9 +34,11 @@ import en from "@/runtime/i18n/en"
 import type { useLanguage } from "@/runtime/i18n/language"
 import {
   bulkSummary,
+  isArchivedSelectable,
   isSelectable,
   nextSelection,
   offlineResult,
+  openTabCount,
   pruneSelection,
   rangeSelect,
   runBulk,
@@ -519,6 +526,103 @@ describe("isSelectable", () => {
   })
 })
 
+describe("isArchivedSelectable", () => {
+  const session = (time: { archived?: number | null }, parentID?: string | null) => ({
+    id: "ses_x",
+    parentID,
+    location: { directory: "/repo" },
+    time,
+  })
+
+  test("accepts an idle, root, archived session", () => {
+    expect(isArchivedSelectable(session({ archived: 1_700_000_000_000 }), false)).toBe(true)
+  })
+
+  test("accepts an epoch-zero archive timestamp", () => {
+    expect(isArchivedSelectable(session({ archived: 0 }), false)).toBe(true)
+  })
+
+  test("rejects a busy session", () => {
+    expect(isArchivedSelectable(session({ archived: 1_700_000_000_000 }), true)).toBe(false)
+  })
+
+  test("rejects a child session", () => {
+    expect(isArchivedSelectable(session({ archived: 1_700_000_000_000 }, "ses_parent"), false)).toBe(false)
+  })
+
+  test("rejects a session that is not archived", () => {
+    expect(isArchivedSelectable(session({}), false)).toBe(false)
+    expect(isArchivedSelectable(session({ archived: null }), false)).toBe(false)
+    expect(isArchivedSelectable(session({ archived: undefined }), false)).toBe(false)
+  })
+
+  test("treats a null, undefined or empty parent as a root", () => {
+    for (const parentID of [null, undefined, ""]) {
+      expect(isArchivedSelectable(session({ archived: 1 }, parentID), false)).toBe(true)
+    }
+  })
+
+  test("is the archived counterpart of isSelectable for an idle root", () => {
+    const archived = session({ archived: 1 })
+    const active = session({})
+
+    expect(isArchivedSelectable(archived, false)).toBe(!isSelectable(archived, false))
+    expect(isArchivedSelectable(active, false)).toBe(!isSelectable(active, false))
+  })
+})
+
+describe("openTabCount", () => {
+  const trees = new Map([
+    ["ses_a", ["ses_a", "ses_a_child"]],
+    ["ses_b", ["ses_b", "ses_b_child"]],
+    ["ses_c", ["ses_c"]],
+  ])
+
+  const tree = (id: string) => trees.get(id) ?? []
+
+  test("is zero for no ids", () => {
+    expect(openTabCount([], tree, () => true)).toBe(0)
+  })
+
+  test("is zero when no tree has a tab", () => {
+    expect(openTabCount(["ses_a", "ses_b"], tree, () => false)).toBe(0)
+  })
+
+  test("counts a root whose tab is on the root itself", () => {
+    expect(openTabCount(["ses_c"], tree, (id) => id === "ses_c")).toBe(1)
+  })
+
+  test("counts a root whose tab is only on a child", () => {
+    expect(openTabCount(["ses_a"], tree, (id) => id === "ses_a_child")).toBe(1)
+  })
+
+  test("counts only the roots that have a tab", () => {
+    expect(openTabCount(["ses_a", "ses_b"], tree, (id) => id === "ses_b_child")).toBe(1)
+  })
+
+  test("counts a root once however many tabs its tree has", () => {
+    expect(openTabCount(["ses_a"], tree, () => true)).toBe(1)
+  })
+
+  test("never counts a root whose tree function lacks the id", () => {
+    expect(openTabCount(["ses_unknown"], tree, () => true)).toBe(0)
+    expect(
+      openTabCount(
+        ["ses_a"],
+        () => ["ses_other"],
+        (id) => id === "ses_a",
+      ),
+    ).toBe(0)
+  })
+
+  test("asks hasTab about tree members only", () => {
+    const asked: string[] = []
+
+    openTabCount(["ses_c"], tree, (id) => (asked.push(id), false))
+    expect(asked).toEqual(["ses_c"])
+  })
+})
+
 describe("bulkSummary", () => {
   test("reports one archived session in the singular", () => {
     expect(bulkSummary("archive", result({ ok: ["ses_a"] }), language)).toEqual({
@@ -572,6 +676,56 @@ describe("bulkSummary", () => {
       variant: "error",
       title: "Archived 0 of 2, 2 failed",
     })
+  })
+
+  test("reports one unarchived session in the singular", () => {
+    expect(bulkSummary("unarchive", result({ ok: ["ses_a"] }), language)).toEqual({
+      variant: "success",
+      title: "Unarchived 1 session",
+    })
+  })
+
+  test("reports several unarchived sessions in the plural", () => {
+    expect(bulkSummary("unarchive", result({ ok: ["ses_a", "ses_b", "ses_c"] }), language)).toEqual({
+      variant: "success",
+      title: "Unarchived 3 sessions",
+    })
+  })
+
+  test("counts missing sessions as done for an unarchive when nothing failed", () => {
+    expect(bulkSummary("unarchive", result({ ok: ["ses_a"], missing: ["ses_b"] }), language)).toEqual({
+      variant: "success",
+      title: "Unarchived 2 sessions",
+    })
+    expect(bulkSummary("unarchive", result({ missing: ["ses_b"] }), language)).toEqual({
+      variant: "success",
+      title: "Unarchived 1 session",
+    })
+  })
+
+  test("reports a partial unarchive as an error with exact counts", () => {
+    const ok = Array.from({ length: 5 }, (_, index) => `ses_ok_${index}`)
+
+    expect(
+      bulkSummary("unarchive", result({ ok, missing: ["ses_gone"], failed: ["ses_f1", "ses_f2"] }), language),
+    ).toEqual({ variant: "error", title: "Unarchived 6 of 8, 2 failed" })
+  })
+
+  test("reports a fully failed or offline unarchive as an error with zero done", () => {
+    const ids = ["ses_a", "ses_b", "ses_c"]
+
+    expect(ids.length).toBeGreaterThan(0)
+    expect(bulkSummary("unarchive", offlineResult(ids), language)).toEqual({
+      variant: "error",
+      title: "Unarchived 0 of 3, 3 failed",
+    })
+  })
+
+  test("keeps the archive and delete copy distinct from unarchive for the same result", () => {
+    const same = result({ ok: ["ses_a", "ses_b"] })
+    const titles = (["archive", "delete", "unarchive"] as const).map((kind) => bulkSummary(kind, same, language).title)
+
+    expect(titles).toEqual(["Archived 2 sessions", "Deleted 2 sessions", "Unarchived 2 sessions"])
   })
 })
 

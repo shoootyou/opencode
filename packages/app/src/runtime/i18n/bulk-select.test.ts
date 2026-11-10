@@ -1,6 +1,6 @@
 /**
  * @spec-handoff
- * @interface en dictionary keys home.sessions.select and home.sessions.bulk.* (plural bases carry .one and .other)
+ * @interface en dictionary keys home.sessions.select, home.sessions.bulk.* (plural bases carry .one and .other) and dialog.archivedSessions.bulk.description
  * @behavior
  *   - The English dictionary defines the bulk-select copy below; other locales are not edited and fall back to English.
  *   - Every plural base defines both .one and .other, so language.plural resolves it.
@@ -25,6 +25,11 @@ const copy = {
   "home.sessions.bulk.archive.done.one": "Archived {{count}} session",
   "home.sessions.bulk.archive.done.other": "Archived {{count}} sessions",
   "home.sessions.bulk.archive.partial": "Archived {{done}} of {{total}}, {{failed}} failed",
+  "home.sessions.bulk.unarchive.done.one": "Unarchived {{count}} session",
+  "home.sessions.bulk.unarchive.done.other": "Unarchived {{count}} sessions",
+  "home.sessions.bulk.unarchive.partial": "Unarchived {{done}} of {{total}}, {{failed}} failed",
+  "dialog.archivedSessions.bulk.description":
+    "Select sessions to unarchive or delete them. Search covers loaded sessions only.",
   "home.sessions.bulk.delete.title.one": "Delete {{count}} session?",
   "home.sessions.bulk.delete.title.other": "Delete {{count}} sessions?",
   "home.sessions.bulk.delete.tabs.one": "{{count}} open tab will be closed",
@@ -39,6 +44,7 @@ const copy = {
 const pluralBases = [
   "home.sessions.bulk.selected",
   "home.sessions.bulk.archive.done",
+  "home.sessions.bulk.unarchive.done",
   "home.sessions.bulk.delete.title",
   "home.sessions.bulk.delete.description",
   "home.sessions.bulk.delete.tabs",
@@ -60,12 +66,13 @@ test.each(pluralBases.filter((base) => !base.endsWith("description")))("%s shows
   expect(dictionary[`${base}.other`]).toContain("{{count}}")
 })
 
-test.each(["home.sessions.bulk.archive.partial", "home.sessions.bulk.delete.partial"])(
-  "%s keeps the done, total and failed slots",
-  (key) => {
-    for (const slot of ["{{done}}", "{{total}}", "{{failed}}"]) expect(dictionary[key]).toContain(slot)
-  },
-)
+test.each([
+  "home.sessions.bulk.archive.partial",
+  "home.sessions.bulk.unarchive.partial",
+  "home.sessions.bulk.delete.partial",
+])("%s keeps the done, total and failed slots", (key) => {
+  for (const slot of ["{{done}}", "{{total}}", "{{failed}}"]) expect(dictionary[key]).toContain(slot)
+})
 
 test.each(["one", "other"])("delete description (.%s) mentions sub-sessions are deleted and forks are not", (form) => {
   const text = dictionary[`home.sessions.bulk.delete.description.${form}`]

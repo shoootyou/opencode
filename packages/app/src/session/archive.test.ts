@@ -2,6 +2,7 @@
  * @spec-handoff
  * @interface createSessionArchiveActions(deps): ArchiveActions; isArchivedSession(session): boolean
  * @interface ArchiveActions.archiveSessionQuiet(target: ArchiveTarget): Promise<ArchiveAttempt>
+ * @interface ArchiveActions.unarchiveSessionQuiet(target: ArchiveTarget): Promise<ArchiveAttempt>
  * @interface type ArchiveAttempt = { status: "archived" } | { status: "pending" } | { status: "failed"; error: unknown }
  * @behavior
  *   - PATCHes a captured server/session with archived:boolean, then canonically hydrates it.
@@ -9,6 +10,8 @@
  *   - Exposes pending transitions to the reactive shell bridge.
  *   - archiveSessionQuiet(target): Promise<ArchiveAttempt> archives like setSessionArchive but never toasts and reports
  *     { status: "archived" | "pending" | "failed" (with the same error object) } instead of a boolean.
+ *   - unarchiveSessionQuiet(target): Promise<ArchiveAttempt> is the same quiet flow sending archived:false; it shares the
+ *     pending guard and the result shape with archiveSessionQuiet and setSessionArchive.
  *   - Does not own retired archive-index reconnect scheduling.
  * @edge-cases
  *   - Epoch zero is archived; null and undefined are active; callers never send archive timestamps.
@@ -231,6 +234,177 @@ test("archiveSessionQuiet keeps error text only in the error field and out of to
   })
 
   const result = await actions.archiveSessionQuiet(target)
+
+  expect(result).toMatchObject({ status: "failed", error })
+  expect(JSON.stringify({ ...result, error: undefined })).not.toContain(sentinel)
+  expect(JSON.stringify(toasts)).not.toContain(sentinel)
+  expect(toasts).toEqual([])
+})
+
+test("unarchiveSessionQuiet sends archived:false once without toasting", async () => {
+  const requests: unknown[] = []
+  const toasts: unknown[] = []
+
+  const actions = createSessionArchiveActions({
+    update: async (x) => void requests.push(x),
+    sync: async () => {},
+    toast: (n) => toasts.push(n),
+  })
+
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "archived" })
+  expect(requests).toEqual([{ ...target, archived: false }])
+  expect(toasts).toEqual([])
+})
+
+test("unarchiveSessionQuiet hydrates the target after the update", async () => {
+  const calls: string[] = []
+
+  const actions = createSessionArchiveActions({
+    update: async (x) => void calls.push(`update:${x.archived}`),
+    sync: async (x) => void calls.push(`sync:${x.sessionID}`),
+    toast: () => {},
+  })
+
+  await actions.unarchiveSessionQuiet(target)
+  expect(calls).toEqual(["update:false", "sync:x"])
+})
+
+test("unarchiveSessionQuiet returns pending without sending while the target is in flight, then releases", async () => {
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => (release = resolve))
+  let updates = 0
+
+  const actions = createSessionArchiveActions({
+    update: async () => {
+      updates++
+
+      if (updates === 1) await wait
+    },
+    sync: async () => {},
+    toast: () => {},
+  })
+
+  const first = actions.unarchiveSessionQuiet(target)
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "pending" })
+  expect(updates).toBe(1)
+  release()
+  expect(await first).toEqual({ status: "archived" })
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "archived" })
+  expect(updates).toBe(2)
+})
+
+test("unarchiveSessionQuiet shares the pending guard with setSessionArchive and archiveSessionQuiet", async () => {
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => (release = resolve))
+  let updates = 0
+
+  const actions = createSessionArchiveActions({
+    update: async () => {
+      updates++
+
+      await wait
+    },
+    sync: async () => {},
+    toast: () => {},
+  })
+
+  const first = actions.setSessionArchive({ ...target, archived: true })
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "pending" })
+  expect(await actions.archiveSessionQuiet(target)).toEqual({ status: "pending" })
+  expect(updates).toBe(1)
+  release()
+  expect(await first).toBe(true)
+
+  const second = actions.unarchiveSessionQuiet(target)
+  expect(actions.isPending(target)).toBe(true)
+  expect(await actions.setSessionArchive({ ...target, archived: false })).toBe(false)
+  release()
+  expect(await second).toEqual({ status: "archived" })
+})
+
+test("unarchiveSessionQuiet does not block a different target", async () => {
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => (release = resolve))
+  const requests: string[] = []
+
+  const actions = createSessionArchiveActions({
+    update: async (x) => {
+      requests.push(`${x.server}:${x.sessionID}`)
+
+      if (x.server === "s" && x.sessionID === "x") await wait
+    },
+    sync: async () => {},
+    toast: () => {},
+  })
+
+  const first = actions.unarchiveSessionQuiet(target)
+  expect(await actions.unarchiveSessionQuiet({ server: "s", sessionID: "y" })).toEqual({ status: "archived" })
+  expect(await actions.unarchiveSessionQuiet({ server: "t", sessionID: "x" })).toEqual({ status: "archived" })
+  release()
+  await first
+  expect(requests).toEqual(["s:x", "s:y", "t:x"])
+})
+
+test("unarchiveSessionQuiet returns the same error object on update failure, without toast, and releases pending", async () => {
+  const error = new Error("offline")
+  const toasts: unknown[] = []
+  let attempts = 0
+
+  const actions = createSessionArchiveActions({
+    update: async () => {
+      attempts++
+
+      if (attempts === 1) throw error
+    },
+    sync: async () => {
+      throw new Error("sync must not run after a failed update")
+    },
+    toast: (n) => toasts.push(n),
+  })
+
+  const result = await actions.unarchiveSessionQuiet(target)
+
+  expect(result.status).toBe("failed")
+  expect(result.status === "failed" && result.error).toBe(error)
+  expect(toasts).toEqual([])
+  expect(actions.isPending(target)).toBe(false)
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "archived" })
+})
+
+test("unarchiveSessionQuiet still reports archived when the refresh fails, without toast", async () => {
+  const toasts: unknown[] = []
+  let syncs = 0
+
+  const actions = createSessionArchiveActions({
+    update: async () => {},
+    sync: async () => {
+      syncs++
+
+      throw new Error("refresh")
+    },
+    toast: (n) => toasts.push(n),
+  })
+
+  expect(await actions.unarchiveSessionQuiet(target)).toEqual({ status: "archived" })
+  expect(syncs).toBe(1)
+  expect(toasts).toEqual([])
+  expect(actions.isPending(target)).toBe(false)
+})
+
+test("unarchiveSessionQuiet keeps error text only in the error field and out of toasts", async () => {
+  const sentinel = "SECRET-5d1e84b7"
+  const error = new Error(`request failed: ${sentinel}`)
+  const toasts: unknown[] = []
+
+  const actions = createSessionArchiveActions({
+    update: async () => {
+      throw error
+    },
+    sync: async () => {},
+    toast: (n) => toasts.push(n),
+  })
+
+  const result = await actions.unarchiveSessionQuiet(target)
 
   expect(result).toMatchObject({ status: "failed", error })
   expect(JSON.stringify({ ...result, error: undefined })).not.toContain(sentinel)
