@@ -1,17 +1,25 @@
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js"
+import { createStore, produce } from "solid-js/store"
+import { useQueryClient } from "@tanstack/solid-query"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
 import { List } from "@opencode/ui/list"
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
+import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useTabs } from "@/shell/tabs/tabs"
+import { sessionIDHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
 import { type ArchiveSession } from "@/session/archive"
 import { sessionBusy } from "@/shell/layout/project-avatar-state"
+import { sessionTreeIDs } from "@/session/requests/session-request-tree"
+import { showToast } from "@/shell/notifications/toast"
+import { bulkSummary, isArchivedSelectable, openTabCount, type BulkResult } from "@/home/sessions/bulk"
+import { createSelection, SelectionBar, SelectionBox } from "@/home/sessions/selection"
+import { notifySessionTabsRemoved } from "./session-events"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
-import { selectArchivedSessionsView } from "./archived-sessions-view"
+import { rowAria, selectArchivedSessionsView } from "./archived-sessions-view"
 
 // oxlint-disable anti-slop/require-readable-spacing -- Adjacent native-event guards define one demand-token transition.
 
@@ -79,6 +87,195 @@ function ArchivedSessionsDialog(props: { server: string }) {
     return model.restoringID()
   }
 
+  const bulkRunning = () => {
+    version()
+
+    return model.bulkRunning()
+  }
+
+  // A single restore and a batch exclude each other and every load.
+  const busy = () => restoringID() !== undefined || bulkRunning()
+
+  const queryClient = useQueryClient()
+  // SAFETY: same registered server key the context above was resolved with.
+  const server = props.server as ServerConnection.Key
+  const selection = createSelection()
+  const [bulk, setBulk] = createStore<{ progress?: { done: number; total: number } }>({})
+  // The rows List actually renders: model.search and List disagree on some filters, and only rendered rows are selectable.
+  const [rendered, setRendered] = createStore<Record<string, ArchiveSession>>({})
+  // A batch the user confirmed still runs after the dialog closes, but it must not write to the disposed selection.
+  let alive = true
+  onCleanup(() => (alive = false))
+
+  const isBusy = (id: string) => [id, ...ctx.data.session.family(id)].some((item) => sessionBusy(ctx.data, item))
+
+  const selectable = createMemo(
+    () =>
+      new Set(
+        Object.values(rendered)
+          .filter((session) => isArchivedSelectable(session, isBusy(session.id)))
+          .map((session) => session.id),
+      ),
+  )
+
+  // Rows that leave, get filtered out or start working drop out of the selection; a running batch owns it.
+  createEffect(() => {
+    const valid = selectable()
+
+    if (bulk.progress) return
+
+    untrack(() => {
+      if (selection.store.ids.some((id) => !valid.has(id))) selection.prune(valid)
+    })
+  })
+
+  const focusSearch = () =>
+    queueMicrotask(() => listRoot?.querySelector<HTMLInputElement>('[data-slot="list-search"] input')?.focus())
+
+  const enterSelection = () => {
+    selection.enter()
+    focusSearch()
+  }
+
+  const exitSelection = () => {
+    selection.exit()
+    focusSearch()
+  }
+
+  const finish = (result: BulkResult) => {
+    // Failures stay selected so a retry is one click away; the mode closes only when everything worked.
+    if (result.failed.length === 0) exitSelection()
+    else selection.selectAll(result.failed)
+  }
+
+  // Exactly one toast per batch; server error text never reaches it.
+  const showSummary = (kind: "unarchive" | "delete", result: BulkResult) => {
+    const summary = bulkSummary(kind, result, language)
+
+    showToast({ variant: summary.variant, title: summary.title })
+  }
+
+  const onProgress = (done: number, total: number) => setBulk("progress", { done, total })
+
+  const bulkUnarchive = async (ids: string[]) => {
+    if (ids.length === 0 || bulk.progress) return
+    setBulk("progress", { done: 0, total: ids.length })
+
+    try {
+      const result = await model.restoreMany(ids, { onProgress })
+
+      if (!result) return
+      const conn = global.servers.list().find((item) => ServerConnection.key(item) === server)
+
+      // Home merges the store, but a swallowed sync failure would leave its cached index without the row.
+      if (result.ok.length > 0 && conn)
+        void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
+      showSummary("unarchive", result)
+
+      // Only the selection belongs to the view; the toast and cache update report a batch that already ran.
+      if (alive) finish(result)
+    } finally {
+      setBulk("progress", undefined)
+    }
+  }
+
+  const bulkDelete = async (ids: string[], expected: ReturnType<typeof global.serverCtx>) => {
+    // The dialog was opened for another server context; confirming must not aim its ids at this one.
+    if (ids.length === 0 || bulk.progress || global.serverCtx(server) !== expected) return
+    // The list hides a session once it is removed, so the trees are read before the first remove.
+    const trees = new Map(ids.map((id) => [id, sessionTreeIDs(ctx.data.session.list(), id)]))
+    const directory = model.search("").find((row) => row.id === ids[0])?.location.directory ?? ""
+    setBulk("progress", { done: 0, total: ids.length })
+
+    try {
+      const result = await model.removeMany(ids, { onProgress })
+
+      if (!result) return
+      const gone = new Set([...result.ok, ...result.missing])
+
+      notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
+      showSummary("delete", result)
+
+      if (alive) finish(result)
+    } finally {
+      setBulk("progress", undefined)
+    }
+  }
+
+  function ArchivedDeleteDialog(deleting: {
+    ids: string[]
+    tabs: number
+    expected: ReturnType<typeof global.serverCtx>
+  }) {
+    // The dialog stays mounted through its exit animation, so a second activation must not rerun the batch.
+    const [confirmed, setConfirmed] = createSignal(false)
+
+    const confirm = async () => {
+      if (confirmed()) return
+      setConfirmed(true)
+      dialog.close()
+      await bulkDelete(deleting.ids, deleting.expected)
+    }
+
+    return (
+      <Dialog fit>
+        <DialogHeader hideClose>
+          <DialogTitleGroup
+            title={language.plural("home.sessions.bulk.delete.title", deleting.ids.length)}
+            description={
+              <>
+                <span class="block">
+                  {language.plural("home.sessions.bulk.delete.description", deleting.ids.length)}
+                </span>
+                <Show when={deleting.tabs > 0}>
+                  <span class="block">{language.plural("home.sessions.bulk.delete.tabs", deleting.tabs)}</span>
+                </Show>
+              </>
+            }
+          />
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" autofocus onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </Button>
+          <Button variant="danger" disabled={confirmed()} onClick={confirm}>
+            {language.plural("home.sessions.bulk.delete.button", deleting.ids.length)}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    )
+  }
+
+  const showDelete = () => {
+    const ids = [...selection.store.ids]
+
+    if (ids.length === 0 || busy()) return
+    // Snapshot at open: the count describes the selection the user is confirming.
+    const tabsOpen = openTabCount(
+      ids,
+      (id) => sessionTreeIDs(ctx.data.session.list(), id),
+      (item) => sessionIDHasOpenTab(tabs.store, server, item),
+    )
+    const expected = global.serverCtx(server)
+
+    // push keeps this dialog and its model mounted; show would dispose the whole stack.
+    void dialog.push(() => <ArchivedDeleteDialog ids={ids} tabs={tabsOpen} expected={expected} />)
+  }
+
+  const selectButton = (
+    <Show
+      when={(() => {
+        const current = state()
+
+        return !selection.store.on && current.status === "ready" && current.rows.length > 0
+      })()}
+    >
+      <Button variant="ghost" data-action="archived-select" onClick={enterSelection}>
+        {language.t("home.sessions.select")}
+      </Button>
+    </Show>
+  )
+
   const view = () => {
     const current = state()
 
@@ -90,6 +287,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
       continuationError: current.status === "ready" ? current.continuationError : undefined,
       continuationPending: current.status === "ready" ? current.continuationPending : false,
       restoringID: restoringID(),
+      bulkRunning: bulkRunning(),
     })
   }
 
@@ -180,7 +378,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
     return current.status === "error" || (current.status === "ready" && !!current.nextCursor)
   }
 
-  const actionPending = () => continueLoading() || restoringID() !== undefined
+  const actionPending = () => continueLoading() || busy()
   const continuationError = () => {
     const current = state()
     return current.status === "ready" ? current.continuationError : undefined
@@ -226,7 +424,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
       !current.nextCursor ||
       current.continuationPending ||
       current.continuationError ||
-      restoringID() ||
+      busy() ||
       !scroller
     )
       return
@@ -280,10 +478,30 @@ function ArchivedSessionsDialog(props: { server: string }) {
       <DialogHeader>
         <DialogTitleGroup
           title={language.t("dialog.archivedSessions.title")}
-          description={language.t("dialog.archivedSessions.loadedDescription")}
+          description={language.t(
+            selection.store.on
+              ? "dialog.archivedSessions.bulk.description"
+              : "dialog.archivedSessions.loadedDescription",
+          )}
         />
       </DialogHeader>
       <DialogBody class="flex min-h-0 flex-1 flex-col">
+        {/* First in DOM and tab order, drawn last. */}
+        <Show when={selection.store.on}>
+          <div class="order-last">
+            <SelectionBar
+              language={language}
+              selected={selection.store.ids.length}
+              total={selectable().size}
+              progress={bulk.progress}
+              primaryLabel={language.t("common.unarchive")}
+              onSelectAll={() => selection.selectAll([...selectable()])}
+              onArchive={() => void bulkUnarchive([...selection.store.ids])}
+              onDelete={showDelete}
+              onDone={exitSelection}
+            />
+          </div>
+        </Show>
         <div
           class="flex min-h-0 flex-1 flex-col"
           ref={(element) => {
@@ -312,7 +530,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
             }}
             key={(session) => session.id}
             filterKeys={["title", "location.directory"]}
-            search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}
+            search={{ placeholder: language.t("common.search.placeholder"), autofocus: true, action: selectButton }}
             emptyMessage={listMessage()}
             onFilter={(value) => {
               clearKeyboardDemand()
@@ -320,15 +538,49 @@ function ArchivedSessionsDialog(props: { server: string }) {
             }}
             onScroll={onScroll}
             preserveActiveKey
+            itemWrapper={(session, node) => {
+              setRendered(session.id, session)
+              onCleanup(() => setRendered(produce((rows) => void delete rows[session.id])))
+
+              if (node instanceof HTMLElement)
+                createEffect(() => {
+                  const aria = rowAria({
+                    on: selection.store.on,
+                    selected: selection.store.ids.includes(session.id),
+                    selectable: selectable().has(session.id),
+                  })
+
+                  for (const name of ["role", "aria-checked", "aria-disabled"] as const)
+                    if (aria[name] === undefined) node.removeAttribute(name)
+                    else node.setAttribute(name, aria[name])
+                })
+
+              return node
+            }}
             onSelect={(session) => {
-              if (session) void model.restore(session.id)
+              if (!session) return
+
+              if (!selection.store.on) return void model.restore(session.id)
+              if (bulk.progress) return
+              selection.toggle(session.id, false, Object.keys(rendered), (id) => selectable().has(id))
             }}
           >
             {(session) => {
               const archived = session.time.archived ?? 0
 
               return (
-                <span class="flex w-full min-w-0 items-center gap-2 text-start">
+                <span
+                  class="flex w-full min-w-0 items-center gap-2 text-start"
+                  classList={{ "opacity-50": selection.store.on && !selectable().has(session.id) }}
+                  title={
+                    selection.store.on && !selectable().has(session.id)
+                      ? language.t("home.sessions.bulk.busy")
+                      : undefined
+                  }
+                >
+                  <Show when={selection.store.on}>
+                    <SelectionBox checked={selection.store.ids.includes(session.id)} />
+                  </Show>
                   <Icon name="bubble-5" size="small" class="shrink-0 text-v2-text-text-muted" aria-hidden="true" />
                   <span class="flex min-w-0 flex-1 flex-col md:flex-row md:items-center md:gap-2">
                     <span class="min-w-0 shrink truncate leading-4 text-v2-text-text-base [font-weight:530] md:max-w-[50%]">

@@ -44,7 +44,9 @@ export function SelectionBar(props: {
   total: number
   progress: { done: number; total: number } | undefined
   onSelectAll: () => void
+  // The primary action (Archive on Home); `primaryLabel` lets another list name it differently.
   onArchive: () => void
+  primaryLabel?: string
   onDelete: () => void
   onDone: () => void
 }) {
@@ -74,7 +76,7 @@ export function SelectionBar(props: {
         {props.language.t("home.sessions.bulk.selectAll")}
       </Button>
       <Button variant="neutral" size="normal" disabled={empty()} onClick={props.onArchive}>
-        {props.language.t("common.archive")}
+        {props.primaryLabel ?? props.language.t("common.archive")}
       </Button>
       <Button variant="ghost-danger" size="normal" disabled={empty()} onClick={props.onDelete}>
         {props.language.t("common.delete")}
