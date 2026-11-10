@@ -13,9 +13,8 @@ import { sessionIDHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
 import { isArchivedSession, type ArchiveSession } from "@/session/archive"
 import { sessionBusy } from "@/shell/layout/project-avatar-state"
-import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { showToast } from "@/shell/notifications/toast"
-import { bulkSummary, isArchivedSelectable, openTabCount, type BulkResult } from "@/home/sessions/bulk"
+import { bulkSummary, isArchivedSelectable, openTabCount, tabIdsToClose, type BulkResult } from "@/home/sessions/bulk"
 import { createSelection, SelectionBar, SelectionBox } from "@/home/sessions/selection"
 import { notifySessionTabsRemoved } from "./session-events"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
@@ -151,7 +150,11 @@ function ArchivedSessionsDialog(props: { server: string }) {
   const finish = (result: BulkResult) => {
     // Failures stay selected so a retry is one click away; the mode closes only when everything worked.
     if (result.failed.length === 0) exitSelection()
-    else selection.selectAll(result.failed)
+    else {
+      selection.selectAll(result.failed)
+      // The confirm layer and the disabled bar leave focus on the body otherwise.
+      focusSearch()
+    }
   }
 
   // Exactly one toast per batch; server error text never reaches it.
@@ -185,11 +188,14 @@ function ArchivedSessionsDialog(props: { server: string }) {
     }
   }
 
-  const bulkDelete = async (ids: string[], expected: ReturnType<typeof global.serverCtx>) => {
+  // The tree always includes the root; children are known only if they were synced, and no sync is forced here.
+  const treeOf = (id: string) => [id, ...ctx.data.session.family(id)]
+
+  const bulkDelete = async (ids: string[], expected: NonNullable<ReturnType<typeof global.serverCtx>>) => {
     // The dialog was opened for another server context; confirming must not aim its ids at this one.
     if (ids.length === 0 || bulk.progress || global.serverCtx(server) !== expected) return
     // The list hides a session once it is removed, so the trees are read before the first remove.
-    const trees = new Map(ids.map((id) => [id, sessionTreeIDs(ctx.data.session.list(), id)]))
+    const trees = new Map(ids.map((id) => [id, treeOf(id)]))
     const directory = model.search("").find((row) => row.id === ids[0])?.location.directory ?? ""
     setBulk("progress", { done: 0, total: ids.length })
 
@@ -197,9 +203,8 @@ function ArchivedSessionsDialog(props: { server: string }) {
       const result = await model.removeMany(ids, { onProgress })
 
       if (!result) return
-      const gone = new Set([...result.ok, ...result.missing])
 
-      notifySessionTabsRemoved({ server, directory, sessionIDs: [...gone].flatMap((id) => trees.get(id) ?? [id]) })
+      notifySessionTabsRemoved({ server, directory, sessionIDs: tabIdsToClose(result, trees) })
       showSummary("delete", result)
 
       if (alive) finish(result)
@@ -211,7 +216,7 @@ function ArchivedSessionsDialog(props: { server: string }) {
   function ArchivedDeleteDialog(deleting: {
     ids: string[]
     tabs: number
-    expected: ReturnType<typeof global.serverCtx>
+    expected: NonNullable<ReturnType<typeof global.serverCtx>>
   }) {
     // The dialog stays mounted through its exit animation, so a second activation must not rerun the batch.
     const [confirmed, setConfirmed] = createSignal(false)
@@ -257,15 +262,10 @@ function ArchivedSessionsDialog(props: { server: string }) {
 
     if (ids.length === 0 || busy()) return
     // Snapshot at open: the count describes the selection the user is confirming.
-    const tabsOpen = openTabCount(
-      ids,
-      (id) => sessionTreeIDs(ctx.data.session.list(), id),
-      (item) => sessionIDHasOpenTab(tabs.store, server, item),
-    )
-    const expected = global.serverCtx(server)
+    const tabsOpen = openTabCount(ids, treeOf, (item) => sessionIDHasOpenTab(tabs.store, server, item))
 
     // push keeps this dialog and its model mounted; show would dispose the whole stack.
-    void dialog.push(() => <ArchivedDeleteDialog ids={ids} tabs={tabsOpen} expected={expected} />)
+    void dialog.push(() => <ArchivedDeleteDialog ids={ids} tabs={tabsOpen} expected={ctx} />)
   }
 
   const selectButton = (
