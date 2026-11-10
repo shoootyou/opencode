@@ -11,7 +11,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import { sessionIDHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
-import { type ArchiveSession } from "@/session/archive"
+import { isArchivedSession, type ArchiveSession } from "@/session/archive"
 import { sessionBusy } from "@/shell/layout/project-avatar-state"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { showToast } from "@/shell/notifications/toast"
@@ -67,6 +67,12 @@ function ArchivedSessionsDialog(props: { server: string }) {
     remove: (sessionID) => ctx.data.session.remove(sessionID),
     connected: () => ctx.sdk.connection.status() === "connected",
     isBusy: (sessionID) => [sessionID, ...ctx.data.session.family(sessionID)].some((id) => sessionBusy(ctx.data, id)),
+    // Only a session the store positively knows is active counts; an unsynced one is still treated as archived.
+    unarchivedElsewhere: (sessionID) => {
+      const info = ctx.data.session.get(sessionID)
+
+      return info !== undefined && !isArchivedSession(info)
+    },
     // SAFETY: same captured key as above; a replaced context makes the batch fail closed.
     active: () => global.serverCtx(props.server as never) === ctx,
   })

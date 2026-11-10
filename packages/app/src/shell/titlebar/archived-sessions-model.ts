@@ -96,6 +96,7 @@ export function createArchivedSessionsModel<Tab>(
     remove: (sessionID: string) => Promise<void>
     connected: () => boolean
     isBusy: (sessionID: string) => boolean
+    unarchivedElsewhere: (sessionID: string) => boolean
     active: () => boolean
   }>,
 ): ArchivedSessionsModel {
@@ -210,6 +211,7 @@ export function createArchivedSessionsModel<Tab>(
     input: readonly string[],
     op: (id: string) => Promise<void>,
     options: ManyOptions = {},
+    skip: (id: string) => boolean = deps.isBusy,
   ): Promise<BulkResult | undefined> => {
     const ids = [...new Set(input)]
 
@@ -223,7 +225,7 @@ export function createArchivedSessionsModel<Tab>(
 
     try {
       const result = await runBulk(ids, op, {
-        isBusy: (id) => skipId(deps.connected(), deps.isBusy(id)),
+        isBusy: (id) => skipId(deps.connected(), skip(id)),
         proceed: deps.active,
         onProgress: options.onProgress,
       })
@@ -266,7 +268,14 @@ export function createArchivedSessionsModel<Tab>(
         },
         options,
       ),
-    removeMany: (ids, options) => runMany(ids, (sessionID) => deps.remove(sessionID), options),
+    // Another client may have unarchived a listed session; deleting it would be irreversible.
+    removeMany: (ids, options) =>
+      runMany(
+        ids,
+        (sessionID) => deps.remove(sessionID),
+        options,
+        (id) => deps.isBusy(id) || deps.unarchivedElsewhere(id),
+      ),
     async restore(sessionID) {
       if (disposed || busy() || value.status !== "ready") return false
       const session = value.rows.find((item) => item.id === sessionID)

@@ -129,6 +129,11 @@ export function nextSelection(
   return { ids, anchor: input.id }
 }
 
+/** Session ids whose tabs close after a delete: the trees of every id the server no longer has. */
+export function tabIdsToClose(result: BulkResult, trees: ReadonlyMap<string, readonly string[]>): string[] {
+  return [...new Set([...result.ok, ...result.missing].flatMap((id) => trees.get(id) ?? [id]))]
+}
+
 /** The per-id skip for runBulk: nothing is attempted on a dead connection or a busy session. */
 export function skipId(connected: boolean, busy: boolean): boolean {
   return !connected || busy
