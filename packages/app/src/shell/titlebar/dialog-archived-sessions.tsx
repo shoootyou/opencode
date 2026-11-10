@@ -9,6 +9,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
 import { type ArchiveSession } from "@/session/archive"
+import { sessionBusy } from "@/shell/layout/project-avatar-state"
 import { createArchivedSessionsModel } from "./archived-sessions-model"
 import { selectArchivedSessionsView } from "./archived-sessions-view"
 
@@ -54,6 +55,12 @@ function ArchivedSessionsDialog(props: { server: string }) {
     addTab: ({ server, sessionId }) => tabs.addSessionTab({ server: server as never, sessionId }),
     selectTab: tabs.select,
     close: () => dialog.close(),
+    unarchive: global.sessionArchive.unarchiveSessionQuiet,
+    remove: (sessionID) => ctx.data.session.remove(sessionID),
+    connected: () => ctx.sdk.connection.status() === "connected",
+    isBusy: (sessionID) => [sessionID, ...ctx.data.session.family(sessionID)].some((id) => sessionBusy(ctx.data, id)),
+    // SAFETY: same captured key as above; a replaced context makes the batch fail closed.
+    active: () => global.serverCtx(props.server as never) === ctx,
   })
 
   model.subscribe(() => setVersion((value) => value + 1))

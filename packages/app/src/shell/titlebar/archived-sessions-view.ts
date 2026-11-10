@@ -15,10 +15,12 @@ export function selectArchivedSessionsView(
     restoringID?: string
     continuationError?: unknown
     continuationPending?: boolean
+    bulkRunning?: boolean
   }>,
 ): ArchivedSessionsView {
   const ready = input.status === "ready"
-  const canContinue = ready && !!input.nextCursor && !input.restoringID && !input.continuationPending
+  const canContinue =
+    ready && !!input.nextCursor && !input.restoringID && !input.bulkRunning && !input.continuationPending
 
   const message =
     input.status === "loading"
@@ -35,5 +37,18 @@ export function selectArchivedSessionsView(
     message,
     loadMoreEnabled: canContinue && !input.continuationError,
     retryEnabled: input.status === "error" || (canContinue && !!input.continuationError),
+  }
+}
+
+export type RowAria = Readonly<{ role?: "checkbox"; "aria-checked"?: "true" | "false"; "aria-disabled"?: "true" }>
+
+export function rowAria(input: Readonly<{ on: boolean; selected: boolean; selectable: boolean }>): RowAria {
+  if (!input.on) return {}
+
+  return {
+    role: "checkbox",
+    "aria-checked": input.selected ? "true" : "false",
+    // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- The attribute must be absent, not "false", on a selectable row.
+    ...(input.selectable ? {} : { "aria-disabled": "true" as const }),
   }
 }

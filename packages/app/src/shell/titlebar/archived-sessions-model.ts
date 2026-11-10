@@ -1,4 +1,11 @@
-import { isArchivedSession, type ArchiveSession, type SetSessionArchive } from "@/session/archive"
+import { offlineResult, runBulk, skipId, type BulkResult } from "@/home/sessions/bulk"
+import {
+  isArchivedSession,
+  type ArchiveAttempt,
+  type ArchiveSession,
+  type ArchiveTarget,
+  type SetSessionArchive,
+} from "@/session/archive"
 
 // oxlint-disable anti-slop/require-readable-spacing -- Compact state transitions keep each cursor operation auditable as one unit.
 
@@ -23,8 +30,13 @@ export type ArchivedSessionsModel = Readonly<{
   search: (query: string) => readonly ArchiveSession[]
   restoringID: () => string | undefined
   restore: (sessionID: string) => Promise<boolean>
+  bulkRunning: () => boolean
+  restoreMany: (ids: readonly string[], options?: ManyOptions) => Promise<BulkResult | undefined>
+  removeMany: (ids: readonly string[], options?: ManyOptions) => Promise<BulkResult | undefined>
   dispose: () => void
 }>
+
+type ManyOptions = Readonly<{ onProgress?: (done: number, total: number) => void }>
 
 type ArchiveList = (
   input?: { archived?: boolean; parentID?: null; order?: "desc"; limit?: number; cursor?: string },
@@ -80,19 +92,26 @@ export function createArchivedSessionsModel<Tab>(
     addTab: (input: Readonly<{ server: string; sessionId: string }>) => Tab
     selectTab: (tab: Tab) => void
     close: () => void
+    unarchive: (target: ArchiveTarget) => Promise<ArchiveAttempt>
+    remove: (sessionID: string) => Promise<void>
+    connected: () => boolean
+    isBusy: (sessionID: string) => boolean
+    active: () => boolean
   }>,
 ): ArchivedSessionsModel {
   let value: ArchivedSessionsState = { status: "idle" }
   let restoring: string | undefined
+  let bulk = false
   let controller: AbortController | undefined
   let generation = 0
   let disposed = false
   const listeners = new Set<() => void>()
   const notify = () => listeners.forEach((listener) => listener())
   const state = () => value
+  const busy = () => restoring !== undefined || bulk
 
   const load = async () => {
-    if (disposed || restoring) return
+    if (disposed || busy()) return
     controller?.abort()
     const current = new AbortController()
     controller = current
@@ -126,7 +145,7 @@ export function createArchivedSessionsModel<Tab>(
   }
 
   const loadMore = async () => {
-    if (disposed || restoring || value.status !== "ready" || value.continuationPending || !value.nextCursor) return
+    if (disposed || busy() || value.status !== "ready" || value.continuationPending || !value.nextCursor) return
 
     const cursor = value.nextCursor
     const current = new AbortController()
@@ -186,6 +205,40 @@ export function createArchivedSessionsModel<Tab>(
 
   const consumed = new Set<string>()
 
+  // Aborting the continuation and bumping `generation` keeps a late page from re-adding rows the batch removes.
+  const runMany = async (
+    input: readonly string[],
+    op: (id: string) => Promise<void>,
+    options: ManyOptions = {},
+  ): Promise<BulkResult | undefined> => {
+    const ids = [...new Set(input)]
+
+    if (disposed || busy() || value.status !== "ready" || ids.length === 0) return undefined
+    if (!deps.connected()) return offlineResult(ids)
+    bulk = true
+    controller?.abort()
+    ++generation
+    value = { ...value, continuationPending: false }
+    notify()
+
+    try {
+      const result = await runBulk(ids, op, {
+        isBusy: (id) => skipId(deps.connected(), deps.isBusy(id)),
+        proceed: deps.active,
+        onProgress: options.onProgress,
+      })
+      const gone = new Set([...result.ok, ...result.missing])
+
+      if (value.status === "ready") value = { ...value, rows: value.rows.filter((row) => !gone.has(row.id)) }
+
+      return result
+    } finally {
+      bulk = false
+
+      if (!disposed) notify()
+    }
+  }
+
   return {
     state,
     subscribe(listener) {
@@ -200,8 +253,22 @@ export function createArchivedSessionsModel<Tab>(
       return value.status === "ready" ? value.rows.filter((session) => matchesArchivedSession(session, query)) : []
     },
     restoringID: () => restoring,
+    bulkRunning: () => bulk,
+    restoreMany: (ids, options) =>
+      runMany(
+        ids,
+        async (sessionID) => {
+          const attempt = await deps.unarchive({ server: deps.server, sessionID })
+
+          if (attempt.status === "failed") throw attempt.error
+
+          if (attempt.status === "pending") throw new Error("Archive already in progress")
+        },
+        options,
+      ),
+    removeMany: (ids, options) => runMany(ids, (sessionID) => deps.remove(sessionID), options),
     async restore(sessionID) {
-      if (disposed || restoring || value.status !== "ready") return false
+      if (disposed || busy() || value.status !== "ready") return false
       const session = value.rows.find((item) => item.id === sessionID)
 
       if (!session || !isArchivedSession(session)) return false
