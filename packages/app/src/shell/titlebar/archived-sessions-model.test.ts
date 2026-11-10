@@ -2,7 +2,7 @@
  * @spec-handoff
  * @interface createArchivedSessionsModel(deps): { load(): Promise<void>; loadMore(): Promise<void>; retryMore(): Promise<void> }
  * @interface deps gains REQUIRED unarchive(target: { server; sessionID }): Promise<ArchiveAttempt>, remove(sessionID): Promise<void>,
- *   connected(): boolean, isBusy(sessionID): boolean, active(): boolean
+ *   connected(): boolean, isBusy(sessionID): boolean, unarchivedElsewhere(sessionID): boolean, active(): boolean
  * @interface model gains bulkRunning(): boolean; restoreMany(ids, options?: { onProgress?(done, total) }) and
  *   removeMany(ids, options?): Promise<BulkResult | undefined>
  * @behavior
@@ -18,6 +18,8 @@
  *   - While a batch runs, bulkRunning() is true; load, loadMore, retryMore and restore are no-ops; a held continuation is aborted.
  *   - dispose() mid-batch does not stop the batch: deps keep being called, the result is returned, and nothing notifies.
  *   - A batch never calls openProject, touchProject, addTab, selectTab or close.
+ *   - deps.unarchivedElsewhere(sessionID) is true only when the client store positively knows the session is no longer archived.
+ *     removeMany fails such an id without calling remove (read at call time, like isBusy); restoreMany never consults it.
  * @edge-cases
  *   - Empty or cursorless batches exhaust; short nonempty batches with a cursor remain continuable; restore sends archived:false.
  *   - Repeated cursors and duplicate-only batches pause with a recoverable error rather than exhausting.
@@ -46,6 +48,7 @@ const bulkDeps = {
   remove: async () => {},
   connected: () => true,
   isBusy: () => false,
+  unarchivedElsewhere: () => false,
   active: () => true,
 }
 
@@ -450,6 +453,7 @@ function bulkFixture(
     attempt?: (id: string) => ArchiveAttempt
     connected?: () => boolean
     isBusy?: (id: string) => boolean
+    unarchivedElsewhere?: (id: string) => boolean
     active?: () => boolean
     list?: (call: number) => Promise<unknown>
     setArchive?: () => Promise<boolean>
@@ -520,6 +524,7 @@ function bulkFixture(
     },
     connected: options.connected ?? (() => true),
     isBusy: options.isBusy ?? (() => false),
+    unarchivedElsewhere: options.unarchivedElsewhere ?? (() => false),
     active: options.active ?? (() => true),
   }) as unknown as BulkModel
 
@@ -975,4 +980,88 @@ test("removeMany is refused while a restoreMany batch runs, and the other way ro
 
   expect(await fixture.archive.removeMany(["b"])).toMatchObject({ ok: ["b"] })
   expect(fixture.wrong).toEqual(["b"])
+})
+
+test("removeMany fails an id that was unarchived elsewhere without calling remove, and keeps its row", async () => {
+  const fixture = bulkFixture("remove", { unarchivedElsewhere: (id) => id === "b" })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["b"])
+
+  expect(result).toEqual({ ok: [], missing: [], failed: ["b"] })
+  expect(fixture.ran).toEqual([])
+  expect(fixture.rows()).toEqual(["a", "b", "c", "d"])
+})
+
+test("removeMany skips only the ids unarchived elsewhere and removes the rest, including a 404 as missing", async () => {
+  const fixture = bulkFixture("remove", {
+    unarchivedElsewhere: (id) => id === "b",
+    behave: (id) => {
+      if (id === "c") throw notFound()
+    },
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c", "d"])
+
+  expect(result).toEqual({ ok: ["a", "d"], missing: ["c"], failed: ["b"] })
+  expect(fixture.ran).toEqual(["a", "c", "d"])
+  expect(fixture.rows()).toEqual(["b"])
+})
+
+test("removeMany reads unarchivedElsewhere at call time, so an id flipped mid-batch is skipped", async () => {
+  const elsewhere = new Set<string>()
+  const fixture = bulkFixture("remove", {
+    unarchivedElsewhere: (id) => elsewhere.has(id),
+    behave: (id) => void (id === "a" && elsewhere.add("c")),
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c"])
+
+  expect(fixture.ran).toEqual(["a", "b"])
+  expect(result).toEqual({ ok: ["a", "b"], missing: [], failed: ["c"] })
+  expect(fixture.rows()).toEqual(["c", "d"])
+})
+
+test("removeMany treats a session the store does not know as still archived and removes it", async () => {
+  const fixture = bulkFixture("remove", { unarchivedElsewhere: () => false })
+
+  await fixture.archive.load()
+
+  expect(await fixture.archive.removeMany(["a", "unloaded"])).toEqual({
+    ok: ["a", "unloaded"],
+    missing: [],
+    failed: [],
+  })
+  expect(fixture.ran).toEqual(["a", "unloaded"])
+})
+
+test("removeMany still fails a busy id that is archived, and an unarchived-elsewhere id that is idle", async () => {
+  const fixture = bulkFixture("remove", { isBusy: (id) => id === "a", unarchivedElsewhere: (id) => id === "b" })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c"])
+
+  expect(result).toEqual({ ok: ["c"], missing: [], failed: ["a", "b"] })
+  expect(fixture.ran).toEqual(["c"])
+})
+
+test("restoreMany does not consult unarchivedElsewhere, because unarchiving an unarchived session is benign", async () => {
+  const asked: string[] = []
+  const fixture = bulkFixture("restore", {
+    unarchivedElsewhere: (id) => {
+      asked.push(id)
+
+      return true
+    },
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.restoreMany(["a", "b"])
+
+  expect(result).toEqual({ ok: ["a", "b"], missing: [], failed: [] })
+  expect(fixture.ran).toEqual(["a", "b"])
+  expect(asked).toEqual([])
+  expect(fixture.rows()).toEqual(["c", "d"])
 })

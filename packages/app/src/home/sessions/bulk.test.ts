@@ -4,6 +4,7 @@
  * @interface rangeSelect(order, anchor, target, selectable): string[]
  * @interface isSelectable(session, busy): boolean
  * @interface isArchivedSelectable(session: ArchiveSession, busy: boolean): boolean
+ * @interface tabIdsToClose(result: BulkResult, trees: ReadonlyMap<string, readonly string[]>): string[]
  * @interface openTabCount(ids: readonly string[], tree: (id: string) => readonly string[], hasTab: (id: string) => boolean): number
  * @interface bulkSummary(kind: "archive" | "delete" | "unarchive", result, language): { variant: "success" | "error"; title: string }
  * @interface skipId(connected: boolean, busy: boolean): boolean; offlineResult(ids: readonly string[]): BulkResult
@@ -16,6 +17,7 @@
  *   - rangeSelect is inclusive in `order` (either direction), filtered by `selectable`; no usable anchor -> [target] when target is selectable, else [].
  *   - isSelectable = !busy && !parentID && not archived (epoch zero counts as archived).
  *   - isArchivedSelectable = !busy && !parentID && archived (epoch zero counts as archived); isSelectable is unchanged.
+ *   - tabIdsToClose = the tree ids (trees.get(id) ?? [id]) of every ok then missing id, in order, deduped, as a fresh array; failed ids add nothing.
  *   - openTabCount = ids.filter(id => tree(id).some(hasTab)).length; tree(id) is expected to include id itself.
  *   - bulkSummary("unarchive") uses "Unarchived ..." copy (home.sessions.bulk.unarchive.*) with the same done/partial rules.
  *   - bulkSummary: ok+missing only -> success + plural title; any failed -> error + "<Verb> {{done}} of {{total}}, {{failed}} failed".
@@ -39,6 +41,7 @@ import {
   nextSelection,
   offlineResult,
   openTabCount,
+  tabIdsToClose,
   pruneSelection,
   rangeSelect,
   runBulk,
@@ -620,6 +623,73 @@ describe("openTabCount", () => {
 
     openTabCount(["ses_c"], tree, (id) => (asked.push(id), false))
     expect(asked).toEqual(["ses_c"])
+  })
+})
+
+describe("tabIdsToClose", () => {
+  const trees = new Map([
+    ["ses_a", ["ses_a", "ses_a_child"]],
+    ["ses_b", ["ses_b"]],
+    ["ses_c", ["ses_c", "ses_c_child", "ses_c_grandchild"]],
+  ])
+
+  test("is empty for an empty result", () => {
+    expect(tabIdsToClose(result({}), trees)).toEqual([])
+  })
+
+  test("returns the whole tree of each ok id, in order", () => {
+    expect(tabIdsToClose(result({ ok: ["ses_c", "ses_a"] }), trees)).toEqual([
+      "ses_c",
+      "ses_c_child",
+      "ses_c_grandchild",
+      "ses_a",
+      "ses_a_child",
+    ])
+  })
+
+  test("includes missing ids after the ok ids, because their sessions are gone too", () => {
+    expect(tabIdsToClose(result({ ok: ["ses_a"], missing: ["ses_b"] }), trees)).toEqual([
+      "ses_a",
+      "ses_a_child",
+      "ses_b",
+    ])
+    expect(tabIdsToClose(result({ missing: ["ses_c"] }), trees)).toEqual(["ses_c", "ses_c_child", "ses_c_grandchild"])
+  })
+
+  test("leaves out failed ids, whose sessions still exist", () => {
+    expect(tabIdsToClose(result({ ok: ["ses_b"], failed: ["ses_a", "ses_c"] }), trees)).toEqual(["ses_b"])
+    expect(tabIdsToClose(result({ failed: ["ses_a"] }), trees)).toEqual([])
+  })
+
+  test("falls back to the id itself when there is no tree entry", () => {
+    expect(tabIdsToClose(result({ ok: ["ses_unknown"], missing: ["ses_other"] }), trees)).toEqual([
+      "ses_unknown",
+      "ses_other",
+    ])
+    expect(tabIdsToClose(result({ ok: ["ses_a"] }), new Map())).toEqual(["ses_a"])
+  })
+
+  test("lists a session once when trees overlap", () => {
+    const overlapping = new Map([
+      ["ses_x", ["ses_x", "ses_shared"]],
+      ["ses_y", ["ses_shared", "ses_y"]],
+    ])
+
+    expect(tabIdsToClose(result({ ok: ["ses_x"], missing: ["ses_y"] }), overlapping)).toEqual([
+      "ses_x",
+      "ses_shared",
+      "ses_y",
+    ])
+  })
+
+  test("returns a fresh array and leaves the trees untouched", () => {
+    const tree = ["ses_b"]
+    const owned = new Map([["ses_b", tree]])
+    const ids = tabIdsToClose(result({ ok: ["ses_b"] }), owned)
+
+    expect(ids).not.toBe(tree)
+    ids.push("ses_extra")
+    expect(tree).toEqual(["ses_b"])
   })
 })
 
