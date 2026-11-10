@@ -25,6 +25,7 @@ export type ArchiveActions = Readonly<{
   setSessionArchive: SetSessionArchive
   archiveSession: (target: ArchiveTarget) => Promise<boolean>
   archiveSessionQuiet: (target: ArchiveTarget) => Promise<ArchiveAttempt>
+  unarchiveSessionQuiet: (target: ArchiveTarget) => Promise<ArchiveAttempt>
   isPending: (target: ArchiveTarget) => boolean
 }>
 
@@ -95,6 +96,7 @@ export function createSessionArchiveActions(
     setSessionArchive,
     archiveSession: (target) => setSessionArchive({ ...target, archived: true }),
     archiveSessionQuiet: (target) => run({ ...target, archived: true }),
+    unarchiveSessionQuiet: (target) => run({ ...target, archived: false }),
     isPending,
   }
 }

@@ -77,19 +77,37 @@ export function isSelectable(session: ArchiveSession, busy: boolean): boolean {
   return !busy && !session.parentID && !isArchivedSession(session)
 }
 
-export function bulkSummary(kind: "archive" | "delete", result: BulkResult, language: Language): BulkSummary {
+/** An archived root the user may act on. Does not change isSelectable. */
+export function isArchivedSelectable(session: ArchiveSession, busy: boolean): boolean {
+  return !busy && !session.parentID && isArchivedSession(session)
+}
+
+/** How many of the selected roots have an open tab anywhere in their tree; `tree(id)` includes `id` itself. */
+export function openTabCount(
+  ids: readonly string[],
+  tree: (id: string) => readonly string[],
+  hasTab: (id: string) => boolean,
+): number {
+  return ids.filter((id) => tree(id).some(hasTab)).length
+}
+
+const KEYS = {
+  archive: { done: "home.sessions.bulk.archive.done", partial: "home.sessions.bulk.archive.partial" },
+  delete: { done: "home.sessions.bulk.delete.done", partial: "home.sessions.bulk.delete.partial" },
+  unarchive: { done: "home.sessions.bulk.unarchive.done", partial: "home.sessions.bulk.unarchive.partial" },
+} as const
+
+export function bulkSummary(
+  kind: "archive" | "delete" | "unarchive",
+  result: BulkResult,
+  language: Language,
+): BulkSummary {
   const failed = result.failed.length
   const done = result.ok.length + result.missing.length
 
-  if (failed === 0) {
-    const key = kind === "archive" ? "home.sessions.bulk.archive.done" : "home.sessions.bulk.delete.done"
+  if (failed === 0) return { variant: "success", title: language.plural(KEYS[kind].done, done) }
 
-    return { variant: "success", title: language.plural(key, done) }
-  }
-
-  const key = kind === "archive" ? "home.sessions.bulk.archive.partial" : "home.sessions.bulk.delete.partial"
-
-  return { variant: "error", title: language.t(key, { done, total: done + failed, failed }) }
+  return { variant: "error", title: language.t(KEYS[kind].partial, { done, total: done + failed, failed }) }
 }
 
 export function nextSelection(
