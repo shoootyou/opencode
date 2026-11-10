@@ -19,6 +19,7 @@ export function selectArchivedSessionsView(
   }>,
 ): ArchivedSessionsView {
   const ready = input.status === "ready"
+
   const canContinue =
     ready && !!input.nextCursor && !input.restoringID && !input.bulkRunning && !input.continuationPending
 
