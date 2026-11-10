@@ -749,6 +749,8 @@ export const dict = {
   "dialog.archivedSessions.loadedNoMatches": "No loaded archived sessions match your search",
   "dialog.archivedSessions.error": "Could not load archived sessions",
   "dialog.archivedSessions.loading": "Loading archived sessions…",
+  "dialog.archivedSessions.bulk.description":
+    "Select sessions to unarchive or delete them. Search covers loaded sessions only.",
   "session.archive.refreshFailed": "Session updated, but its details could not be refreshed.",
   "home.sessions.select": "Select",
   "home.sessions.bulk.selectAll": "Select all",
@@ -760,6 +762,9 @@ export const dict = {
   "home.sessions.bulk.archive.done.one": "Archived {{count}} session",
   "home.sessions.bulk.archive.done.other": "Archived {{count}} sessions",
   "home.sessions.bulk.archive.partial": "Archived {{done}} of {{total}}, {{failed}} failed",
+  "home.sessions.bulk.unarchive.done.one": "Unarchived {{count}} session",
+  "home.sessions.bulk.unarchive.done.other": "Unarchived {{count}} sessions",
+  "home.sessions.bulk.unarchive.partial": "Unarchived {{done}} of {{total}}, {{failed}} failed",
   "home.sessions.bulk.delete.title.one": "Delete {{count}} session?",
   "home.sessions.bulk.delete.title.other": "Delete {{count}} sessions?",
   "home.sessions.bulk.delete.description.one":

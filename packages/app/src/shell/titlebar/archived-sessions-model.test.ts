@@ -1,11 +1,25 @@
 /**
  * @spec-handoff
  * @interface createArchivedSessionsModel(deps): { load(): Promise<void>; loadMore(): Promise<void>; retryMore(): Promise<void> }
+ * @interface deps gains REQUIRED unarchive(target: { server; sessionID }): Promise<ArchiveAttempt>, remove(sessionID): Promise<void>,
+ *   connected(): boolean, isBusy(sessionID): boolean, unarchivedElsewhere(sessionID): boolean, active(): boolean
+ * @interface model gains bulkRunning(): boolean; restoreMany(ids, options?: { onProgress?(done, total) }) and
+ *   removeMany(ids, options?): Promise<BulkResult | undefined>
  * @behavior
  *   - Loads one archived:true root batch of 50, then appends unique continuation rows in response order.
  *   - Guards concurrent continuation, retains rows on recoverable continuation failure, and retries its same cursor.
  *   - Ignores stale, disposed, reset, and restore-aborted append completions.
  *   - Keeps first row objects, terminates an empty root batch, and searches retained rows without fetching.
+ *   - restoreMany/removeMany run runBulk over the deduped ids one at a time: ok and missing rows leave in ONE update, failed rows
+ *     stay, nextCursor and continuationError are kept, onProgress fires per id. restoreMany sends deps.unarchive({ server, sessionID });
+ *     removeMany sends deps.remove(sessionID). A failed attempt rethrows its error (404 -> missing); a pending attempt is failed.
+ *   - Returns undefined when refused (disposed, restoring, bulk already running, state not ready, no ids after dedupe) and
+ *     offlineResult(ids) when connected() is false at start. Per id, a busy session, a lost connection or active() false is failed.
+ *   - While a batch runs, bulkRunning() is true; load, loadMore, retryMore and restore are no-ops; a held continuation is aborted.
+ *   - dispose() mid-batch does not stop the batch: deps keep being called, the result is returned, and nothing notifies.
+ *   - A batch never calls openProject, touchProject, addTab, selectTab or close.
+ *   - deps.unarchivedElsewhere(sessionID) is true only when the client store positively knows the session is no longer archived.
+ *     removeMany fails such an id without calling remove (read at call time, like isBusy); restoreMany never consults it.
  * @edge-cases
  *   - Empty or cursorless batches exhaust; short nonempty batches with a cursor remain continuable; restore sends archived:false.
  *   - Repeated cursors and duplicate-only batches pause with a recoverable error rather than exhausting.
@@ -13,6 +27,9 @@
  */
 // oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-chained-type-assertions, anti-slop/require-readable-spacing, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: these controlled black-box fixtures deliberately capture the opaque SDK request and assert the proposed model contract before its typed API exists.
 import { expect, test } from "bun:test"
+import { Data } from "effect"
+import type { BulkResult } from "@/home/sessions/bulk"
+import type { ArchiveAttempt } from "@/session/archive"
 import { createArchivedSessionsModel, loadArchivedSessions, matchesArchivedSession } from "./archived-sessions-model"
 
 type ContinuousModel = {
@@ -23,6 +40,16 @@ type ContinuousModel = {
   search: (query: string) => readonly { id: string }[]
   restore: (id: string) => Promise<boolean>
   dispose: () => void
+}
+
+// Harmless defaults for the bulk deps, so the single-restore fixtures below keep their meaning.
+const bulkDeps = {
+  unarchive: async (): Promise<ArchiveAttempt> => ({ status: "archived" }),
+  remove: async () => {},
+  connected: () => true,
+  isBusy: () => false,
+  unarchivedElsewhere: () => false,
+  active: () => true,
 }
 
 const session = (id: string, archived = 1) => ({ id, title: id, location: { directory: `/${id}` }, time: { archived } })
@@ -37,6 +64,7 @@ function model(list: (input: unknown) => Promise<unknown>) {
     addTab: () => "tab",
     selectTab: () => {},
     close: () => {},
+    ...bulkDeps,
   }) as unknown as ContinuousModel
 }
 
@@ -262,6 +290,7 @@ test("restore aborts a held continuation, keeps displayed rows, and prevents its
     },
     selectTab: () => calls.push("select"),
     close: () => calls.push("close"),
+    ...bulkDeps,
   }) as unknown as ContinuousModel
 
   await archive.load()
@@ -294,6 +323,7 @@ test("restores a captured displayed row through the existing success-only tab se
     },
     selectTab: () => calls.push("select"),
     close: () => calls.push("close"),
+    ...bulkDeps,
   })
 
   await archive.load()
@@ -322,6 +352,7 @@ test("keeps continuation available after a failed restore without replaying the 
     addTab: () => "tab",
     selectTab: () => {},
     close: () => {},
+    ...bulkDeps,
   }) as unknown as ContinuousModel
 
   await archive.load()
@@ -349,6 +380,7 @@ for (const lateOutcome of ["resolve", "reject"] as const) {
       addTab: () => "tab",
       selectTab: () => {},
       close: () => {},
+      ...bulkDeps,
     }) as unknown as ContinuousModel
 
     await archive.load()
@@ -389,4 +421,647 @@ test("loadArchivedSessions preserves one-request validation and terminal cursor 
   )
   expect(page.sessions.map((row) => row.id)).toEqual(["final"])
   expect(page.cursor.next).toBeUndefined()
+})
+
+type ManyOptions = { onProgress?: (done: number, total: number) => void }
+
+type BulkModel = ContinuousModel & {
+  subscribe: (listener: () => void) => () => void
+  bulkRunning: () => boolean
+  restoringID: () => string | undefined
+  restoreMany: (ids: readonly string[], options?: ManyOptions) => Promise<BulkResult | undefined>
+  removeMany: (ids: readonly string[], options?: ManyOptions) => Promise<BulkResult | undefined>
+}
+
+type Kind = "restore" | "remove"
+
+// A tagged error carries the `_tag` the client guard reads, like the 404 the client throws.
+class SessionNotFoundError extends Data.TaggedError("SessionNotFoundError")<{
+  readonly sessionID: string
+  readonly message: string
+}> {}
+
+const notFound = () => new SessionNotFoundError({ sessionID: "ses_gone", message: "gone" })
+
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+// One fixture drives restoreMany (through deps.unarchive) and removeMany (through deps.remove) with the same behaviour.
+function bulkFixture(
+  kind: Kind,
+  options: {
+    behave?: (id: string, archive: BulkModel) => Promise<void> | void
+    attempt?: (id: string) => ArchiveAttempt
+    connected?: () => boolean
+    isBusy?: (id: string) => boolean
+    unarchivedElsewhere?: (id: string) => boolean
+    active?: () => boolean
+    list?: (call: number) => Promise<unknown>
+    setArchive?: () => Promise<boolean>
+  } = {},
+) {
+  const ran: string[] = []
+  const wrong: string[] = []
+  const targets: unknown[] = []
+  const calls: string[] = []
+  const lists: unknown[] = []
+  const signals: (AbortSignal | undefined)[] = []
+
+  const archive = createArchivedSessionsModel({
+    server: "captured-server",
+    list: async (input, listOptions) => {
+      lists.push(input)
+      signals.push(listOptions?.signal)
+
+      if (options.list) return (await options.list(lists.length)) as never
+
+      return lists.length === 1
+        ? ({ data: ["a", "b", "c", "d"].map((id) => session(id)), cursor: { next: "cursor-2" } } as never)
+        : ({ data: [session("later")], cursor: {} } as never)
+    },
+    setArchive: async () => {
+      calls.push("setArchive")
+
+      return options.setArchive ? options.setArchive() : true
+    },
+    openProject: async () => void calls.push("open"),
+    touchProject: () => calls.push("touch"),
+    addTab: () => {
+      calls.push("tab")
+
+      return "tab"
+    },
+    selectTab: () => calls.push("select"),
+    close: () => calls.push("close"),
+    unarchive: async (target: { server: string; sessionID: string }): Promise<ArchiveAttempt> => {
+      if (kind === "remove") {
+        wrong.push(target.sessionID)
+
+        return { status: "archived" }
+      }
+
+      targets.push(target)
+      ran.push(target.sessionID)
+
+      if (options.attempt) return options.attempt(target.sessionID)
+
+      try {
+        await options.behave?.(target.sessionID, archive)
+
+        return { status: "archived" }
+      } catch (error) {
+        return { status: "failed", error }
+      }
+    },
+    remove: async (sessionID: string) => {
+      if (kind === "restore") {
+        wrong.push(sessionID)
+
+        return
+      }
+
+      ran.push(sessionID)
+      await options.behave?.(sessionID, archive)
+    },
+    connected: options.connected ?? (() => true),
+    isBusy: options.isBusy ?? (() => false),
+    unarchivedElsewhere: options.unarchivedElsewhere ?? (() => false),
+    active: options.active ?? (() => true),
+  }) as unknown as BulkModel
+
+  const run = (ids: readonly string[], manyOptions?: ManyOptions) =>
+    kind === "restore" ? archive.restoreMany(ids, manyOptions) : archive.removeMany(ids, manyOptions)
+
+  const rows = () => archive.state().rows?.map((row) => row.id)
+
+  return { archive, run, rows, ran, wrong, targets, calls, lists, signals }
+}
+
+for (const kind of ["restore", "remove"] as const) {
+  const method = kind === "restore" ? "restoreMany" : "removeMany"
+
+  test(`${method} runs the ids one at a time in the given order and keeps the rows until the batch ends`, async () => {
+    let running = 0
+    let peak = 0
+    const during: (string[] | undefined)[] = []
+
+    const fixture = bulkFixture(kind, {
+      behave: async (_id, archive) => {
+        running++
+        peak = Math.max(peak, running)
+        during.push(archive.state().rows?.map((row) => row.id))
+        await tick()
+        running--
+      },
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["c", "a", "d"])
+
+    expect(fixture.ran).toEqual(["c", "a", "d"])
+    expect(peak).toBe(1)
+    expect(during).toEqual([
+      ["a", "b", "c", "d"],
+      ["a", "b", "c", "d"],
+      ["a", "b", "c", "d"],
+    ])
+    expect(result).toEqual({ ok: ["c", "a", "d"], missing: [], failed: [] })
+    expect(fixture.wrong).toEqual([])
+  })
+
+  test(`${method} notifies once when it starts and once when the rows leave, in one update`, async () => {
+    const fixture = bulkFixture(kind)
+
+    await fixture.archive.load()
+    const seen: (string[] | undefined)[] = []
+    fixture.archive.subscribe(() => seen.push(fixture.rows()))
+    await fixture.run(["a", "b"])
+
+    expect(seen).toEqual([
+      ["a", "b", "c", "d"],
+      ["c", "d"],
+    ])
+  })
+
+  test(`${method} drops ok and missing rows and keeps failed rows`, async () => {
+    const fixture = bulkFixture(kind, {
+      behave: (id) => {
+        if (id === "b") throw notFound()
+
+        if (id === "c") throw new Error("boom")
+      },
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["a", "b", "c", "d"])
+
+    expect(result).toEqual({ ok: ["a", "d"], missing: ["b"], failed: ["c"] })
+    expect(fixture.rows()).toEqual(["c"])
+  })
+
+  test(`${method} keeps the continuation cursor and error while removing rows`, async () => {
+    let call = 0
+
+    const fixture = bulkFixture(kind, {
+      list: async () => {
+        call++
+
+        return call === 1
+          ? { data: [session("a"), session("b"), session("c")], cursor: { next: "cursor-2" } }
+          : { data: [session("a")], cursor: { next: "cursor-2" } }
+      },
+    })
+
+    await fixture.archive.load()
+    await fixture.archive.loadMore()
+    const before = fixture.archive.state()
+
+    expect(before.continuationError).toBeDefined()
+    await fixture.run(["a", "b"])
+
+    expect(fixture.rows()).toEqual(["c"])
+    expect(fixture.archive.state().nextCursor).toBe("cursor-2")
+    expect(fixture.archive.state().continuationError).toBe(before.continuationError)
+  })
+
+  test(`${method} reports progress as (done, total) once per id`, async () => {
+    const fixture = bulkFixture(kind, {
+      behave: (id) => {
+        if (id === "b") throw new Error("boom")
+      },
+    })
+    const progress: [number, number][] = []
+
+    await fixture.archive.load()
+    await fixture.run(["a", "b", "c"], { onProgress: (done, total) => progress.push([done, total]) })
+
+    expect(progress).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ])
+  })
+
+  test(`${method} runs each repeated id once, in first-seen order`, async () => {
+    const fixture = bulkFixture(kind)
+    const progress: [number, number][] = []
+
+    await fixture.archive.load()
+    const result = await fixture.run(["b", "a", "b", "a", "c"], {
+      onProgress: (done, total) => progress.push([done, total]),
+    })
+
+    expect(fixture.ran).toEqual(["b", "a", "c"])
+    expect(result).toEqual({ ok: ["b", "a", "c"], missing: [], failed: [] })
+    expect(progress.at(-1)).toEqual([3, 3])
+  })
+
+  test(`${method} refuses an empty list without running or notifying`, async () => {
+    const fixture = bulkFixture(kind)
+
+    await fixture.archive.load()
+    let notices = 0
+    fixture.archive.subscribe(() => notices++)
+
+    expect(await fixture.run([])).toBeUndefined()
+    expect(fixture.ran).toEqual([])
+    expect(notices).toBe(0)
+    expect(fixture.archive.bulkRunning()).toBe(false)
+  })
+
+  test(`${method} refuses to start before the list is ready`, async () => {
+    const fixture = bulkFixture(kind)
+
+    expect(fixture.archive.state().status).toBe("idle")
+    expect(await fixture.run(["a"])).toBeUndefined()
+    expect(fixture.ran).toEqual([])
+  })
+
+  test(`${method} sends an id that is not a loaded row and counts a 404 as missing`, async () => {
+    const fixture = bulkFixture(kind, {
+      behave: (id) => {
+        if (id === "gone") throw notFound()
+      },
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["unloaded", "gone"])
+
+    expect(fixture.ran).toEqual(["unloaded", "gone"])
+    expect(result).toEqual({ ok: ["unloaded"], missing: ["gone"], failed: [] })
+    expect(fixture.rows()).toEqual(["a", "b", "c", "d"])
+  })
+
+  test(`${method} fails a busy id without calling the server, reading busy at call time`, async () => {
+    const busy = new Set(["b"])
+
+    const fixture = bulkFixture(kind, {
+      isBusy: (id) => busy.has(id),
+      behave: (id) => void (id === "a" && busy.add("c")),
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["a", "b", "c", "d"])
+
+    expect(fixture.ran).toEqual(["a", "d"])
+    expect(result).toEqual({ ok: ["a", "d"], missing: [], failed: ["b", "c"] })
+    expect(fixture.rows()).toEqual(["b", "c"])
+  })
+
+  test(`${method} returns every id failed when offline at the start, without running or touching rows`, async () => {
+    let online = false
+    const fixture = bulkFixture(kind, { connected: () => online })
+
+    await fixture.archive.load()
+    let notices = 0
+    fixture.archive.subscribe(() => notices++)
+    const result = await fixture.run(["a", "b", "c"])
+
+    expect(result).toEqual({ ok: [], missing: [], failed: ["a", "b", "c"] })
+    expect(fixture.ran).toEqual([])
+    expect(fixture.rows()).toEqual(["a", "b", "c", "d"])
+    expect(fixture.archive.bulkRunning()).toBe(false)
+    expect(notices).toBe(0)
+
+    online = true
+    expect(await fixture.run(["a"])).toEqual({ ok: ["a"], missing: [], failed: [] })
+  })
+
+  test(`${method} fails the rest of the batch when the connection drops mid-batch`, async () => {
+    let online = true
+
+    const fixture = bulkFixture(kind, {
+      connected: () => online,
+      behave: (id) => void (id === "a" && (online = false)),
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["a", "b", "c"])
+
+    expect(fixture.ran).toEqual(["a"])
+    expect(result).toEqual({ ok: ["a"], missing: [], failed: ["b", "c"] })
+    expect(fixture.rows()).toEqual(["b", "c", "d"])
+  })
+
+  test(`${method} fails the rest of the batch when the server context is replaced mid-batch`, async () => {
+    let current = true
+
+    const fixture = bulkFixture(kind, {
+      active: () => current,
+      behave: (id) => void (id === "a" && (current = false)),
+    })
+
+    await fixture.archive.load()
+    const result = await fixture.run(["a", "b", "c"])
+
+    expect(fixture.ran).toEqual(["a"])
+    expect(result).toEqual({ ok: ["a"], missing: [], failed: ["b", "c"] })
+  })
+
+  test(`${method} fails every id without running when the server context is already replaced`, async () => {
+    const fixture = bulkFixture(kind, { active: () => false })
+
+    await fixture.archive.load()
+
+    expect(await fixture.run(["a", "b"])).toEqual({ ok: [], missing: [], failed: ["a", "b"] })
+    expect(fixture.ran).toEqual([])
+    expect(fixture.rows()).toEqual(["a", "b", "c", "d"])
+  })
+
+  test(`${method} is refused while a single restore is in flight`, async () => {
+    const held = Promise.withResolvers<boolean>()
+    const fixture = bulkFixture(kind, { setArchive: () => held.promise })
+
+    await fixture.archive.load()
+    const restoring = fixture.archive.restore("a")
+    await tick()
+
+    expect(fixture.archive.restoringID()).toBe("a")
+    expect(await fixture.run(["b"])).toBeUndefined()
+    expect(fixture.ran).toEqual([])
+    held.resolve(true)
+    await restoring
+
+    expect(await fixture.run(["b"])).toEqual({ ok: ["b"], missing: [], failed: [] })
+  })
+
+  test(`${method} is refused while another batch runs, and the running batch finishes`, async () => {
+    const hold = Promise.withResolvers<void>()
+    const fixture = bulkFixture(kind, { behave: async (id) => void (id === "a" && (await hold.promise)) })
+
+    await fixture.archive.load()
+    const first = fixture.run(["a", "b"])
+    await tick()
+
+    expect(await fixture.run(["c"])).toBeUndefined()
+    expect(fixture.ran).toEqual(["a"])
+    hold.resolve()
+
+    expect(await first).toEqual({ ok: ["a", "b"], missing: [], failed: [] })
+    expect(fixture.ran).toEqual(["a", "b"])
+    expect(fixture.rows()).toEqual(["c", "d"])
+  })
+
+  test(`${method} blocks restore, load, loadMore and retryMore while it runs`, async () => {
+    const hold = Promise.withResolvers<void>()
+    const fixture = bulkFixture(kind, { behave: async () => hold.promise })
+
+    await fixture.archive.load()
+    const batch = fixture.run(["a"])
+    await tick()
+
+    expect(fixture.archive.bulkRunning()).toBe(true)
+    expect(await fixture.archive.restore("c")).toBe(false)
+    expect(fixture.archive.restoringID()).toBeUndefined()
+    await fixture.archive.load()
+    await fixture.archive.loadMore()
+    await fixture.archive.retryMore()
+
+    expect(fixture.lists).toHaveLength(1)
+    expect(fixture.calls).not.toContain("setArchive")
+    expect(fixture.archive.state().status).toBe("ready")
+    hold.resolve()
+    await batch
+
+    await fixture.archive.loadMore()
+    expect(fixture.lists).toHaveLength(2)
+    expect(fixture.rows()).toEqual(["b", "c", "d", "later"])
+  })
+
+  test(`${method} aborts a held continuation so its late page cannot append rows`, async () => {
+    const continuation = Promise.withResolvers<unknown>()
+    const hold = Promise.withResolvers<void>()
+
+    const fixture = bulkFixture(kind, {
+      list: async (call) =>
+        call === 1 ? { data: [session("a"), session("b")], cursor: { next: "cursor-2" } } : continuation.promise,
+      behave: async () => hold.promise,
+    })
+
+    await fixture.archive.load()
+    const append = fixture.archive.loadMore()
+    expect(fixture.archive.state()).toMatchObject({ continuationPending: true })
+
+    const batch = fixture.run(["a"])
+    await tick()
+
+    expect(fixture.signals[1]?.aborted).toBe(true)
+    expect(fixture.archive.state()).toMatchObject({ continuationPending: false })
+    hold.resolve()
+    await batch
+    continuation.resolve({ data: [session("a"), session("late")], cursor: {} })
+    await append
+
+    expect(fixture.rows()).toEqual(["b"])
+    expect(fixture.archive.state().nextCursor).toBe("cursor-2")
+  })
+
+  test(`${method} reports bulkRunning while it runs and releases it afterwards`, async () => {
+    const inside: boolean[] = []
+    const fixture = bulkFixture(kind, { behave: (_id, archive) => void inside.push(archive.bulkRunning()) })
+
+    await fixture.archive.load()
+    expect(fixture.archive.bulkRunning()).toBe(false)
+    await fixture.run(["a", "b"])
+
+    expect(inside).toEqual([true, true])
+    expect(fixture.archive.bulkRunning()).toBe(false)
+  })
+
+  test(`${method} releases bulkRunning when the dependency throws`, async () => {
+    const fixture = bulkFixture(kind, {
+      behave: () => {
+        throw new Error("boom")
+      },
+    })
+
+    await fixture.archive.load()
+    expect(await fixture.run(["a"])).toEqual({ ok: [], missing: [], failed: ["a"] })
+    expect(fixture.archive.bulkRunning()).toBe(false)
+  })
+
+  test(`${method} keeps calling the server after dispose, returns its result and notifies nobody`, async () => {
+    const hold = Promise.withResolvers<void>()
+    const fixture = bulkFixture(kind, { behave: async (id) => void (id === "a" && (await hold.promise)) })
+
+    await fixture.archive.load()
+    const batch = fixture.run(["a", "b", "c"])
+    await tick()
+    fixture.archive.dispose()
+    // dispose clears the listeners, so a listener added afterwards observes any notify the batch still makes.
+    let notices = 0
+    fixture.archive.subscribe(() => notices++)
+    hold.resolve()
+
+    expect(await batch).toEqual({ ok: ["a", "b", "c"], missing: [], failed: [] })
+    expect(fixture.ran).toEqual(["a", "b", "c"])
+    expect(notices).toBe(0)
+  })
+
+  test(`${method} is refused after dispose`, async () => {
+    const fixture = bulkFixture(kind)
+
+    await fixture.archive.load()
+    fixture.archive.dispose()
+
+    expect(await fixture.run(["a"])).toBeUndefined()
+    expect(fixture.ran).toEqual([])
+  })
+
+  test(`${method} never opens a project or a tab and never closes the dialog`, async () => {
+    const fixture = bulkFixture(kind)
+
+    await fixture.archive.load()
+    await fixture.run(["a", "b"])
+
+    expect(fixture.calls).toEqual([])
+  })
+}
+
+test("restoreMany sends each id to unarchive for the captured server and never to remove", async () => {
+  const fixture = bulkFixture("restore")
+
+  await fixture.archive.load()
+  await fixture.archive.restoreMany(["a", "b"])
+
+  expect(fixture.targets).toEqual([
+    { server: "captured-server", sessionID: "a" },
+    { server: "captured-server", sessionID: "b" },
+  ])
+  expect(fixture.wrong).toEqual([])
+})
+
+test("removeMany sends each id to remove and never to unarchive", async () => {
+  const fixture = bulkFixture("remove")
+
+  await fixture.archive.load()
+  await fixture.archive.removeMany(["a", "b"])
+
+  expect(fixture.ran).toEqual(["a", "b"])
+  expect(fixture.wrong).toEqual([])
+})
+
+test("restoreMany counts a pending attempt as failed and keeps its row", async () => {
+  const fixture = bulkFixture("restore", {
+    attempt: (id) => (id === "a" ? { status: "pending" } : { status: "archived" }),
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.restoreMany(["a", "b"])
+
+  expect(result).toEqual({ ok: ["b"], missing: [], failed: ["a"] })
+  expect(fixture.rows()).toEqual(["a", "c", "d"])
+})
+
+test("restoreMany counts a failed attempt as failed and rethrows its not-found error as missing", async () => {
+  const fixture = bulkFixture("restore", {
+    attempt: (id) =>
+      id === "a" ? { status: "failed", error: new Error("boom") } : { status: "failed", error: notFound() },
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.restoreMany(["a", "b"])
+
+  expect(result).toEqual({ ok: [], missing: ["b"], failed: ["a"] })
+  expect(fixture.rows()).toEqual(["a", "c", "d"])
+})
+
+test("removeMany is refused while a restoreMany batch runs, and the other way round", async () => {
+  const hold = Promise.withResolvers<void>()
+  const fixture = bulkFixture("restore", { behave: async () => hold.promise })
+
+  await fixture.archive.load()
+  const batch = fixture.archive.restoreMany(["a"])
+  await tick()
+
+  expect(await fixture.archive.removeMany(["b"])).toBeUndefined()
+  expect(fixture.wrong).toEqual([])
+  hold.resolve()
+  await batch
+
+  expect(await fixture.archive.removeMany(["b"])).toMatchObject({ ok: ["b"] })
+  expect(fixture.wrong).toEqual(["b"])
+})
+
+test("removeMany fails an id that was unarchived elsewhere without calling remove, and keeps its row", async () => {
+  const fixture = bulkFixture("remove", { unarchivedElsewhere: (id) => id === "b" })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["b"])
+
+  expect(result).toEqual({ ok: [], missing: [], failed: ["b"] })
+  expect(fixture.ran).toEqual([])
+  expect(fixture.rows()).toEqual(["a", "b", "c", "d"])
+})
+
+test("removeMany skips only the ids unarchived elsewhere and removes the rest, including a 404 as missing", async () => {
+  const fixture = bulkFixture("remove", {
+    unarchivedElsewhere: (id) => id === "b",
+    behave: (id) => {
+      if (id === "c") throw notFound()
+    },
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c", "d"])
+
+  expect(result).toEqual({ ok: ["a", "d"], missing: ["c"], failed: ["b"] })
+  expect(fixture.ran).toEqual(["a", "c", "d"])
+  expect(fixture.rows()).toEqual(["b"])
+})
+
+test("removeMany reads unarchivedElsewhere at call time, so an id flipped mid-batch is skipped", async () => {
+  const elsewhere = new Set<string>()
+  const fixture = bulkFixture("remove", {
+    unarchivedElsewhere: (id) => elsewhere.has(id),
+    behave: (id) => void (id === "a" && elsewhere.add("c")),
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c"])
+
+  expect(fixture.ran).toEqual(["a", "b"])
+  expect(result).toEqual({ ok: ["a", "b"], missing: [], failed: ["c"] })
+  expect(fixture.rows()).toEqual(["c", "d"])
+})
+
+test("removeMany treats a session the store does not know as still archived and removes it", async () => {
+  const fixture = bulkFixture("remove", { unarchivedElsewhere: () => false })
+
+  await fixture.archive.load()
+
+  expect(await fixture.archive.removeMany(["a", "unloaded"])).toEqual({
+    ok: ["a", "unloaded"],
+    missing: [],
+    failed: [],
+  })
+  expect(fixture.ran).toEqual(["a", "unloaded"])
+})
+
+test("removeMany still fails a busy id that is archived, and an unarchived-elsewhere id that is idle", async () => {
+  const fixture = bulkFixture("remove", { isBusy: (id) => id === "a", unarchivedElsewhere: (id) => id === "b" })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.removeMany(["a", "b", "c"])
+
+  expect(result).toEqual({ ok: ["c"], missing: [], failed: ["a", "b"] })
+  expect(fixture.ran).toEqual(["c"])
+})
+
+test("restoreMany does not consult unarchivedElsewhere, because unarchiving an unarchived session is benign", async () => {
+  const asked: string[] = []
+  const fixture = bulkFixture("restore", {
+    unarchivedElsewhere: (id) => {
+      asked.push(id)
+
+      return true
+    },
+  })
+
+  await fixture.archive.load()
+  const result = await fixture.archive.restoreMany(["a", "b"])
+
+  expect(result).toEqual({ ok: ["a", "b"], missing: [], failed: [] })
+  expect(fixture.ran).toEqual(["a", "b"])
+  expect(asked).toEqual([])
+  expect(fixture.rows()).toEqual(["c", "d"])
 })
